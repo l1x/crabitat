@@ -15,6 +15,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 log = "0.4"
 
 env_logger = "0.10"
+base36 = "0.0.1"
+async-trait = "0.1.89"
 
 [dev-dependencies]
 tempfile = "3.10"

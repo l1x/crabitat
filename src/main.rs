@@ -8,4 +8,5 @@ use env_logger;
 
 mod agent;
 mod config;
+mod eid;
 mod error;
