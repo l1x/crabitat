@@ -31,8 +31,6 @@ graph TD
     class PM,W,A,B,C,TL1,TL2,TL3 orchestration-scope;
 ```
 
----
-
 ## Core Entities
 
 ### Project
@@ -59,8 +57,6 @@ Agents are autonomous entities with specific roles and capabilities, powered by 
 
 - **Description**: Specific, atomic functions that an agent can execute. `Tools` represent an agent's capabilities to interact with its environment, such as `ReadFile`, `WriteFile`, or `ShellExecute`.
 
----
-
 ## System Flow
 
 1.  A `Project` is defined, and a high-level `Task` is created within it.
@@ -68,3 +64,13 @@ Agents are autonomous entities with specific roles and capabilities, powered by 
 3.  The Project Manager delegates responsibilities to specialist agents like the `Frontend Dev Agent` and `Backend Dev Agent`.
 4.  Each specialist agent performs its part of the task by using its available **Tools**.
 5.  The **Workflow** is updated as the task progresses, providing a clear status until the `Task` is complete.
+
+## Project Management
+
+| ID    | Title                              | Assignee | Priority | Status | Dependencies |
+| ----- | ---------------------------------- | -------- | -------- | ------ | ------------ |
+| crb-1 | Implement Core Agent System        | agent    | P2       | open   | None         |
+| crb-2 | Implement Tool System Framework    | agent    | P2       | open   | None         |
+| crb-3 | Implement Task Management System   | agent    | P2       | open   | None         |
+| crb-4 | Implement Workflow Engine          | agent    | P2       | open   | crb-3        |
+| crb-5 | Implement Project Container System | agent    | P2       | open   | crb-3        |
