@@ -9,18 +9,10 @@ use crate::eid::ExternalId;
 pub struct Agent {
     pub id: ExternalId,
     pub name: String,
-    pub role: AgentRole,
+    pub role: String,
     pub persona: String,
     pub model: ModelConfig,
     pub tools: Vec<String>, // Vec<Tool>
-}
-
-/// Defines the role specialization of an agent
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentRole {
-    Developer,
-    TechnicalProjectManager,
 }
 
 /// Configuration for the language model powering an agent

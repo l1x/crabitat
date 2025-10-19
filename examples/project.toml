@@ -42,11 +42,11 @@ execute_shell = { allowed = true }
 # Tools
 #
 # Read file
-[[tools]]
+[[tool]]
 id = "read_file"
 name = "Reading A File"
 # Execute shell
-[[tools]]
+[[tool]]
 id = "execute_shell"
 name = "Exceute something in shell"
 #
