@@ -1,132 +1,70 @@
-# Crabitat, agent workflow orchestrator
+# Crabitat, agentic orchestration
 
-Crabitat is designed to coordinate and manage conversations between multiple AI agents. This system enables you to build sophisticated, autonomous workflows where specialized agents collaborate to solve complex problems, mirroring a team of human experts.
+This document outlines the architecture for a multi-agent system designed to manage and execute complex software development tasks within a project structure.
 
-By defining roles, assigning tools, and setting a clear objective, you can create robust solutions for tasks ranging from code generation and data analysis to automated research and content creation.
+## Architecture Overview
 
-## Core Concepts
-
-The architecture is built upon a few simple concepts. Understanding these entities is key to leveraging the project.
-
-- **Agent**: An `Agent` is the fundamental building block. It's an autonomous entity with a specific **persona** (defined by a system message), a set of **tools** it can use, and a connection to a language model (LLM). Think of an agent as a specialized team member, like a "Senior Rust Developer" or a "Code Reviewer."
-
-- **Tool**: A `Tool` is a function that an `Agent` can execute to interact with the world outside the LLM. This could be anything from running shell commands, fetching data from a URL, or reading from a file system. Tools give agents the ability to perform actions and gather information. Tool use safety is a primary concern.
-
-- **Message**: A `Message` is the unit of communication. Agents interact by sending messages to each other within a shared conversation history. This history provides the context for each subsequent step in the workflow.
-
-- **Orchestrator**: The `Orchestrator` (also known as a Workflow Manager) is the central coordinator. It manages the entire process, holding the state of the conversation, routing messages between agents, and deciding which agent should act next based on a defined strategy.
-
-## Type Relationships
-
-The diagram below illustrates how these core types interact within the system. The `Orchestrator` contains a collection of `Agent`s and a history of `Message`s. Each `Agent` is configured with its own set of `Tool`s that it can invoke.
+The system is centered around a **Project Manager Agent** that orchestrates various specialized agents (e.g., Frontend, Backend) to complete tasks. It uses a defined **Workflow** to manage the state of each **Task** from inception to completion.
 
 ```mermaid
 graph TD
-    subgraph Orchestrator
-        O[Orchestrator]
-        M[Messages]
-        A1[Agent 1]
-        A2[Agent 2]
+    subgraph "Project"
+        direction LR
+        P(Project) -- "Contains" --> T(Task)
     end
 
-    subgraph AgentScope
-        T1[Tool A]
-        T2[Tool B]
-        T3[Tool C]
+    subgraph "Orchestration"
+        PM(Project Manager Agent) -- "Manages through" --> W(Workflow)
+        W -- "Drives State Of" --> T
+        PM -- "Delegates/Uses" --> A(Frontend Dev Agent)
+        PM -- "Delegates/Uses" --> B(Backend Dev Agent)
+        PM -- "Delegates/Uses" --> C(Architect Agent)
+        A -- "Uses" --> TL1(Tool)
+        B -- "Uses" --> TL2(Tool)
+        C -- "Uses" --> TL3(Tool)
     end
 
-    O --> M
-    O --> A1
-    O --> A2
+    classDef project-scope fill:#e0f2f7,stroke:#29b6f6,stroke-width:2px;
+    classDef orchestration-scope fill:#fff3e0,stroke:#ffb74d,stroke-width:2px;
 
-    A1 -- can use --> T1
-    A1 -- can use --> T2
-    A2 -- can use --> T3
-
-    style O fill:#f9f,stroke:#333,stroke-width:2px
-    style A1 fill:#bbf,stroke:#333,stroke-width:2px
-    style A2 fill:#bbf,stroke:#333,stroke-width:2px
+    class P,T project-scope;
+    class PM,W,A,B,C,TL1,TL2,TL3 orchestration-scope;
 ```
 
-## How It Works
+---
 
-The workflow follows a conversational loop managed entirely by the `Orchestrator`.
+## Core Entities
 
-1.  **Initialization**: The user defines a set of agents, each with a specific persona and a set of available tools. These agents are added to the `Orchestrator`.
-2.  **User Prompt**: The user kicks off the process with an initial task or question. This becomes the first message in the conversation history.
-3.  **Agent Selection**: The `Orchestrator` determines which agent is best suited to respond to the latest message. This can be a simple round-robin rotation or a more complex logic based on the message content.
-4.  **Agent Action**: The selected agent receives the conversation history. Based on its instructions and the current context, it can either:
-    - Respond with a natural language message.
-    - Decide to use one of its `Tool`s to perform an action.
-5.  **Tool Execution**: If an agent decides to use a tool, the `Orchestrator` securely executes the corresponding function and returns the result as a new message in the conversation.
-6.  **Loop or Terminate**: The process repeats from Step 3. The conversation continues until the task is completed or a termination condition is met (e.g., a specific "TERMINATE" keyword is produced by an agent).
+### Project
 
-## Example Usage
+- **Description**: The highest-level container. A `Project` is a workspace that holds all related `Tasks`.
 
-Below is a conceptual example of how you might define a simple two-agent workflow. This snippet is for illustrative purposes only to demonstrate the core ideas.
+### Task
 
-```rust
-// This is a conceptual example and not intended to be runnable code.
+- **Description**: A single, well-defined unit of work to be completed, such as "implement the authentication API" or "create the login page." Each `Task` has a state (e.g., `Open`, `In Progress`, `Done`) that is managed by a `Workflow`.
 
-// 1. Define Agents with their personas and tools.
-let coder = Agent::new(
-    "rust_coder",
-    "You are a Senior Rust Developer. You write high-quality Rust code.",
-    vec![Tool::new("execute_shell")]
-);
+### Workflow
 
-let reviewer = Agent::new(
-    "code_reviewer",
-    "You review Rust code for quality, bugs, and adherence to best practices.",
-    vec![] // The reviewer has no tools.
-);
+- **Description**: The process or state machine that a `Task` moves through. The `Project Manager Agent` uses the `Workflow` to track and drive a task towards completion.
 
-// 2. Create an orchestrator with the agents.
-let mut orchestrator = Orchestrator::new(vec![coder, reviewer]);
+### Agents
 
-// 3. Kick off the workflow with a user prompt.
-let initial_prompt = "Write a Rust function that returns the n-th Fibonacci number.";
-let final_result = orchestrator.run(initial_prompt);
+Agents are autonomous entities with specific roles and capabilities, powered by LLMs.
 
-// The orchestrator now manages the conversation until a final result is achieved.
-println!("Workflow Result: {}", final_result);
+- **Project Manager Agent**: The central orchestrator. It breaks down high-level `Tasks`, delegates sub-tasks to the appropriate specialist agents, and monitors overall progress through the `Workflow`.
 
-```
+- **Specialist Agents (Frontend, Backend, Architect)**: These are the "worker" agents. Each is an expert in a specific domain and is equipped with the `Tools` necessary to perform its job. For example, a `Backend Dev Agent` might use tools for file I/O and running shell commands.
 
-## Project Management
+### Tools
 
-```bash
-➜  bd list
+- **Description**: Specific, atomic functions that an agent can execute. `Tools` represent an agent's capabilities to interact with its environment, such as `ReadFile`, `WriteFile`, or `ShellExecute`.
 
-Found 9 issues:
+---
 
-crb-9 [P1] [task] open
-  Create functional example workflow demonstrating agent configuration and execution
+## System Flow
 
-crb-8 [P2] [task] open
-  Build Example Workflows
-
-crb-7 [P2] [task] open
-  Implement Termination Conditions
-
-crb-6 [P2] [task] open
-  Create Tool Integration Layer
-
-crb-5 [P2] [task] closed
-  Add Simple Agent Selection Strategy
-
-crb-4 [P2] [task] closed
-  Build the Orchestrator Workflow Loop
-
-crb-3 [P2] [task] closed
-  Create Agent Communication System
-
-crb-2 [P2] [task] closed
-  Implement Tool Execution Framework
-
-crb-1 [P2] [task] closed
-  Define Core Data Structures
-  Assignee: deepseek
-```
-
-See `bd quickstart` for more.
+1.  A `Project` is defined, and a high-level `Task` is created within it.
+2.  The **Project Manager Agent** assesses the `Task` and initiates the corresponding `Workflow`.
+3.  The Project Manager delegates responsibilities to specialist agents like the `Frontend Dev Agent` and `Backend Dev Agent`.
+4.  Each specialist agent performs its part of the task by using its available **Tools**.
+5.  The **Workflow** is updated as the task progresses, providing a clear status until the `Task` is complete.
