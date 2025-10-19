@@ -1,0 +1,57 @@
+# Project Configuration for Crabitat Agent System
+[project]
+name = "Crabitat Development Project"
+version = "1.0.0"
+#
+# Agents:
+#
+#   Developer
+[[agent]]
+id = "developer"
+name = "Development Agent"
+role = "developer"
+persona = "Expert software developer skilled in Rust, TypeScript, and system design."
+
+[agent.model]
+name = "gemma3:latest"
+temperature = 0.5
+url = "http://localhost:11434"
+
+[agent.tools]
+read_file = { allowed = true }
+write_file = { allowed = true }
+execute_shell = { allowed = true }
+
+#  Technical Project manager
+[[agent]]
+id = "tpm"
+name = "Technical Project manager"
+role = "tpm"
+persona = "Senior technical project manager, experienced in customer requirement intake and managing developers and technical staff. Great at estimating complexity."
+
+[agent.model]
+name = "gemma3:latest"
+temperature = 0.5
+url = "http://localhost:11434"
+
+[agent.tools]
+read_file = { allowed = true }
+write_file = { allowed = true }
+execute_shell = { allowed = true }
+#
+# Tools
+#
+# Read file
+[[tools]]
+id = "read_file"
+name = "Reading A File"
+# Execute shell
+[[tools]]
+id = "execute_shell"
+name = "Exceute something in shell"
+#
+# Security
+#
+[security]
+allowed_extensions = [".rs", ".toml", ".md", ".json", ".txt", ".js", ".ts"]
+max_file_size_mb = 10
