@@ -44,9 +44,9 @@ mod tests {
 
     #[test]
     fn test_external_id_creation() {
-        let id = ExternalId::new("agent");
-        assert_eq!(id.prefix, "agent");
-        assert!(id.to_string().starts_with("agent-"));
+        let id = ExternalId::new("aid");
+        assert_eq!(id.prefix, "aid");
+        assert!(id.to_string().starts_with("aid-"));
     }
 
     #[test]

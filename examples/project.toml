@@ -7,48 +7,42 @@ version = "1.0.0"
 #
 #   Developer
 [[agent]]
-id = "developer"
+id = "aid-7k9q2h8m4n6r1p3s5t7u9w"
 name = "Development Agent"
 role = "developer"
 persona = "Expert software developer skilled in Rust, TypeScript, and system design."
-
-[agent.model]
-name = "gemma3:latest"
-temperature = 0.5
-url = "http://localhost:11434"
-
-[agent.tools]
-read_file = { allowed = true }
-write_file = { allowed = true }
-execute_shell = { allowed = true }
-
+tools = ["read_file", "write_file", "execute_shell"]
+model = "mid-4o5p7q9r1s3t5u7w9y2z4"
 #  Technical Project manager
 [[agent]]
-id = "tpm"
+id = "aid-2b3c4d5e6f7g8h9i0j1k2l"
 name = "Technical Project manager"
 role = "tpm"
 persona = "Senior technical project manager, experienced in customer requirement intake and managing developers and technical staff. Great at estimating complexity."
-
-[agent.model]
+model = "mid-4o5p7q9r1s3t5u7w9y2z4"
+tools = ["read_file", "write_file", "execute_shell"]
+#
+# Models
+#
+#   Gemma - local
+[[model]]
+id = "mid-4o5p7q9r1s3t5u7w9y2z4"
 name = "gemma3:latest"
 temperature = 0.5
 url = "http://localhost:11434"
-
-[agent.tools]
-read_file = { allowed = true }
-write_file = { allowed = true }
-execute_shell = { allowed = true }
 #
 # Tools
 #
 # Read file
 [[tool]]
-id = "read_file"
-name = "Reading A File"
+id = "tid-3m2n4o6p8q1r3s5t7u9w0y"
+name = "read_file"
+description = "Reading a file"
 # Execute shell
 [[tool]]
-id = "execute_shell"
-name = "Exceute something in shell"
+id = "tid-6m2n4o6p8q13s5t7u7w0t"
+name = "execute_shell"
+description = "Executing a command in shell"
 #
 # Security
 #

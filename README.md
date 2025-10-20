@@ -65,6 +65,25 @@ Agents are autonomous entities with specific roles and capabilities, powered by 
 4.  Each specialist agent performs its part of the task by using its available **Tools**.
 5.  The **Workflow** is updated as the task progresses, providing a clear status until the `Task` is complete.
 
+## External Id
+
+A robust external ID system combining human-readable prefixes with UUID-based identifiers for distributed systems.
+
+Generation: Creates UUID v4 + prefix combination
+
+- **Serialization**: `prefix-base36` string format
+- **UUID Access**: Direct UUID extraction for database storage
+- **Display**: Implements Display trait for logging
+
+Examples:
+
+| Type    | ID                          | UUID                                 |
+| ------- | --------------------------- | ------------------------------------ |
+| Agent   | aid-7k9q2h8m4n6r1p3s5t7u9w  | 550e8400-e29b-41d4-a716-446655440000 |
+| User    | uid-2b3c4d5e6f7g8h9i0j1k2l  | 234f5678-9abc-12d3-a456-426655440001 |
+| Task    | task-3m2n4o6p8q1r3s5t7u9w0y | 345f6789-bcde-12d3-a456-426655440002 |
+| Project | proj-4o5p7q9r1s3t5u7w9y2z4  | 456g7890-cdef-12d3-a456-426655440003 |
+
 ## Project Management
 
 | ID    | Title                              | Assignee | Priority | Status | Dependencies |
