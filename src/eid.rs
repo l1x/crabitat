@@ -6,11 +6,13 @@ use uuid::Uuid;
 
 /// External ID with prefix and UUID bytes
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct ExternalId {
     pub prefix: String,
     pub bytes: [u8; 16],
 }
 
+#[allow(dead_code)]
 impl ExternalId {
     /// Generate a new external ID with given prefix
     pub fn new(prefix: &str) -> Self {

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// Represents an autonomous agent with specific capabilities
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct Model {
     pub id: String,
     pub name: String,

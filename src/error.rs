@@ -4,6 +4,7 @@ use thiserror::Error;
 
 /// Configuration-related errors
 #[derive(Debug, Error)]
+#[allow(dead_code)]
 pub enum ConfigError {
     #[error("Failed to read config file: {0}")]
     FileRead(String),
