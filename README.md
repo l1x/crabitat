@@ -86,10 +86,11 @@ Examples:
 
 ## Project Management
 
-| ID    | Title                              | Assignee | Priority | Status | Dependencies |
-| ----- | ---------------------------------- | -------- | -------- | ------ | ------------ |
-| crb-1 | Implement Core Agent System        | agent    | P2       | open   | None         |
-| crb-2 | Implement Tool System Framework    | agent    | P2       | open   | None         |
-| crb-3 | Implement Task Management System   | agent    | P2       | open   | None         |
-| crb-4 | Implement Workflow Engine          | agent    | P2       | open   | crb-3        |
-| crb-5 | Implement Project Container System | agent    | P2       | open   | crb-3        |
+| ID    | Title                                  | Assignee | Priority | Status | Dependencies |
+| ----- | -------------------------------------- | -------- | -------- | ------ | ------------ |
+| crb-1 | Implement Core Agent System            | agent    | P2       | open   | None         |
+| crb-2 | Implement Tool System Framework        | agent    | P2       | open   | None         |
+| crb-3 | Implement Task Management System       | agent    | P2       | open   | None         |
+| crb-4 | Implement Workflow Engine              | agent    | P2       | open   | crb-3        |
+| crb-5 | Implement Project Container System     | agent    | P2       | open   | crb-3        |
+| crb-6 | Create example code for agent creation | agent    | P2       | open   | None         |
