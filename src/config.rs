@@ -24,21 +24,16 @@ pub(crate) struct Config {
 }
 
 /// Load configuration from TOML file
-pub(crate) fn load_config(path: &str) -> Result<Config, ConfigError> {
+pub(crate) fn load_config(path: &str) -> Result<Project, ConfigError> {
     let content = fs::read_to_string(path).map_err(|e| ConfigError::FileRead(e.to_string()))?;
 
-    let config: Config =
+    let project: Project =
         toml::from_str(&content).map_err(|e| ConfigError::TomlParse(e.to_string()))?;
 
-    // Project
-    log::info!("project.name : {:?}", config.project.name);
-    log::info!("project.version : {:?}", config.project.version);
-    // Tools
-    log::info!("tools : {:?}", config.tool);
-    // Models
-    log::info!("models : {:?}", config.model);
-    // Agents
-    log::info!("agents : {:?}", config.agent);
+    log::info!("Loaded project: {} v{}", project.name, project.version);
+    log::info!("Models: {}", project.models.len());
+    log::info!("Agents: {}", project.agents.len());
+    log::info!("Tools: {}", project.tools.len());
 
-    Ok(config)
+    Ok(project)
 }

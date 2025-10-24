@@ -26,16 +26,5 @@ async fn main() -> Result<(), CrabitatError> {
     let project = config::load_config("examples/project.toml")?;
     log::info!("{:?}", project);
 
-    for m in project.model {
-        match m.show().await {
-            Ok(details) => {
-                log::info!("Model details:\n{}", details);
-            }
-            Err(e) => {
-                log::error!("Failed to get model details: {}", e);
-            }
-        }
-    }
-
     Ok(())
 }

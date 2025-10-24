@@ -10,5 +10,21 @@ pub struct Agent {
     pub name: String,
     pub role: String,
     pub persona: String,
-    //
+    /// Model ID this agent should use
+    pub model: Option<String>,
+    /// Tool IDs this agent has access to
+    #[serde(default)]
+    pub tools: Vec<String>,
+}
+
+impl Agent {
+    /// Check if agent can use a specific tool
+    pub fn has_tool(&self, tool_id: &str) -> bool {
+        self.tools.contains(&tool_id.to_string())
+    }
+
+    /// Get assigned model name (if available)
+    pub fn model_name(&self) -> Option<&str> {
+        self.model.as_deref()
+    }
 }

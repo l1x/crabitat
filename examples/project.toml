@@ -1,12 +1,11 @@
 # Project Configuration for Crabitat Agent System
-[project]
 name = "Crabitat Development Project"
 version = "1.0.0"
 #
 # Agents:
 #
 #   Developer
-[[agent]]
+[[agents]]
 id = "aid-7k9q2h8m4n6r1p3s5t7u9w"
 name = "Development Agent"
 role = "developer"
@@ -14,7 +13,7 @@ persona = "Expert software developer skilled in Rust, TypeScript, and system des
 tools = ["read_file", "write_file", "execute_shell"]
 model = "mid-4o5p7q9r1s3t5u7w9y2z4"
 #  Technical Project manager
-[[agent]]
+[[agents]]
 id = "aid-2b3c4d5e6f7g8h9i0j1k2l"
 name = "Technical Project manager"
 role = "tpm"
@@ -25,7 +24,7 @@ tools = ["read_file", "write_file", "execute_shell"]
 # Models
 #
 #   Gemma - local
-[[model]]
+[[models]]
 id = "mid-4o5p7q9r1s3t5u7w9y2z4"
 name = "gemma3:latest"
 temperature = 0.5
@@ -34,12 +33,12 @@ url = "http://localhost:11434"
 # Tools
 #
 # Read file
-[[tool]]
+[[tools]]
 id = "tid-3m2n4o6p8q1r3s5t7u9w0y"
 name = "read_file"
 description = "Reading a file"
 # Execute shell
-[[tool]]
+[[tools]]
 id = "tid-6m2n4o6p8q13s5t7u7w0t"
 name = "execute_shell"
 description = "Executing a command in shell"

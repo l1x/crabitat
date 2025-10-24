@@ -23,7 +23,9 @@ impl fmt::Display for Model {
 }
 
 impl Model {
+    ///
     /// Get model details from Ollama API
+    ///
     pub async fn show(&self) -> Result<ModelDetails, ModelError> {
         let client = reqwest::Client::new();
 
@@ -51,6 +53,99 @@ impl Model {
             .map_err(|e| ModelError::InvalidResponse(e.to_string()))?;
 
         Ok(details)
+    }
+
+    ///
+    /// Send chat completion request to Ollama
+    ///
+    pub async fn chat(&self, messages: Vec<ChatMessage>) -> Result<ChatResponse, ModelError> {
+        let client = reqwest::Client::new();
+
+        let payload = serde_json::json!({
+            "model": self.name,
+            "messages": messages,
+            "stream": false,
+            "options": {
+                "temperature": self.temperature
+            }
+        });
+
+        let response = client
+            .post(&format!("{}/api/chat", self.url))
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| ModelError::ApiError(e.to_string()))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            return Err(ModelError::HttpError(format!("{}: {}", status, text)));
+        }
+
+        let chat_response: ChatResponse = response
+            .json()
+            .await
+            .map_err(|e| ModelError::InvalidResponse(e.to_string()))?;
+
+        Ok(chat_response)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MessageRole {
+    #[serde(rename = "system")]
+    System,
+    #[serde(rename = "user")]
+    User,
+    #[serde(rename = "assistant")]
+    Assistant,
+}
+
+/// Chat message for model interaction
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMessage {
+    pub role: MessageRole,
+    pub content: String,
+}
+
+/// Response from /api/chat endpoint
+#[derive(Debug, Deserialize)]
+pub struct ChatResponseMessage {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ChatResponse {
+    pub message: ChatResponseMessage,
+    pub done: bool,
+    #[serde(default)]
+    pub total_duration: Option<u64>,
+    #[serde(default)]
+    pub prompt_eval_count: Option<u32>,
+    #[serde(default)]
+    pub eval_count: Option<u32>,
+}
+
+impl fmt::Display for ChatResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Response: {}", self.message.content)?;
+        if let Some(duration) = self.total_duration {
+            writeln!(f, "Duration: {}ms", duration / 1_000_000)?;
+        }
+        if let Some(prompt_tokens) = self.prompt_eval_count {
+            if let Some(eval_tokens) = self.eval_count {
+                writeln!(
+                    f,
+                    "Tokens: {} prompt + {} completion = {}",
+                    prompt_tokens,
+                    eval_tokens,
+                    prompt_tokens + eval_tokens
+                )?;
+            }
+        }
+        Ok(())
     }
 }
 
