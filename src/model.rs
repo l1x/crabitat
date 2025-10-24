@@ -4,7 +4,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{CrabitatError, ModelError};
+use crate::error::ModelError;
 
 /// Represents an autonomous agent with specific capabilities
 #[derive(Debug, Clone, Serialize, Deserialize)]

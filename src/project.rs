@@ -30,10 +30,7 @@ impl Project {
 
     /// Get model assigned to an agent
     pub fn get_agent_model(&self, agent: &Agent) -> Option<&Model> {
-        agent
-            .model
-            .as_ref()
-            .and_then(|model_id| self.get_model(model_id))
+        Some(&agent.model).and_then(|model_id| self.get_model(model_id))
     }
 
     /// Get all agents for a specific role

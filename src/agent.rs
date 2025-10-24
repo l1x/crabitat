@@ -11,7 +11,7 @@ pub struct Agent {
     pub role: String,
     pub persona: String,
     /// Model ID this agent should use
-    pub model: Option<String>,
+    pub model: String,
     /// Tool IDs this agent has access to
     #[serde(default)]
     pub tools: Vec<String>,
@@ -24,7 +24,7 @@ impl Agent {
     }
 
     /// Get assigned model name (if available)
-    pub fn model_name(&self) -> Option<&str> {
-        self.model.as_deref()
+    pub fn model_name(&self) -> &str {
+        &self.model // Just return reference since it's required String now
     }
 }
