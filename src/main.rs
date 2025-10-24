@@ -6,6 +6,8 @@
 
 use env_logger;
 
+use crate::error::CrabitatError;
+
 mod agent;
 mod config;
 mod eid;
@@ -15,13 +17,25 @@ mod project;
 mod task;
 mod tool;
 
-fn main() {
+#[tokio::main]
+async fn main() -> Result<(), CrabitatError> {
     env_logger::Builder::from_default_env()
         .filter_level(log::LevelFilter::Info)
         .init();
-
     log::info!("Starting");
-    let p = config::load_config("examples/project.toml");
+    let project = config::load_config("examples/project.toml")?;
+    log::info!("{:?}", project);
 
-    log::info!("{:?}", p);
+    for m in project.model {
+        match m.show().await {
+            Ok(details) => {
+                log::info!("Model details:\n{}", details);
+            }
+            Err(e) => {
+                log::error!("Failed to get model details: {}", e);
+            }
+        }
+    }
+
+    Ok(())
 }

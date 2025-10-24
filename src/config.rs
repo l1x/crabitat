@@ -24,7 +24,7 @@ pub(crate) struct Config {
 }
 
 /// Load configuration from TOML file
-pub(crate) fn load_config(path: &str) -> Result<(), ConfigError> {
+pub(crate) fn load_config(path: &str) -> Result<Config, ConfigError> {
     let content = fs::read_to_string(path).map_err(|e| ConfigError::FileRead(e.to_string()))?;
 
     let config: Config =
@@ -40,5 +40,5 @@ pub(crate) fn load_config(path: &str) -> Result<(), ConfigError> {
     // Agents
     log::info!("agents : {:?}", config.agent);
 
-    Ok(())
+    Ok(config)
 }
