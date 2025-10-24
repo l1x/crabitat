@@ -26,7 +26,10 @@ async fn main() -> Result<(), CrabitatError> {
     let project = config::load_config("examples/project.toml")?;
     log::info!("{:?}", project);
 
-    if let Some(agent) = project.agents.first() {
+    // Iterate through all agents
+    for agent in &project.agents {
+        log::info!("Processing agent: {}", agent.name);
+
         if let Some(model) = project.get_agent_model(agent) {
             log::info!("Agent '{}' uses model '{}'", agent.name, model.name);
 
@@ -36,14 +39,12 @@ async fn main() -> Result<(), CrabitatError> {
                     log::info!("Model details:\n{}", details);
                 }
                 Err(e) => {
-                    log::error!("Failed to get model details: {}", e);
+                    log::error!("Failed to get model details for {}: {}", agent.name, e);
                 }
             }
         } else {
             log::warn!("Agent '{}' has no model assigned", agent.name);
         }
-    } else {
-        log::warn!("No agents found in project");
     }
 
     Ok(())
