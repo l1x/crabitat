@@ -1,9 +1,12 @@
 # Project Configuration for Crabitat Agent System
 name = "Crabitat Development Project"
 version = "1.0.0"
+description = "Crabitat is an intelligent agent orchestration system designed to coordinate multiple AI agents for complex software development tasks. It provides a framework for defining specialized agents (developers, project managers, architects), managing their capabilities through tools, and orchestrating workflows with task dependency tracking. The system uses local LLM models (via Ollama) to enable autonomous agent decision-making and collaboration, with features for project-level coordination, task management, and secure tool execution within defined boundaries."
+
 #
 # Agents:
 #
+
 #   Developer
 [[agents]]
 id = "aid-7k9q2h8m4n6r1p3s5t7u9w"
@@ -12,6 +15,7 @@ role = "developer"
 persona = "Expert software developer skilled in Rust, TypeScript, and system design."
 tools = ["read_file", "write_file", "execute_shell"]
 model = "mid-4o5p7q9r1s3t5u7w9y2z4"
+
 #  Technical Project manager
 [[agents]]
 id = "aid-2b3c4d5e6f7g8h9i0j1k2l"
@@ -20,31 +24,41 @@ role = "tpm"
 persona = "Senior technical project manager, experienced in customer requirement intake and managing developers and technical staff. Great at estimating complexity."
 model = "mid-4o5p7q9r1s3t5u7w9y2z4"
 tools = ["read_file", "write_file", "execute_shell"]
+
 #
 # Models
 #
+
 #   Gemma - local
 [[models]]
 id = "mid-4o5p7q9r1s3t5u7w9y2z4"
 name = "gemma3:latest"
 temperature = 0.5
 url = "http://localhost:11434"
+
 #
 # Tools
 #
+
 # Read file
 [[tools]]
 id = "tid-3m2n4o6p8q1r3s5t7u9w0y"
 name = "read_file"
 description = "Reading a file"
+
 # Execute shell
 [[tools]]
 id = "tid-6m2n4o6p8q13s5t7u7w0t"
 name = "execute_shell"
 description = "Executing a command in shell"
+
 #
 # Security
 #
 [security]
 allowed_extensions = [".rs", ".toml", ".md", ".json", ".txt", ".js", ".ts"]
 max_file_size_mb = 10
+
+#
+# Tasks
+#
