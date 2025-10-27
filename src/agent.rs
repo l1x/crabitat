@@ -8,8 +8,7 @@ pub struct Agent {
     //
     pub id: String,
     pub name: String,
-    pub role: String,
-    pub persona: String,
+    pub prompt_file: String,
     /// Model ID this agent should use
     pub model: String,
     /// Tool IDs this agent has access to

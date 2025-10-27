@@ -11,17 +11,15 @@ description = "Crabitat is an intelligent agent orchestration system designed to
 [[agents]]
 id = "aid-7k9q2h8m4n6r1p3s5t7u9w"
 name = "Development Agent"
-role = "developer"
-persona = "Expert software developer skilled in Rust, TypeScript, and system design."
-tools = ["read_file", "write_file", "execute_shell"]
+prompt_file = "docs/prompts/agents/rust_backend_dev.md"
 model = "mid-4o5p7q9r1s3t5u7w9y2z4"
+tools = ["read_file", "write_file", "execute_shell"]
 
 #  Technical Project manager
 [[agents]]
 id = "aid-2b3c4d5e6f7g8h9i0j1k2l"
 name = "Technical Project manager"
-role = "tpm"
-persona = "Senior technical project manager, experienced in customer requirement intake and managing developers and technical staff. Great at estimating complexity."
+prompt_file = "docs/prompts/agents/technical_project_manager.md"
 model = "mid-4o5p7q9r1s3t5u7w9y2z4"
 tools = ["read_file", "write_file", "execute_shell"]
 
@@ -52,9 +50,16 @@ id = "tid-6m2n4o6p8q13s5t7u7w0t"
 name = "execute_shell"
 description = "Executing a command in shell"
 
+# Beads - Project Management
+[[tools]]
+id = "tid-772n4o5p8q93s2t3u6w0q"
+name = "beads"
+description = "Beads Project Management"
+
 #
 # Security
 #
+
 [security]
 allowed_extensions = [".rs", ".toml", ".md", ".json", ".txt", ".js", ".ts"]
 max_file_size_mb = 10
@@ -62,3 +67,35 @@ max_file_size_mb = 10
 #
 # Tasks
 #
+
+# Implementing Task type - very meta
+[[tasks]]
+# internal id
+id = "task-7k9q2h8m4n6r1p3s5t7u9w"
+# external id
+project_management_vendor = "beads"
+project_management_ref = "crb-3"
+title = "Implement Task Management System"
+description = "Create Task struct with id, title, description, and references. Implement run() for Task that takes the details and talks to the agent. This usually a technical project manager who knows about the available other agents like architect, backend developer, frontend developer, machine learning engineer, data ops engineer, etc."
+agent_id = "aid-2b3c4d5e6f7g8h9i0j1k2l"
+# tasks.context_files
+[[tasks.context_files]]
+  file_path = "docs/requirements.md"
+  file_type = "file"
+  file_description = "Task system requirements"
+
+  [[tasks.context_files]]
+  file_path = "src/"
+  file_type = "folder"
+  file_description = "Current Implementation"
+
+  [[tasks.context_files]]
+  file_path = "README.md"
+  file_type = "file"
+  file_description = "Project Summary"
+
+[workflow]
+# Task
+task = "tasks.task-7k9q2h8m4n6r1p3s5t7u9w"
+# Prompt
+starting_prompt = ""

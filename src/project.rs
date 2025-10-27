@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::agent::Agent;
 use crate::model::Model;
+use crate::task::Task;
 use crate::tool::Tool;
 
 /// Main project container for the Crabitat system
@@ -15,6 +16,8 @@ pub struct Project {
     pub models: Vec<Model>,
     #[serde(default)]
     pub agents: Vec<Agent>,
+    #[serde(default)]
+    pub tasks: Vec<Task>,
 }
 
 impl Project {
@@ -31,11 +34,6 @@ impl Project {
     /// Get model assigned to an agent
     pub fn get_agent_model(&self, agent: &Agent) -> Option<&Model> {
         Some(&agent.model).and_then(|model_id| self.get_model(model_id))
-    }
-
-    /// Get all agents for a specific role
-    pub fn get_agents_by_role(&self, role: &str) -> Vec<&Agent> {
-        self.agents.iter().filter(|a| a.role == role).collect()
     }
 
     /// Get available model names

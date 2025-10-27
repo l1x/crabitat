@@ -14,6 +14,7 @@ mod eid;
 mod error;
 mod model;
 mod project;
+mod state;
 mod task;
 mod tool;
 
@@ -45,6 +46,10 @@ async fn main() -> Result<(), CrabitatError> {
         } else {
             log::warn!("Agent '{}' has no model assigned", agent.name);
         }
+    }
+
+    for task in &project.tasks {
+        log::info!("Task details:\n{}", task)
     }
 
     Ok(())
