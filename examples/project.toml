@@ -76,7 +76,16 @@ id = "task-7k9q2h8m4n6r1p3s5t7u9w"
 project_management_vendor = "beads"
 project_management_ref = "crb-3"
 title = "Implement Task Management System"
-description = "Create Task struct with id, title, description, and references. Implement run() for Task that takes the details and talks to the agent. This usually a technical project manager who knows about the available other agents like architect, backend developer, frontend developer, machine learning engineer, data ops engineer, etc."
+state = "tobedone"
+
+
+description = """
+  Create Task struct with id, title, description, and references. Implement run() for Task
+  that takes the details and talks to the agent. This usually a technical project manager who
+  knows about the available other agents like architect, backend developer, frontend developer,
+  machine learning engineer, data ops engineer, etc.
+"""
+
 agent_id = "aid-2b3c4d5e6f7g8h9i0j1k2l"
 # tasks.context_files
 [[tasks.context_files]]
@@ -98,4 +107,9 @@ agent_id = "aid-2b3c4d5e6f7g8h9i0j1k2l"
 # Task
 task = "tasks.task-7k9q2h8m4n6r1p3s5t7u9w"
 # Prompt
-starting_prompt = ""
+starting_prompt = """
+read your mode from [@rust_backend_dev.md](file://docs/prompts/agents/rust_backend_dev.md) and stop (no output)
+execute bd quickstart and bd list in shell and stop (no output)
+read [@README.md](file://README.md) and stop (no output)
+read [@src](file://src/) files and stop (no output)
+"""
