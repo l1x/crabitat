@@ -56,11 +56,8 @@ Develop an agent orchestrator, named **Conductor**, that operates as a TUI and I
 
 ## Success Metrics
 
-- **Adoption Rate:** At least 30% of active developers on the repo use the conductor weekly within the first 3 months.
 - **Task Completion Rate:** 80% of tasks launched via the conductor finish successfully (exit code 0) without manual intervention.
 - **Latency:** Average time from task submission to completion should be under 2 minutes for typical small tasks.
-- **Error Reduction:** Number of merge‑conflict incidents related to auto‑generated code should decrease by 15% compared to baseline.
-- **User Satisfaction:** Post‑implementation survey scores of ≥4.0/5 for ease of use and usefulness.
 
 ## Design Considerations
 
@@ -81,3 +78,113 @@ Develop an agent orchestrator, named **Conductor**, that operates as a TUI and I
 2. How should the conductor handle long‑running tasks that exceed typical TUI session lifetimes?
 3. What is the preferred method for passing large context files (e.g., >10 MB) into the container?
 4. Should the conductor support multiple concurrent task executions, or only a single queue?
+
+```mermaid
+graph TD
+    %% Actors
+    Dev[Developer]
+
+    %% Conductor System Boundary
+    subgraph Conductor_System [Conductor Rust Application]
+        direction TB
+        CLI[CLI / IDE Interface]
+        Orchestrator[Conductor Orchestrator]
+        TUI[Terminal UI]
+        ConfigMgr[Config Parser]
+        SecretClient[Secret Store Client]
+        DockerClient[Docker Controller]
+    end
+
+    %% External Systems
+    subgraph Environment [External Environment]
+        Repo[Local Repository]
+        SecretStore[(OS Secret Store<br/>Keychain/Vault)]
+        DockerDaemon[Docker Daemon]
+        Toml[conductor.toml]
+    end
+
+    %% Execution Context
+    subgraph Container_Context [Docker Container]
+        TaskEnv[Execution Environment]
+        SLM[Local SLM]
+    end
+
+    %% Relationships
+    Dev -->|issues command| CLI
+    CLI -->|triggers| Orchestrator
+
+    %% Configuration
+    Orchestrator -->|reads| ConfigMgr
+    ConfigMgr -->|parses| Toml
+    ConfigMgr -->|returns Model Config| Orchestrator
+
+    %% Secrets
+    Orchestrator -->|requests API keys| SecretClient
+    SecretClient -->|secure retrieval| SecretStore
+
+    %% Docker & Execution
+    Orchestrator -->|manages lifecycle| DockerClient
+    DockerClient -->|mounts Repo| DockerDaemon
+    DockerClient -->|passes Secrets/Task| DockerDaemon
+    DockerDaemon -->|spawns| Container_Context
+    Container_Context -->|runs inference on| SLM
+
+    %% Output
+    Orchestrator -->|streams logs/progress| TUI
+    Dev -->|monitors| TUI
+
+    Container_Context -->|writes Artifacts| Repo
+
+    %% Styling
+    classDef system fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
+    classDef external fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,stroke-dasharray: 5 5;
+    classDef container fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px;
+
+    class Conductor_System system;
+    class Environment external;
+    class Container_Context container;
+
+```
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Dev as Developer
+    participant Cond as Conductor (Orchestrator)
+    participant TOML as conductor.toml
+    participant Store as Secret Store
+    participant Dock as Docker Engine
+    participant Cont as Docker Container (SLM)
+    participant Repo as Local Repo
+
+    Dev->>Cond: run --task implement-login
+    activate Cond
+
+    Note over Cond: Parse Task & Context
+
+    Cond->>TOML: Read Configuration
+    TOML-->>Cond: Return Approved Models & Tags
+    Cond->>Cond: Select Best SLM based on Task Tags
+
+    Cond->>Store: Retrieve API Keys (if needed)
+    Store-->>Cond: Return Secrets (Securely)
+
+    Cond->>Dock: Create Container
+    Note right of Cond: Mount Repo<br/>Inject Secrets as Env Vars<br/>Inject Task Context
+
+    Dock->>Cont: Start Container
+
+    par Stream Progress
+        Cond-->>Dev: Update TUI (Real-time logs)
+    and Execute Task
+        Cont->>Repo: Read Files (Context)
+        Cont->>Cont: Execute SLM (Code Gen)
+        Cont->>Repo: Write Artifacts (Code/Tests)
+    end
+
+    Cont-->>Dock: Exit Code 0 (Success)
+    Dock-->>Cond: Container Finished
+
+    Cond-->>Dev: TUI Shows Completion Summary
+    deactivate Cond
+```
