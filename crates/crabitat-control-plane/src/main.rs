@@ -8,7 +8,7 @@ use axum::{
 };
 use clap::{Parser, Subcommand};
 use crabitat_core::{
-    BurrowMode, Mission, RunId, RunMetrics, RunStatus, TaskId, TaskStatus, now_ms,
+    BurrowMode, Colony, Mission, RunId, RunMetrics, RunStatus, TaskId, TaskStatus, now_ms,
 };
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
@@ -107,9 +107,22 @@ impl IntoResponse for ApiError {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Record types (API responses)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+struct ColonyRecord {
+    colony_id: String,
+    name: String,
+    description: String,
+    created_at_ms: u64,
+}
+
 #[derive(Debug, Serialize)]
 struct CrabRecord {
     crab_id: String,
+    colony_id: String,
     name: String,
     role: String,
     state: CrabState,
@@ -121,6 +134,7 @@ struct CrabRecord {
 #[derive(Debug, Serialize)]
 struct MissionRecord {
     mission_id: String,
+    colony_id: String,
     prompt: String,
     created_at_ms: u64,
 }
@@ -169,15 +183,27 @@ struct StatusSummary {
 struct StatusSnapshot {
     generated_at_ms: u64,
     summary: StatusSummary,
+    colonies: Vec<ColonyRecord>,
     crabs: Vec<CrabRecord>,
     missions: Vec<MissionRecord>,
     tasks: Vec<TaskRecord>,
     runs: Vec<RunRecord>,
 }
 
+// ---------------------------------------------------------------------------
+// Request types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct CreateColonyRequest {
+    name: String,
+    description: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct RegisterCrabRequest {
     crab_id: String,
+    colony_id: String,
     name: String,
     role: String,
     state: Option<CrabState>,
@@ -185,6 +211,7 @@ struct RegisterCrabRequest {
 
 #[derive(Debug, Deserialize)]
 struct CreateMissionRequest {
+    colony_id: String,
     prompt: String,
 }
 
@@ -241,6 +268,10 @@ struct CompleteRunRequest {
     timing: Option<TimingPatch>,
 }
 
+// ---------------------------------------------------------------------------
+// Entrypoint
+// ---------------------------------------------------------------------------
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -258,17 +289,7 @@ async fn serve(port: u16, db_path: &Path) -> Result<()> {
     let connection = init_db(db_path)?;
     let state = AppState { db: Arc::new(Mutex::new(connection)) };
 
-    let app = Router::new()
-        .route("/healthz", get(healthz))
-        .route("/v1/crabs", get(list_crabs))
-        .route("/v1/crabs/register", post(register_crab))
-        .route("/v1/missions", post(create_mission).get(list_missions))
-        .route("/v1/tasks", post(create_task).get(list_tasks))
-        .route("/v1/runs/start", post(start_run))
-        .route("/v1/runs/update", post(update_run))
-        .route("/v1/runs/complete", post(complete_run))
-        .route("/v1/status", get(get_status))
-        .with_state(state);
+    let app = build_router(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -282,33 +303,56 @@ async fn serve(port: u16, db_path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn init_db(db_path: &Path) -> Result<Connection> {
-    if let Some(parent) = db_path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        fs::create_dir_all(parent)?;
-    }
+fn build_router(state: AppState) -> Router {
+    Router::new()
+        .route("/healthz", get(healthz))
+        .route("/v1/colonies", post(create_colony).get(list_colonies))
+        .route("/v1/crabs", get(list_crabs))
+        .route("/v1/crabs/register", post(register_crab))
+        .route("/v1/missions", post(create_mission).get(list_missions))
+        .route("/v1/tasks", post(create_task).get(list_tasks))
+        .route("/v1/runs/start", post(start_run))
+        .route("/v1/runs/update", post(update_run))
+        .route("/v1/runs/complete", post(complete_run))
+        .route("/v1/status", get(get_status))
+        .with_state(state)
+}
 
-    let conn = Connection::open(db_path)?;
+// ---------------------------------------------------------------------------
+// Database
+// ---------------------------------------------------------------------------
+
+fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
     conn.execute_batch(
         "
         PRAGMA journal_mode = WAL;
         PRAGMA foreign_keys = ON;
 
+        CREATE TABLE IF NOT EXISTS colonies (
+          colony_id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          created_at_ms INTEGER NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS crabs (
           crab_id TEXT PRIMARY KEY,
+          colony_id TEXT NOT NULL,
           name TEXT NOT NULL,
           role TEXT NOT NULL,
           state TEXT NOT NULL,
           current_task_id TEXT,
           current_run_id TEXT,
-          updated_at_ms INTEGER NOT NULL
+          updated_at_ms INTEGER NOT NULL,
+          FOREIGN KEY(colony_id) REFERENCES colonies(colony_id)
         );
 
         CREATE TABLE IF NOT EXISTS missions (
           mission_id TEXT PRIMARY KEY,
+          colony_id TEXT NOT NULL,
           prompt TEXT NOT NULL,
-          created_at_ms INTEGER NOT NULL
+          created_at_ms INTEGER NOT NULL,
+          FOREIGN KEY(colony_id) REFERENCES colonies(colony_id)
         );
 
         CREATE TABLE IF NOT EXISTS tasks (
@@ -346,12 +390,57 @@ fn init_db(db_path: &Path) -> Result<Connection> {
           FOREIGN KEY(task_id) REFERENCES tasks(task_id)
         );
         ",
-    )?;
+    )
+}
+
+fn init_db(db_path: &Path) -> Result<Connection> {
+    if let Some(parent) = db_path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent)?;
+    }
+
+    let conn = Connection::open(db_path)?;
+    apply_schema(&conn)?;
     Ok(conn)
 }
 
+// ---------------------------------------------------------------------------
+// Handlers
+// ---------------------------------------------------------------------------
+
 async fn healthz() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "ok": true }))
+}
+
+async fn create_colony(
+    State(state): State<AppState>,
+    Json(request): Json<CreateColonyRequest>,
+) -> Result<Json<ColonyRecord>, ApiError> {
+    if request.name.trim().is_empty() {
+        return Err(ApiError::bad_request("name is required"));
+    }
+
+    let colony = Colony::new(request.name, request.description.unwrap_or_default());
+    let row = ColonyRecord {
+        colony_id: colony.id.to_string(),
+        name: colony.name,
+        description: colony.description,
+        created_at_ms: colony.created_at_ms,
+    };
+
+    let db = state.db.lock().await;
+    db.execute(
+        "INSERT INTO colonies (colony_id, name, description, created_at_ms) VALUES (?1, ?2, ?3, ?4)",
+        params![row.colony_id, row.name, row.description, row.created_at_ms],
+    )?;
+
+    Ok(Json(row))
+}
+
+async fn list_colonies(State(state): State<AppState>) -> Result<Json<Vec<ColonyRecord>>, ApiError> {
+    let db = state.db.lock().await;
+    Ok(Json(query_colonies(&db)?))
 }
 
 async fn register_crab(
@@ -359,27 +448,46 @@ async fn register_crab(
     Json(request): Json<RegisterCrabRequest>,
 ) -> Result<Json<CrabRecord>, ApiError> {
     if request.crab_id.trim().is_empty()
+        || request.colony_id.trim().is_empty()
         || request.name.trim().is_empty()
         || request.role.trim().is_empty()
     {
-        return Err(ApiError::bad_request("crab_id, name, and role are required"));
+        return Err(ApiError::bad_request("crab_id, colony_id, name, and role are required"));
+    }
+
+    let db = state.db.lock().await;
+
+    let colony_exists: i64 = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM colonies WHERE colony_id = ?1)",
+        params![request.colony_id],
+        |row| row.get(0),
+    )?;
+    if colony_exists == 0 {
+        return Err(ApiError::not_found("colony_id not found"));
     }
 
     let updated_at_ms = now_ms();
     let crab_state = request.state.unwrap_or(CrabState::Idle);
 
-    let db = state.db.lock().await;
     db.execute(
         "
-        INSERT INTO crabs (crab_id, name, role, state, current_task_id, current_run_id, updated_at_ms)
-        VALUES (?1, ?2, ?3, ?4, NULL, NULL, ?5)
+        INSERT INTO crabs (crab_id, colony_id, name, role, state, current_task_id, current_run_id, updated_at_ms)
+        VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, ?6)
         ON CONFLICT(crab_id) DO UPDATE SET
+          colony_id=excluded.colony_id,
           name=excluded.name,
           role=excluded.role,
           state=excluded.state,
           updated_at_ms=excluded.updated_at_ms
         ",
-        params![request.crab_id, request.name, request.role, crab_state.as_str(), updated_at_ms],
+        params![
+            request.crab_id,
+            request.colony_id,
+            request.name,
+            request.role,
+            crab_state.as_str(),
+            updated_at_ms
+        ],
     )?;
 
     let crab = fetch_crab(&db, &request.crab_id)?
@@ -399,18 +507,33 @@ async fn create_mission(
     if request.prompt.trim().is_empty() {
         return Err(ApiError::bad_request("prompt is required"));
     }
+    if request.colony_id.trim().is_empty() {
+        return Err(ApiError::bad_request("colony_id is required"));
+    }
+
+    let db = state.db.lock().await;
+
+    let colony_exists: i64 = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM colonies WHERE colony_id = ?1)",
+        params![request.colony_id],
+        |row| row.get(0),
+    )?;
+    if colony_exists == 0 {
+        return Err(ApiError::not_found("colony_id not found"));
+    }
 
     let mission = Mission::new(request.prompt);
     let row = MissionRecord {
         mission_id: mission.id.to_string(),
+        colony_id: request.colony_id,
         prompt: mission.prompt,
         created_at_ms: mission.created_at_ms,
     };
 
-    let db = state.db.lock().await;
-    db.execute(
-        "INSERT INTO missions (mission_id, prompt, created_at_ms) VALUES (?1, ?2, ?3)",
-        params![row.mission_id, row.prompt, row.created_at_ms],
+    let db_ref = &*db;
+    db_ref.execute(
+        "INSERT INTO missions (mission_id, colony_id, prompt, created_at_ms) VALUES (?1, ?2, ?3, ?4)",
+        params![row.mission_id, row.colony_id, row.prompt, row.created_at_ms],
     )?;
 
     Ok(Json(row))
@@ -702,6 +825,7 @@ async fn complete_run(
 
 async fn get_status(State(state): State<AppState>) -> Result<Json<StatusSnapshot>, ApiError> {
     let db = state.db.lock().await;
+    let colonies = query_colonies(&db)?;
     let crabs = query_crabs(&db)?;
     let missions = query_missions(&db)?;
     let tasks = query_tasks(&db)?;
@@ -735,22 +859,50 @@ async fn get_status(State(state): State<AppState>) -> Result<Json<StatusSnapshot
         avg_end_to_end_ms,
     };
 
-    Ok(Json(StatusSnapshot { generated_at_ms: now_ms(), summary, crabs, missions, tasks, runs }))
+    Ok(Json(StatusSnapshot {
+        generated_at_ms: now_ms(),
+        summary,
+        colonies,
+        crabs,
+        missions,
+        tasks,
+        runs,
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// Query helpers
+// ---------------------------------------------------------------------------
+
+fn query_colonies(conn: &Connection) -> Result<Vec<ColonyRecord>, ApiError> {
+    let mut stmt = conn.prepare(
+        "SELECT colony_id, name, description, created_at_ms FROM colonies ORDER BY created_at_ms DESC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(ColonyRecord {
+            colony_id: row.get(0)?,
+            name: row.get(1)?,
+            description: row.get(2)?,
+            created_at_ms: row.get::<_, i64>(3)? as u64,
+        })
+    })?;
+    Ok(rows.filter_map(Result::ok).collect())
 }
 
 fn query_crabs(conn: &Connection) -> Result<Vec<CrabRecord>, ApiError> {
     let mut stmt = conn.prepare(
-        "SELECT crab_id, name, role, state, current_task_id, current_run_id, updated_at_ms FROM crabs ORDER BY crab_id",
+        "SELECT crab_id, colony_id, name, role, state, current_task_id, current_run_id, updated_at_ms FROM crabs ORDER BY crab_id",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(CrabRecord {
             crab_id: row.get(0)?,
-            name: row.get(1)?,
-            role: row.get(2)?,
-            state: CrabState::from_str(&row.get::<_, String>(3)?),
-            current_task_id: row.get(4)?,
-            current_run_id: row.get(5)?,
-            updated_at_ms: row.get::<_, i64>(6)? as u64,
+            colony_id: row.get(1)?,
+            name: row.get(2)?,
+            role: row.get(3)?,
+            state: CrabState::from_str(&row.get::<_, String>(4)?),
+            current_task_id: row.get(5)?,
+            current_run_id: row.get(6)?,
+            updated_at_ms: row.get::<_, i64>(7)? as u64,
         })
     })?;
     Ok(rows.filter_map(Result::ok).collect())
@@ -758,13 +910,14 @@ fn query_crabs(conn: &Connection) -> Result<Vec<CrabRecord>, ApiError> {
 
 fn query_missions(conn: &Connection) -> Result<Vec<MissionRecord>, ApiError> {
     let mut stmt = conn.prepare(
-        "SELECT mission_id, prompt, created_at_ms FROM missions ORDER BY created_at_ms DESC",
+        "SELECT mission_id, colony_id, prompt, created_at_ms FROM missions ORDER BY created_at_ms DESC",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(MissionRecord {
             mission_id: row.get(0)?,
-            prompt: row.get(1)?,
-            created_at_ms: row.get::<_, i64>(2)? as u64,
+            colony_id: row.get(1)?,
+            prompt: row.get(2)?,
+            created_at_ms: row.get::<_, i64>(3)? as u64,
         })
     })?;
     Ok(rows.filter_map(Result::ok).collect())
@@ -810,7 +963,7 @@ fn query_runs(conn: &Connection) -> Result<Vec<RunRecord>, ApiError> {
 fn fetch_crab(conn: &Connection, crab_id: &str) -> Result<Option<CrabRecord>, ApiError> {
     let mut stmt = conn.prepare(
         "
-        SELECT crab_id, name, role, state, current_task_id, current_run_id, updated_at_ms
+        SELECT crab_id, colony_id, name, role, state, current_task_id, current_run_id, updated_at_ms
         FROM crabs WHERE crab_id = ?1
         ",
     )?;
@@ -819,12 +972,13 @@ fn fetch_crab(conn: &Connection, crab_id: &str) -> Result<Option<CrabRecord>, Ap
     if let Some(row) = rows.next()? {
         return Ok(Some(CrabRecord {
             crab_id: row.get(0)?,
-            name: row.get(1)?,
-            role: row.get(2)?,
-            state: CrabState::from_str(&row.get::<_, String>(3)?),
-            current_task_id: row.get(4)?,
-            current_run_id: row.get(5)?,
-            updated_at_ms: row.get::<_, i64>(6)? as u64,
+            colony_id: row.get(1)?,
+            name: row.get(2)?,
+            role: row.get(3)?,
+            state: CrabState::from_str(&row.get::<_, String>(4)?),
+            current_task_id: row.get(5)?,
+            current_run_id: row.get(6)?,
+            updated_at_ms: row.get::<_, i64>(7)? as u64,
         }));
     }
     Ok(None)
@@ -896,6 +1050,10 @@ fn map_run_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunRecord> {
         completed_at_ms: row.get::<_, Option<i64>>(18)?.map(|v| v as u64),
     })
 }
+
+// ---------------------------------------------------------------------------
+// Utilities
+// ---------------------------------------------------------------------------
 
 fn merge_metrics(
     base: RunMetrics,
@@ -984,5 +1142,333 @@ fn burrow_mode_from_db(raw: &str) -> BurrowMode {
     match raw {
         "external_repo" => BurrowMode::ExternalRepo,
         _ => BurrowMode::Worktree,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+#[allow(unused_must_use)]
+mod tests {
+    use super::*;
+
+    fn test_state() -> AppState {
+        let conn = Connection::open_in_memory().unwrap();
+        apply_schema(&conn).unwrap();
+        AppState { db: Arc::new(Mutex::new(conn)) }
+    }
+
+    async fn setup_colony(state: &AppState) -> ColonyRecord {
+        create_colony(
+            State(state.clone()),
+            Json(CreateColonyRequest { name: "test-colony".into(), description: None }),
+        )
+        .await
+        .unwrap()
+        .0
+    }
+
+    #[tokio::test]
+    async fn register_and_list_crabs() {
+        let state = test_state();
+        let colony = setup_colony(&state).await;
+
+        let crab = register_crab(
+            State(state.clone()),
+            Json(RegisterCrabRequest {
+                crab_id: "crab-1".into(),
+                colony_id: colony.colony_id.clone(),
+                name: "Alice".into(),
+                role: "coder".into(),
+                state: None,
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        assert_eq!(crab.crab_id, "crab-1");
+        assert_eq!(crab.name, "Alice");
+        assert_eq!(crab.colony_id, colony.colony_id);
+        assert!(matches!(crab.state, CrabState::Idle));
+
+        let crabs = list_crabs(State(state.clone())).await.unwrap().0;
+        assert_eq!(crabs.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn create_mission_and_task() {
+        let state = test_state();
+        let colony = setup_colony(&state).await;
+
+        let mission = create_mission(
+            State(state.clone()),
+            Json(CreateMissionRequest {
+                colony_id: colony.colony_id.clone(),
+                prompt: "Implement feature X".into(),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        assert!(!mission.mission_id.is_empty());
+        assert_eq!(mission.colony_id, colony.colony_id);
+
+        register_crab(
+            State(state.clone()),
+            Json(RegisterCrabRequest {
+                crab_id: "crab-1".into(),
+                colony_id: colony.colony_id.clone(),
+                name: "Alice".into(),
+                role: "coder".into(),
+                state: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        let task = create_task(
+            State(state.clone()),
+            Json(CreateTaskRequest {
+                mission_id: mission.mission_id.clone(),
+                title: "Write tests".into(),
+                assigned_crab_id: Some("crab-1".into()),
+                status: None,
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        assert_eq!(task.title, "Write tests");
+        assert_eq!(task.assigned_crab_id.as_deref(), Some("crab-1"));
+    }
+
+    #[tokio::test]
+    async fn full_run_lifecycle() {
+        let state = test_state();
+        let colony = setup_colony(&state).await;
+
+        register_crab(
+            State(state.clone()),
+            Json(RegisterCrabRequest {
+                crab_id: "crab-1".into(),
+                colony_id: colony.colony_id.clone(),
+                name: "Alice".into(),
+                role: "coder".into(),
+                state: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        let mission = create_mission(
+            State(state.clone()),
+            Json(CreateMissionRequest {
+                colony_id: colony.colony_id.clone(),
+                prompt: "Build feature".into(),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        let task = create_task(
+            State(state.clone()),
+            Json(CreateTaskRequest {
+                mission_id: mission.mission_id.clone(),
+                title: "Implement it".into(),
+                assigned_crab_id: None,
+                status: None,
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        // Start a run
+        let run = start_run(
+            State(state.clone()),
+            Json(StartRunRequest {
+                run_id: None,
+                mission_id: mission.mission_id.clone(),
+                task_id: task.task_id.clone(),
+                crab_id: "crab-1".into(),
+                burrow_path: "/tmp/burrow-1".into(),
+                burrow_mode: BurrowMode::Worktree,
+                status: None,
+                progress_message: None,
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        assert!(matches!(run.status, RunStatus::Running));
+
+        // Update the run
+        let updated = update_run(
+            State(state.clone()),
+            Json(UpdateRunRequest {
+                run_id: run.run_id.clone(),
+                status: None,
+                progress_message: Some("halfway there".into()),
+                token_usage: Some(TokenUsagePatch {
+                    prompt_tokens: Some(100),
+                    completion_tokens: Some(50),
+                    total_tokens: None,
+                }),
+                timing: Some(TimingPatch {
+                    first_token_ms: Some(200),
+                    llm_duration_ms: None,
+                    execution_duration_ms: None,
+                    end_to_end_ms: None,
+                }),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        assert_eq!(updated.progress_message, "halfway there");
+        assert_eq!(updated.metrics.prompt_tokens, 100);
+        assert_eq!(updated.metrics.completion_tokens, 50);
+        assert_eq!(updated.metrics.total_tokens, 150);
+
+        // Complete the run
+        let completed = complete_run(
+            State(state.clone()),
+            Json(CompleteRunRequest {
+                run_id: run.run_id.clone(),
+                status: RunStatus::Completed,
+                summary: Some("All done".into()),
+                token_usage: Some(TokenUsagePatch {
+                    prompt_tokens: Some(200),
+                    completion_tokens: Some(100),
+                    total_tokens: None,
+                }),
+                timing: Some(TimingPatch {
+                    first_token_ms: None,
+                    llm_duration_ms: Some(1500),
+                    execution_duration_ms: Some(3000),
+                    end_to_end_ms: Some(5000),
+                }),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        assert!(matches!(completed.status, RunStatus::Completed));
+        assert_eq!(completed.summary.as_deref(), Some("All done"));
+        assert!(completed.completed_at_ms.is_some());
+    }
+
+    #[tokio::test]
+    async fn status_snapshot_totals() {
+        let state = test_state();
+        let colony = setup_colony(&state).await;
+
+        register_crab(
+            State(state.clone()),
+            Json(RegisterCrabRequest {
+                crab_id: "crab-1".into(),
+                colony_id: colony.colony_id.clone(),
+                name: "Alice".into(),
+                role: "coder".into(),
+                state: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        register_crab(
+            State(state.clone()),
+            Json(RegisterCrabRequest {
+                crab_id: "crab-2".into(),
+                colony_id: colony.colony_id.clone(),
+                name: "Bob".into(),
+                role: "reviewer".into(),
+                state: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        let mission = create_mission(
+            State(state.clone()),
+            Json(CreateMissionRequest {
+                colony_id: colony.colony_id.clone(),
+                prompt: "Test mission".into(),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        let task = create_task(
+            State(state.clone()),
+            Json(CreateTaskRequest {
+                mission_id: mission.mission_id.clone(),
+                title: "Test task".into(),
+                assigned_crab_id: None,
+                status: None,
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        let run = start_run(
+            State(state.clone()),
+            Json(StartRunRequest {
+                run_id: None,
+                mission_id: mission.mission_id.clone(),
+                task_id: task.task_id.clone(),
+                crab_id: "crab-1".into(),
+                burrow_path: "/tmp/b1".into(),
+                burrow_mode: BurrowMode::Worktree,
+                status: None,
+                progress_message: None,
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        complete_run(
+            State(state.clone()),
+            Json(CompleteRunRequest {
+                run_id: run.run_id.clone(),
+                status: RunStatus::Completed,
+                summary: Some("done".into()),
+                token_usage: Some(TokenUsagePatch {
+                    prompt_tokens: Some(500),
+                    completion_tokens: Some(300),
+                    total_tokens: None,
+                }),
+                timing: Some(TimingPatch {
+                    first_token_ms: None,
+                    llm_duration_ms: None,
+                    execution_duration_ms: None,
+                    end_to_end_ms: Some(4000),
+                }),
+            }),
+        )
+        .await
+        .unwrap();
+
+        let snapshot = get_status(State(state.clone())).await.unwrap().0;
+
+        assert_eq!(snapshot.summary.total_crabs, 2);
+        assert_eq!(snapshot.summary.busy_crabs, 0);
+        assert_eq!(snapshot.summary.completed_runs, 1);
+        assert_eq!(snapshot.summary.failed_runs, 0);
+        assert_eq!(snapshot.summary.total_tokens, 800);
+        assert_eq!(snapshot.summary.avg_end_to_end_ms, Some(4000));
+        assert_eq!(snapshot.colonies.len(), 1);
     }
 }

@@ -101,20 +101,43 @@ p {
   margin-bottom: 0.75rem;
 }
 
-.agents-grid {
+.colonies-grid {
   display: grid;
   gap: 0.75rem;
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.agent-card {
+.colony-card {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: linear-gradient(180deg, #ffffff, #fbfcfd);
   padding: 0.8rem;
 }
 
-.agent-card h3 {
+.colony-card h3 {
+  font-size: 0.98rem;
+}
+
+.colony-meta {
+  margin-top: 0.35rem;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.crabs-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.crab-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffff, #fbfcfd);
+  padding: 0.8rem;
+}
+
+.crab-card h3 {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -122,13 +145,13 @@ p {
   font-size: 0.98rem;
 }
 
-.agent-meta {
+.crab-meta {
   margin-top: 0.35rem;
   color: var(--muted);
   font-size: 0.86rem;
 }
 
-.agent-work {
+.crab-work {
   margin-top: 0.5rem;
   font-size: 0.9rem;
 }
@@ -238,7 +261,8 @@ p {
 
 @media (max-width: 980px) {
   .summary-grid,
-  .agents-grid {
+  .colonies-grid,
+  .crabs-grid {
     grid-template-columns: 1fr 1fr;
   }
 }
@@ -255,7 +279,8 @@ p {
   }
 
   .summary-grid,
-  .agents-grid {
+  .colonies-grid,
+  .crabs-grid {
     grid-template-columns: 1fr;
   }
 }

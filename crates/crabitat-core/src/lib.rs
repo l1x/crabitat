@@ -5,6 +5,29 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
+pub struct ColonyId(pub Uuid);
+
+impl ColonyId {
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
+impl Default for ColonyId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for ColonyId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct MissionId(pub Uuid);
 
 impl MissionId {
@@ -108,6 +131,26 @@ pub enum RunStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Colony {
+    pub id: ColonyId,
+    pub name: String,
+    pub description: String,
+    pub created_at_ms: u64,
+}
+
+impl Colony {
+    #[must_use]
+    pub fn new(name: impl Into<String>, description: impl Into<String>) -> Self {
+        Self {
+            id: ColonyId::new(),
+            name: name.into(),
+            description: description.into(),
+            created_at_ms: now_ms(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Mission {
     pub id: MissionId,
     pub prompt: String,
@@ -172,6 +215,13 @@ pub fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn colony_id_is_unique() {
+        let a = ColonyId::new();
+        let b = ColonyId::new();
+        assert_ne!(a, b);
+    }
 
     #[test]
     fn mission_id_is_unique() {

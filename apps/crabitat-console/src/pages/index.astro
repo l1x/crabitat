@@ -1,0 +1,210 @@
+---
+import Layout from '../layouts/Layout.astro';
+import type { StatusSnapshot } from '../lib/types';
+
+const CONTROL_PLANE_URL = import.meta.env.CONTROL_PLANE_URL || 'http://127.0.0.1:8800';
+
+let snapshot: StatusSnapshot | null = null;
+let error: string | null = null;
+
+try {
+  const res = await fetch(`${CONTROL_PLANE_URL}/v1/status`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  snapshot = await res.json();
+} catch (err) {
+  error = err instanceof Error ? err.message : String(err);
+}
+
+function formatMs(ms: number | null | undefined): string {
+  if (ms == null) return '\u2014';
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
+function timeAgo(ms: number): string {
+  const diff = Date.now() - ms;
+  if (diff < 60_000) return 'just now';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  return `${Math.floor(diff / 86_400_000)}d ago`;
+}
+
+const activeTasks = snapshot?.tasks.filter(
+  (t) => t.status === 'running' || t.status === 'assigned' || t.status === 'queued',
+) ?? [];
+---
+
+<Layout title="Crabitat Colony Console">
+  <div class="hero">
+    <div>
+      <h1>Crabitat Colony Console</h1>
+      <p>Real-time colony status from the control-plane</p>
+    </div>
+    <div class="health">
+      <span class={`health-dot ${error ? 'offline' : ''}`}></span>
+      {error ? 'Control-plane offline' : 'Control-plane online'}
+    </div>
+  </div>
+
+  {error ? (
+    <div class="panel">
+      <p class="empty">Unable to reach control-plane at {CONTROL_PLANE_URL}: {error}</p>
+    </div>
+  ) : snapshot ? (
+    <>
+      <div class="summary-grid">
+        <div class="metric-card">
+          <h3>Total Crabs</h3>
+          <p>{snapshot.summary.total_crabs}</p>
+        </div>
+        <div class="metric-card">
+          <h3>Busy Crabs</h3>
+          <p>{snapshot.summary.busy_crabs}</p>
+        </div>
+        <div class="metric-card">
+          <h3>Running Runs</h3>
+          <p>{snapshot.summary.running_runs}</p>
+        </div>
+        <div class="metric-card">
+          <h3>Completed Runs</h3>
+          <p>{snapshot.summary.completed_runs}</p>
+        </div>
+        <div class="metric-card">
+          <h3>Failed Runs</h3>
+          <p>{snapshot.summary.failed_runs}</p>
+        </div>
+        <div class="metric-card">
+          <h3>Total Tokens</h3>
+          <p>{formatTokens(snapshot.summary.total_tokens)}</p>
+        </div>
+        <div class="metric-card">
+          <h3>Running Tasks</h3>
+          <p>{snapshot.summary.running_tasks}</p>
+        </div>
+        <div class="metric-card">
+          <h3>Avg Latency</h3>
+          <p>{formatMs(snapshot.summary.avg_end_to_end_ms)}</p>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Colonies</h2>
+        {snapshot.colonies.length === 0 ? (
+          <p class="empty">No colonies yet. Create one with POST /v1/colonies.</p>
+        ) : (
+          <div class="colonies-grid">
+            {snapshot.colonies.map((colony) => (
+              <div class="colony-card">
+                <h3>{colony.name}</h3>
+                <div class="colony-meta">
+                  {colony.colony_id.slice(0, 8)} &middot; {colony.description || 'No description'}
+                </div>
+                <div class="colony-meta">
+                  {snapshot.crabs.filter((c) => c.colony_id === colony.colony_id).length} crabs
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div class="panel">
+        <h2>Crab Roster</h2>
+        {snapshot.crabs.length === 0 ? (
+          <p class="empty">No crabs registered. Use scripts/onboard-crab.sh to add one.</p>
+        ) : (
+          <div class="crabs-grid">
+            {snapshot.crabs.map((crab) => (
+              <div class="crab-card">
+                <h3>
+                  {crab.name}
+                  <span class={`badge badge--${crab.state}`}>{crab.state}</span>
+                </h3>
+                <div class="crab-meta">
+                  {crab.role} &middot; {crab.crab_id}
+                </div>
+                {crab.current_task_id && (
+                  <div class="crab-work">Task: {crab.current_task_id.slice(0, 8)}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div class="panel">
+        <h2>Active Tasks</h2>
+        {activeTasks.length === 0 ? (
+          <p class="empty">No active tasks.</p>
+        ) : (
+          <div class="table-wrap">
+            <table class="status-table">
+              <thead>
+                <tr>
+                  <th>Task</th>
+                  <th>Mission</th>
+                  <th>Assigned Crab</th>
+                  <th>Status</th>
+                  <th>Updated</th>
+                </tr>
+              </thead>
+              <tbody>
+                {activeTasks.map((task) => (
+                  <tr>
+                    <td>{task.title}</td>
+                    <td><code>{task.mission_id.slice(0, 8)}</code></td>
+                    <td>{task.assigned_crab_id ?? '\u2014'}</td>
+                    <td><span class={`badge badge--${task.status}`}>{task.status}</span></td>
+                    <td>{timeAgo(task.updated_at_ms)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div class="panel">
+        <h2>Runs</h2>
+        {snapshot.runs.length === 0 ? (
+          <p class="empty">No runs recorded yet.</p>
+        ) : (
+          <div class="table-wrap">
+            <table class="status-table">
+              <thead>
+                <tr>
+                  <th>Run</th>
+                  <th>Crab</th>
+                  <th>Status</th>
+                  <th>Tokens</th>
+                  <th>Latency</th>
+                  <th>Progress</th>
+                  <th>Updated</th>
+                </tr>
+              </thead>
+              <tbody>
+                {snapshot.runs.map((run) => (
+                  <tr>
+                    <td><code>{run.run_id.slice(0, 8)}</code></td>
+                    <td>{run.crab_id}</td>
+                    <td><span class={`badge badge--${run.status}`}>{run.status}</span></td>
+                    <td>{formatTokens(run.metrics.total_tokens)}</td>
+                    <td>{formatMs(run.metrics.end_to_end_ms)}</td>
+                    <td>{run.progress_message}</td>
+                    <td>{timeAgo(run.updated_at_ms)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </>
+  ) : null}
+</Layout>
