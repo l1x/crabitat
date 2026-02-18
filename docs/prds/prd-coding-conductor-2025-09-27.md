@@ -14,20 +14,7 @@ This replaces complex distributed/p2p behavior with a centralized control plane.
 
 ## 2. High-Level Architecture
 
-```
-Human
-  |
-  v
-Manager Agent <------------------------------+
-  |                                           |
-  | HTTP + WS                                | debug stream
-  v                                           |
-Agent Mesh Server (Axum + SQLite) -----------+
-  |      |      |
-  |      |      +---- Worker C (ws client)
-  |      +----------- Worker B (ws client)
-  +------------------ Worker A (ws client)
-```
+![Manager-worker architecture](../illustrations/manager-worker-architecture.svg)
 
 ### Components
 
