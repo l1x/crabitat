@@ -5,6 +5,10 @@ multiple **Crabs** (executor agents) under a **Chief** (orchestrator), organized
 **Colonies** (projects), tracking **Missions**, **Tasks**, and **Runs** through a
 SQLite-backed control-plane.
 
+## Workflow
+
+![Colony Workflow](docs/illustrations/colony-workflow.svg)
+
 ## Colony Terminology
 
 | Term       | Description                                                  |
