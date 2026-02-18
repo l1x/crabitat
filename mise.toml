@@ -1,0 +1,70 @@
+# tools
+[tools]
+rust = "1.90.0"
+python = "3.13.10"
+
+# env
+[env]
+_.python.venv = { path = ".venv", create = true }
+MISE_EXPERIMENTAL = true
+
+[settings]
+experimental = true
+
+
+# tasks
+[tasks.lint]
+description = "Lint with Clippy, failing on warnings"
+run = "cargo clippy -- -D warnings"
+
+[tasks.verify]
+description = "Full verification (lint + tests) before commit"
+run = "cargo clippy -- -D warnings && cargo test"
+
+[tasks.tests]
+description = "Running tests"
+run = "cargo test -- --nocapture"
+
+[tasks.coverage]
+description = "Run tests with coverage report (requires cargo-tarpaulin)"
+run = "cargo tarpaulin --out Html --output-dir coverage"
+
+[tasks.build-dev]
+description = "Building the development version"
+run = "cargo build"
+
+[tasks.build-prod]
+description = "Building the development version"
+run = "cargo build --release"
+
+[tasks.build-prod-with-timings]
+description = "Building the development version"
+run = "cargo build --release --timings"
+
+[tasks.show-issues]
+description = "List all open issues"
+run = "bd list"
+
+[tasks.show-ready]
+description = "Show ready work (no blockers)"
+run = "bd ready"
+
+[tasks.show-blocked]
+description = "Show blocked issues"
+run = "bd blocked"
+
+[tasks.show-issue-stats]
+description = "Show issue statistics"
+run = "bd stats"
+
+[tasks.show-issue-tree]
+description = "Show dependency tree for an issue (use: mise run issue-tree -- bd-1)"
+run = "bd dep tree"
+
+[tasks.unit-tests]
+description = "Run unit tests only"
+run = "cargo test --bin marie-ssg -- --nocapture"
+
+[tasks.integration-tests]
+description = "Run integration tests only"
+run = "cargo test --test integration_test -- --nocapture"
