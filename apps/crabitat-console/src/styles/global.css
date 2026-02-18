@@ -1,0 +1,261 @@
+:root {
+  --bg: #eceff3;
+  --bg-2: #f7f8fa;
+  --panel: #ffffff;
+  --line: #d6dbe3;
+  --ink: #202733;
+  --muted: #64748b;
+  --accent: #f59e0b;
+  --accent-soft: #fff3dd;
+  --good: #0f766e;
+  --warn: #b45309;
+  --bad: #b91c1c;
+  --shadow: 0 12px 30px rgba(31, 41, 55, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: radial-gradient(circle at 10% 10%, #fdf3e2 0%, transparent 28%),
+    radial-gradient(circle at 95% 0%, #e4e9f0 0%, transparent 40%),
+    var(--bg);
+  color: var(--ink);
+  font-family: 'Avenir Next', 'IBM Plex Sans', 'Segoe UI', sans-serif;
+}
+
+main {
+  width: min(1200px, 100% - 2rem);
+  margin: 2rem auto 3rem;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+.hero {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.hero h1 {
+  font-size: clamp(1.5rem, 2.4vw, 2.25rem);
+  letter-spacing: 0.02em;
+}
+
+.hero p {
+  color: var(--muted);
+  max-width: 50ch;
+}
+
+.summary-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 1rem;
+}
+
+.metric-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0.9rem 1rem;
+  box-shadow: var(--shadow);
+}
+
+.metric-card h3 {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.metric-card p {
+  margin-top: 0.4rem;
+  font-size: 1.5rem;
+  font-weight: 650;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 1rem;
+  box-shadow: var(--shadow);
+  margin-bottom: 1rem;
+}
+
+.panel h2 {
+  font-size: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.agents-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.agent-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffff, #fbfcfd);
+  padding: 0.8rem;
+}
+
+.agent-card h3 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.98rem;
+}
+
+.agent-meta {
+  margin-top: 0.35rem;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.agent-work {
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.badge--idle {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.badge--busy,
+.badge--running {
+  background: var(--accent-soft);
+  color: var(--warn);
+}
+
+.badge--offline,
+.badge--failed {
+  background: #fee2e2;
+  color: var(--bad);
+}
+
+.badge--completed {
+  background: #dcfce7;
+  color: var(--good);
+}
+
+.badge--blocked {
+  background: #fef3c7;
+  color: var(--warn);
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.status-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 900px;
+}
+
+.status-table th,
+.status-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 0.55rem 0.45rem;
+  text-align: left;
+  font-size: 0.88rem;
+  vertical-align: top;
+}
+
+.status-table th {
+  color: var(--muted);
+  font-size: 0.78rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.health {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.health-dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 999px;
+  background: var(--good);
+}
+
+.health-dot.offline {
+  background: var(--bad);
+}
+
+.endpoint-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
+}
+
+.endpoint-list code {
+  background: #f4f6fa;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.22rem 0.55rem;
+  color: #374151;
+  font-size: 0.78rem;
+}
+
+@media (max-width: 980px) {
+  .summary-grid,
+  .agents-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  main {
+    width: min(1200px, 100% - 1rem);
+    margin-top: 1rem;
+  }
+
+  .hero {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .summary-grid,
+  .agents-grid {
+    grid-template-columns: 1fr;
+  }
+}
