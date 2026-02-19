@@ -1,0 +1,34 @@
+---
+import type { ColonyRecord, CrabRecord, MissionRecord } from '../lib/types';
+import { timeAgo } from '../lib/format';
+import EmptyState from './EmptyState.astro';
+import SearchToolbar from './SearchToolbar.astro';
+
+interface Props {
+  colonies: ColonyRecord[];
+  crabs: CrabRecord[];
+  missions: MissionRecord[];
+}
+
+const { colonies, crabs, missions } = Astro.props;
+---
+
+<SearchToolbar placeholder="Search colonies..." searchId="search-colonies" />
+
+{colonies.length === 0 ? (
+  <EmptyState
+    title="Start by creating your first colony!"
+    description="Colonies group your crabs, missions, and tasks together."
+  />
+) : (
+  <div class="card-grid" id="colony-container" style="margin-top:16px">
+    {colonies.map((colony) => (
+      <div class="card" data-id={colony.colony_id} data-searchable={`${colony.name} ${colony.colony_id} ${colony.description}`} data-created-at-ms={colony.created_at_ms}>
+        <div class="card-title">{colony.name}</div>
+        <div class="card-meta">{colony.colony_id.slice(0, 8)} &middot; {colony.description || 'No description'}</div>
+        <div class="card-meta">{crabs.filter((c) => c.colony_id === colony.colony_id).length} crabs &middot; {missions.filter((m) => m.colony_id === colony.colony_id).length} missions</div>
+        <div class="card-meta">Created {timeAgo(colony.created_at_ms)}</div>
+      </div>
+    ))}
+  </div>
+)}

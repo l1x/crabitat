@@ -24,7 +24,7 @@ use std::{
     path::{Path as StdPath, PathBuf},
     sync::Arc,
 };
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, broadcast, mpsc};
 use tracing::info;
 use uuid::Uuid;
 
@@ -51,6 +51,21 @@ type CrabChannels = Arc<Mutex<HashMap<String, mpsc::UnboundedSender<String>>>>;
 struct AppState {
     db: Arc<Mutex<Connection>>,
     crab_channels: CrabChannels,
+    console_tx: broadcast::Sender<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ConsoleEvent {
+    Snapshot(StatusSnapshot),
+    CrabUpdated { crab: CrabRecord },
+    ColonyCreated { colony: ColonyRecord },
+    MissionCreated { mission: MissionRecord },
+    TaskCreated { task: TaskRecord },
+    TaskUpdated { task: TaskRecord },
+    RunCreated { run: RunRecord },
+    RunUpdated { run: RunRecord },
+    RunCompleted { run: RunRecord },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -121,7 +136,7 @@ impl IntoResponse for ApiError {
 // Record types (API responses)
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct ColonyRecord {
     colony_id: String,
     name: String,
@@ -129,7 +144,7 @@ struct ColonyRecord {
     created_at_ms: u64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct CrabRecord {
     crab_id: String,
     colony_id: String,
@@ -141,7 +156,7 @@ struct CrabRecord {
     updated_at_ms: u64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct MissionRecord {
     mission_id: String,
     colony_id: String,
@@ -149,7 +164,7 @@ struct MissionRecord {
     created_at_ms: u64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct TaskRecord {
     task_id: String,
     mission_id: String,
@@ -160,7 +175,7 @@ struct TaskRecord {
     updated_at_ms: u64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct RunRecord {
     run_id: String,
     mission_id: String,
@@ -177,7 +192,7 @@ struct RunRecord {
     completed_at_ms: Option<u64>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct StatusSummary {
     total_crabs: usize,
     busy_crabs: usize,
@@ -189,7 +204,7 @@ struct StatusSummary {
     avg_end_to_end_ms: Option<u64>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct StatusSnapshot {
     generated_at_ms: u64,
     summary: StatusSummary,
@@ -297,9 +312,11 @@ async fn main() -> Result<()> {
 
 async fn serve(port: u16, db_path: &StdPath) -> Result<()> {
     let connection = init_db(db_path)?;
+    let (console_tx, _) = broadcast::channel::<String>(256);
     let state = AppState {
         db: Arc::new(Mutex::new(connection)),
         crab_channels: Arc::new(Mutex::new(HashMap::new())),
+        console_tx,
     };
 
     let app = build_router(state);
@@ -329,6 +346,7 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/runs/complete", post(complete_run))
         .route("/v1/status", get(get_status))
         .route("/v1/ws/crab/{crab_id}", get(ws_crab_handler))
+        .route("/v1/ws/console", get(ws_console_handler))
         .with_state(state)
 }
 
@@ -456,6 +474,9 @@ async fn handle_ws_crab(mut socket: WebSocket, state: AppState, crab_id: String)
                                 "UPDATE crabs SET updated_at_ms = ?2 WHERE crab_id = ?1",
                                 params![crab_id, now_ms() as i64],
                             );
+                            if let Ok(Some(crab)) = fetch_crab(&db, &crab_id) {
+                                emit_console_event(&state.console_tx, ConsoleEvent::CrabUpdated { crab });
+                            }
                         }
                     }
                     Some(Ok(Message::Close(_))) | None => break,
@@ -489,6 +510,82 @@ async fn handle_ws_crab(mut socket: WebSocket, state: AppState, crab_id: String)
         );
     }
     info!(crab_id = %crab_id, "WebSocket disconnected");
+
+    // Emit crab offline event to console subscribers
+    {
+        let db = state.db.lock().await;
+        if let Ok(Some(crab)) = fetch_crab(&db, &crab_id) {
+            emit_console_event(&state.console_tx, ConsoleEvent::CrabUpdated { crab });
+        }
+    }
+}
+
+async fn ws_console_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
+    info!("Console WebSocket upgrade requested");
+    ws.on_upgrade(move |socket| handle_ws_console(socket, state))
+}
+
+async fn handle_ws_console(mut socket: WebSocket, state: AppState) {
+    // Send initial snapshot
+    {
+        let db = state.db.lock().await;
+        if let Ok(snapshot) = build_status_snapshot(&db) {
+            let event = ConsoleEvent::Snapshot(snapshot);
+            if let Ok(json) = serde_json::to_string(&event)
+                && socket.send(Message::Text(json.into())).await.is_err()
+            {
+                return;
+            }
+        }
+    }
+
+    let mut rx = state.console_tx.subscribe();
+
+    loop {
+        tokio::select! {
+            ws_msg = socket.recv() => {
+                match ws_msg {
+                    Some(Ok(Message::Ping(data))) => {
+                        if socket.send(Message::Pong(data)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | None => break,
+                    _ => {}
+                }
+            }
+            broadcast_msg = rx.recv() => {
+                match broadcast_msg {
+                    Ok(json) => {
+                        if socket.send(Message::Text(json.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        // Re-send full snapshot on lag
+                        let db = state.db.lock().await;
+                        if let Ok(snapshot) = build_status_snapshot(&db) {
+                            let event = ConsoleEvent::Snapshot(snapshot);
+                            if let Ok(json) = serde_json::to_string(&event)
+                                && socket.send(Message::Text(json.into())).await.is_err()
+                            {
+                                break;
+                            }
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        }
+    }
+
+    info!("Console WebSocket disconnected");
+}
+
+fn emit_console_event(tx: &broadcast::Sender<String>, event: ConsoleEvent) {
+    if let Ok(json) = serde_json::to_string(&event) {
+        let _ = tx.send(json);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -521,6 +618,7 @@ async fn create_colony(
         params![row.colony_id, row.name, row.description, row.created_at_ms],
     )?;
 
+    emit_console_event(&state.console_tx, ConsoleEvent::ColonyCreated { colony: row.clone() });
     Ok(Json(row))
 }
 
@@ -578,6 +676,7 @@ async fn register_crab(
 
     let crab = fetch_crab(&db, &request.crab_id)?
         .ok_or_else(|| ApiError::internal("failed to reload crab after registration"))?;
+    emit_console_event(&state.console_tx, ConsoleEvent::CrabUpdated { crab: crab.clone() });
     Ok(Json(crab))
 }
 
@@ -622,6 +721,7 @@ async fn create_mission(
         params![row.mission_id, row.colony_id, row.prompt, row.created_at_ms],
     )?;
 
+    emit_console_event(&state.console_tx, ConsoleEvent::MissionCreated { mission: row.clone() });
     Ok(Json(row))
 }
 
@@ -699,6 +799,8 @@ async fn create_task(
 
         (task, mission_prompt)
     };
+
+    emit_console_event(&state.console_tx, ConsoleEvent::TaskCreated { task: task.clone() });
 
     // Push TaskAssigned via WebSocket if the crab is connected
     if let Some(ref crab_id) = notify_crab_id {
@@ -805,6 +907,7 @@ async fn start_run(
 
     let run = fetch_run(&db, &run_id)?
         .ok_or_else(|| ApiError::internal("failed to reload run after start"))?;
+    emit_console_event(&state.console_tx, ConsoleEvent::RunCreated { run: run.clone() });
     Ok(Json(run))
 }
 
@@ -883,8 +986,13 @@ async fn update_run(
         RunStatus::Queued => {}
     }
 
+    if let Ok(Some(task)) = fetch_task(&db, &existing.task_id) {
+        emit_console_event(&state.console_tx, ConsoleEvent::TaskUpdated { task });
+    }
+
     let updated = fetch_run(&db, &request.run_id)?
         .ok_or_else(|| ApiError::internal("failed to reload run after update"))?;
+    emit_console_event(&state.console_tx, ConsoleEvent::RunUpdated { run: updated.clone() });
     Ok(Json(updated))
 }
 
@@ -953,16 +1061,21 @@ async fn complete_run(
 
     let run = fetch_run(&db, &request.run_id)?
         .ok_or_else(|| ApiError::internal("failed to reload run after completion"))?;
+    emit_console_event(&state.console_tx, ConsoleEvent::RunCompleted { run: run.clone() });
     Ok(Json(run))
 }
 
 async fn get_status(State(state): State<AppState>) -> Result<Json<StatusSnapshot>, ApiError> {
     let db = state.db.lock().await;
-    let colonies = query_colonies(&db)?;
-    let crabs = query_crabs(&db)?;
-    let missions = query_missions(&db)?;
-    let tasks = query_tasks(&db)?;
-    let runs = query_runs(&db)?;
+    Ok(Json(build_status_snapshot(&db)?))
+}
+
+fn build_status_snapshot(conn: &Connection) -> Result<StatusSnapshot, ApiError> {
+    let colonies = query_colonies(conn)?;
+    let crabs = query_crabs(conn)?;
+    let missions = query_missions(conn)?;
+    let tasks = query_tasks(conn)?;
+    let runs = query_runs(conn)?;
 
     let completed_runs =
         runs.iter().filter(|run| run.status == RunStatus::Completed).collect::<Vec<_>>();
@@ -992,7 +1105,7 @@ async fn get_status(State(state): State<AppState>) -> Result<Json<StatusSnapshot
         avg_end_to_end_ms,
     };
 
-    Ok(Json(StatusSnapshot {
+    Ok(StatusSnapshot {
         generated_at_ms: now_ms(),
         summary,
         colonies,
@@ -1000,7 +1113,7 @@ async fn get_status(State(state): State<AppState>) -> Result<Json<StatusSnapshot
         missions,
         tasks,
         runs,
-    }))
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1290,9 +1403,11 @@ mod tests {
     fn test_state() -> AppState {
         let conn = Connection::open_in_memory().unwrap();
         apply_schema(&conn).unwrap();
+        let (console_tx, _) = broadcast::channel::<String>(256);
         AppState {
             db: Arc::new(Mutex::new(conn)),
             crab_channels: Arc::new(Mutex::new(HashMap::new())),
+            console_tx,
         }
     }
 

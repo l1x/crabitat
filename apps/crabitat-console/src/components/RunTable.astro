@@ -1,0 +1,59 @@
+---
+import type { RunRecord } from '../lib/types';
+import { formatMs, formatTokens, timeAgo } from '../lib/format';
+import EmptyState from './EmptyState.astro';
+import SearchToolbar from './SearchToolbar.astro';
+
+interface Props {
+  runs: RunRecord[];
+}
+
+const { runs } = Astro.props;
+---
+
+<SearchToolbar
+  placeholder="Search runs..."
+  searchId="search-runs"
+  filters={['All', 'Running', 'Completed', 'Failed']}
+  filterGroup="runs"
+  showSort={true}
+  sortId="sort-runs"
+/>
+
+{runs.length === 0 ? (
+  <EmptyState
+    title="No runs recorded yet"
+    description="Runs are created when a crab starts executing a task."
+  />
+) : (
+  <div class="data-panel" style="margin-top:16px">
+    <div class="data-table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Run</th>
+            <th>Crab</th>
+            <th>Status</th>
+            <th>Tokens</th>
+            <th>Latency</th>
+            <th>Progress</th>
+            <th>Updated</th>
+          </tr>
+        </thead>
+        <tbody id="run-container">
+          {runs.map((run) => (
+            <tr data-id={run.run_id} data-searchable={`${run.run_id} ${run.crab_id} ${run.progress_message}`} data-status={run.status} data-updated-at-ms={run.updated_at_ms}>
+              <td><code>{run.run_id.slice(0, 8)}</code></td>
+              <td>{run.crab_id.slice(0, 12)}</td>
+              <td><span class={`badge badge--${run.status}`}>{run.status}</span></td>
+              <td>{formatTokens(run.metrics.total_tokens)}</td>
+              <td>{formatMs(run.metrics.end_to_end_ms)}</td>
+              <td>{run.progress_message.length > 50 ? run.progress_message.slice(0, 50) + '...' : run.progress_message}</td>
+              <td>{timeAgo(run.updated_at_ms)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+)}

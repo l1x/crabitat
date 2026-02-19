@@ -1,0 +1,23 @@
+---
+interface Props {
+  title: string;
+  description: string;
+  actionLabel?: string;
+  actionId?: string;
+}
+
+const { title, description, actionLabel, actionId } = Astro.props;
+---
+
+<div class="data-panel" style="margin-top:16px">
+  <div class="data-panel-body">
+    <div class="empty-state">
+      <div class="empty-state-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+      </div>
+      <div class="empty-state-title">{title}</div>
+      <p class="empty-state-desc">{description}</p>
+      {actionLabel && <button class="btn btn--primary" id={actionId}>{actionLabel}</button>}
+    </div>
+  </div>
+</div>

@@ -1,5 +1,14 @@
 ---
 import Layout from '../layouts/Layout.astro';
+import Sidebar from '../components/Sidebar.astro';
+import ContentHeader from '../components/ContentHeader.astro';
+import MetricGrid from '../components/MetricGrid.astro';
+import ColonyGrid from '../components/ColonyGrid.astro';
+import CrabGrid from '../components/CrabGrid.astro';
+import MissionTable from '../components/MissionTable.astro';
+import TaskTable from '../components/TaskTable.astro';
+import RunTable from '../components/RunTable.astro';
+import NewMissionModal from '../components/NewMissionModal.astro';
 import type { StatusSnapshot } from '../lib/types';
 
 const CONTROL_PLANE_URL = import.meta.env.CONTROL_PLANE_URL || 'http://127.0.0.1:8800';
@@ -15,133 +24,25 @@ try {
   error = err instanceof Error ? err.message : String(err);
 }
 
-function formatMs(ms: number | null | undefined): string {
-  if (ms == null) return '\u2014';
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
-}
-
-function timeAgo(ms: number): string {
-  const diff = Date.now() - ms;
-  if (diff < 60_000) return 'just now';
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  return `${Math.floor(diff / 86_400_000)}d ago`;
-}
-
 const activeTasks = snapshot?.tasks.filter(
   (t) => t.status === 'running' || t.status === 'assigned' || t.status === 'queued',
 ) ?? [];
-
-const colonyCount = snapshot?.colonies.length ?? 0;
-const crabCount = snapshot?.crabs.length ?? 0;
-const missionCount = snapshot?.missions.length ?? 0;
-const taskCount = snapshot?.tasks.length ?? 0;
-const runCount = snapshot?.runs.length ?? 0;
 ---
 
 <Layout title="Crabitat Colony Console">
-  <!-- ============================================================== -->
-  <!-- Sidebar                                                         -->
-  <!-- ============================================================== -->
-  <aside class="sidebar">
-    <div class="sidebar-header">
-      <div class="sidebar-logo">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M2 12c0-3 2.5-5 5-5s3 1 5 1 2.5-1 5-1 5 2 5 5" />
-          <path d="M3 15c0 2 3 4 9 4s9-2 9-4" />
-          <circle cx="8" cy="11" r="1" fill="currentColor" />
-          <circle cx="16" cy="11" r="1" fill="currentColor" />
-        </svg>
-      </div>
-      <span class="sidebar-brand">Crabitat</span>
-    </div>
+  <Sidebar
+    colonyCount={snapshot?.colonies.length ?? 0}
+    crabCount={snapshot?.crabs.length ?? 0}
+    missionCount={snapshot?.missions.length ?? 0}
+    taskCount={snapshot?.tasks.length ?? 0}
+    runCount={snapshot?.runs.length ?? 0}
+    hasActiveTasks={activeTasks.length > 0}
+    controlPlaneUrl={CONTROL_PLANE_URL}
+    isOnline={!error}
+  />
 
-    <button class="sidebar-cta" id="cta-btn">
-      <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 2a.75.75 0 01.75.75v4.5h4.5a.75.75 0 010 1.5h-4.5v4.5a.75.75 0 01-1.5 0v-4.5h-4.5a.75.75 0 010-1.5h4.5v-4.5A.75.75 0 018 2z"/></svg>
-      New Mission
-    </button>
-
-    <nav class="sidebar-nav">
-      <!-- Colony group -->
-      <div class="nav-group">
-        <div class="nav-group-header">
-          <svg class="nav-group-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
-          Colony
-          <svg class="nav-group-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
-        </div>
-        <a class="nav-item active" data-section="overview">
-          Overview
-        </a>
-        <a class="nav-item" data-section="colonies">
-          Colonies
-          <span class="count-badge">{colonyCount}</span>
-        </a>
-        <a class="nav-item" data-section="crabs">
-          Crabs
-          <span class="count-badge">{crabCount}</span>
-        </a>
-      </div>
-
-      <!-- Operations group -->
-      <div class="nav-group">
-        <div class="nav-group-header">
-          <svg class="nav-group-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
-          Operations
-          <svg class="nav-group-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
-        </div>
-        <a class="nav-item" data-section="missions">
-          Missions
-          <span class="count-badge">{missionCount}</span>
-        </a>
-        <a class="nav-item" data-section="tasks">
-          Tasks
-          {activeTasks.length > 0 && <span class="nav-dot nav-dot--warn"></span>}
-          <span class="count-badge">{taskCount}</span>
-        </a>
-        <a class="nav-item" data-section="runs">
-          Runs
-          <span class="count-badge">{runCount}</span>
-        </a>
-      </div>
-    </nav>
-
-    <div class="sidebar-footer">
-      <div class="footer-org">
-        <div>
-          <div class="footer-org-label">Control-plane</div>
-          <div class="footer-org-name">{CONTROL_PLANE_URL.replace(/^https?:\/\//, '')}</div>
-        </div>
-        <span class={`footer-status ${error ? 'footer-status--offline' : 'footer-status--online'}`}>
-          {error ? 'OFFLINE' : 'ONLINE'}
-        </span>
-      </div>
-      <div class="footer-user">
-        <div class="footer-user-avatar">C</div>
-        <div class="footer-user-text">crabitat-console v0.1.0</div>
-      </div>
-    </div>
-  </aside>
-
-  <!-- ============================================================== -->
-  <!-- Content                                                         -->
-  <!-- ============================================================== -->
   <div class="content">
-    <header class="content-header">
-      <div class="content-title-group">
-        <h1 class="content-title" id="page-title">Overview</h1>
-        <span class="content-count" id="page-count"></span>
-      </div>
-      <div class="header-actions">
-        <button class="btn" id="refresh-btn" onclick="location.reload()">Refresh</button>
-      </div>
-    </header>
+    <ContentHeader title="Overview" />
 
     {error ? (
       <div class="section">
@@ -160,44 +61,10 @@ const runCount = snapshot?.runs.length ?? 0;
       </div>
     ) : snapshot ? (
       <>
-        <!-- ====== Overview ====== -->
+        <!-- Overview -->
         <div class="section" data-section="overview">
-          <div class="metric-grid">
-            <div class="metric-card">
-              <div class="metric-card-label">Total Crabs</div>
-              <div class="metric-card-value">{snapshot.summary.total_crabs}</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-card-label">Busy Crabs</div>
-              <div class="metric-card-value">{snapshot.summary.busy_crabs}</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-card-label">Running Runs</div>
-              <div class="metric-card-value">{snapshot.summary.running_runs}</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-card-label">Completed</div>
-              <div class="metric-card-value">{snapshot.summary.completed_runs}</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-card-label">Failed</div>
-              <div class="metric-card-value">{snapshot.summary.failed_runs}</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-card-label">Total Tokens</div>
-              <div class="metric-card-value">{formatTokens(snapshot.summary.total_tokens)}</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-card-label">Active Tasks</div>
-              <div class="metric-card-value">{snapshot.summary.running_tasks}</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-card-label">Avg Latency</div>
-              <div class="metric-card-value">{formatMs(snapshot.summary.avg_end_to_end_ms)}</div>
-            </div>
-          </div>
+          <MetricGrid summary={snapshot.summary} />
 
-          <!-- Quick colonies -->
           <div class="data-panel">
             <div class="data-panel-header">
               <span class="data-panel-title">Colonies</span>
@@ -212,9 +79,9 @@ const runCount = snapshot?.runs.length ?? 0;
                   <p class="empty-state-desc">Create your first colony with POST /v1/colonies.</p>
                 </div>
               ) : (
-                <div class="card-grid">
+                <div class="card-grid" id="overview-colony-container">
                   {snapshot.colonies.map((colony) => (
-                    <div class="card">
+                    <div class="card" data-id={colony.colony_id}>
                       <div class="card-title">{colony.name}</div>
                       <div class="card-meta">{colony.colony_id.slice(0, 8)} &middot; {colony.description || 'No description'}</div>
                       <div class="card-meta">{snapshot.crabs.filter((c) => c.colony_id === colony.colony_id).length} crabs</div>
@@ -225,7 +92,6 @@ const runCount = snapshot?.runs.length ?? 0;
             </div>
           </div>
 
-          <!-- Quick crabs -->
           <div class="data-panel">
             <div class="data-panel-header">
               <span class="data-panel-title">Crab Roster</span>
@@ -240,9 +106,9 @@ const runCount = snapshot?.runs.length ?? 0;
                   <p class="empty-state-desc">Use scripts/spawn-crab.sh to add a crab agent.</p>
                 </div>
               ) : (
-                <div class="card-grid">
+                <div class="card-grid" id="overview-crab-container">
                   {snapshot.crabs.map((crab) => (
-                    <div class="card">
+                    <div class="card" data-id={crab.crab_id} data-state={crab.state}>
                       <div class="card-title">
                         {crab.name}
                         <span class={`badge badge--${crab.state}`}>{crab.state}</span>
@@ -259,304 +125,40 @@ const runCount = snapshot?.runs.length ?? 0;
           </div>
         </div>
 
-        <!-- ====== Colonies ====== -->
+        <!-- Colonies detail -->
         <div class="section" data-section="colonies" hidden>
-          <div class="toolbar" style="padding-left:0;padding-right:0">
-            <div class="search-box">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              <input type="text" placeholder="Search colonies..." id="search-colonies" />
-            </div>
-          </div>
-          {snapshot.colonies.length === 0 ? (
-            <div class="data-panel" style="margin-top:16px">
-              <div class="data-panel-body">
-                <div class="empty-state">
-                  <div class="empty-state-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
-                  </div>
-                  <div class="empty-state-title">Start by creating your first colony!</div>
-                  <p class="empty-state-desc">Colonies group your crabs, missions, and tasks together.</p>
-                  <button class="btn btn--primary">Create colony</button>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div class="card-grid" style="margin-top:16px">
-              {snapshot.colonies.map((colony) => (
-                <div class="card">
-                  <div class="card-title">{colony.name}</div>
-                  <div class="card-meta">{colony.colony_id.slice(0, 8)} &middot; {colony.description || 'No description'}</div>
-                  <div class="card-meta">{snapshot.crabs.filter((c) => c.colony_id === colony.colony_id).length} crabs &middot; {snapshot.missions.filter((m) => m.colony_id === colony.colony_id).length} missions</div>
-                  <div class="card-meta">Created {timeAgo(colony.created_at_ms)}</div>
-                </div>
-              ))}
-            </div>
-          )}
+          <ColonyGrid colonies={snapshot.colonies} crabs={snapshot.crabs} missions={snapshot.missions} />
         </div>
 
-        <!-- ====== Crabs ====== -->
+        <!-- Crabs detail -->
         <div class="section" data-section="crabs" hidden>
-          <div class="toolbar" style="padding-left:0;padding-right:0">
-            <div class="search-box">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              <input type="text" placeholder="Search crabs..." />
-            </div>
-            <div class="filter-pills">
-              <span class="filter-pill active">All</span>
-              <span class="filter-pill">Idle</span>
-              <span class="filter-pill">Busy</span>
-              <span class="filter-pill">Offline</span>
-            </div>
-          </div>
-          {snapshot.crabs.length === 0 ? (
-            <div class="data-panel" style="margin-top:16px">
-              <div class="data-panel-body">
-                <div class="empty-state">
-                  <div class="empty-state-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
-                  </div>
-                  <div class="empty-state-title">No crabs registered yet</div>
-                  <p class="empty-state-desc">Use scripts/spawn-crab.sh to launch a crab agent.</p>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div class="card-grid" style="margin-top:16px">
-              {snapshot.crabs.map((crab) => (
-                <div class="card">
-                  <div class="card-title">
-                    {crab.name}
-                    <span class={`badge badge--${crab.state}`}>{crab.state}</span>
-                  </div>
-                  <div class="card-meta">{crab.role} &middot; {crab.crab_id}</div>
-                  <div class="card-meta">Colony: {crab.colony_id.slice(0, 8)} &middot; Updated {timeAgo(crab.updated_at_ms)}</div>
-                  {crab.current_task_id && (
-                    <div class="card-detail">Task: <code>{crab.current_task_id.slice(0, 8)}</code></div>
-                  )}
-                  {crab.current_run_id && (
-                    <div class="card-detail">Run: <code>{crab.current_run_id.slice(0, 8)}</code></div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+          <CrabGrid crabs={snapshot.crabs} />
         </div>
 
-        <!-- ====== Missions ====== -->
+        <!-- Missions -->
         <div class="section" data-section="missions" hidden>
-          <div class="toolbar" style="padding-left:0;padding-right:0">
-            <div class="search-box">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              <input type="text" placeholder="Search missions..." />
-            </div>
-            <select class="sort-select">
-              <option>Date created (newest first)</option>
-            </select>
-          </div>
-          {snapshot.missions.length === 0 ? (
-            <div class="data-panel" style="margin-top:16px">
-              <div class="data-panel-body">
-                <div class="empty-state">
-                  <div class="empty-state-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
-                  </div>
-                  <div class="empty-state-title">No missions yet</div>
-                  <p class="empty-state-desc">Create a mission with POST /v1/missions to get started.</p>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div class="data-panel" style="margin-top:16px">
-              <div class="data-table-wrap">
-                <table class="data-table">
-                  <thead>
-                    <tr>
-                      <th>Mission</th>
-                      <th>Colony</th>
-                      <th>Prompt</th>
-                      <th>Created</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {snapshot.missions.map((m) => (
-                      <tr>
-                        <td><code>{m.mission_id.slice(0, 8)}</code></td>
-                        <td><code>{m.colony_id.slice(0, 8)}</code></td>
-                        <td>{m.prompt.length > 80 ? m.prompt.slice(0, 80) + '...' : m.prompt}</td>
-                        <td>{timeAgo(m.created_at_ms)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+          <MissionTable missions={snapshot.missions} />
         </div>
 
-        <!-- ====== Tasks ====== -->
+        <!-- Tasks -->
         <div class="section" data-section="tasks" hidden>
-          <div class="toolbar" style="padding-left:0;padding-right:0">
-            <div class="search-box">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              <input type="text" placeholder="Search tasks..." />
-            </div>
-            <div class="filter-pills">
-              <span class="filter-pill active">All</span>
-              <span class="filter-pill">Running</span>
-              <span class="filter-pill">Completed</span>
-              <span class="filter-pill">Failed</span>
-            </div>
-            <select class="sort-select">
-              <option>Date updated (newest first)</option>
-            </select>
-          </div>
-          {snapshot.tasks.length === 0 ? (
-            <div class="data-panel" style="margin-top:16px">
-              <div class="data-panel-body">
-                <div class="empty-state">
-                  <div class="empty-state-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
-                  </div>
-                  <div class="empty-state-title">No tasks yet</div>
-                  <p class="empty-state-desc">Tasks are created from missions. Assign a crab to get started.</p>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div class="data-panel" style="margin-top:16px">
-              <div class="data-table-wrap">
-                <table class="data-table">
-                  <thead>
-                    <tr>
-                      <th>Task</th>
-                      <th>Mission</th>
-                      <th>Assigned Crab</th>
-                      <th>Status</th>
-                      <th>Updated</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {snapshot.tasks.map((task) => (
-                      <tr>
-                        <td>{task.title}</td>
-                        <td><code>{task.mission_id.slice(0, 8)}</code></td>
-                        <td>{task.assigned_crab_id ? task.assigned_crab_id.slice(0, 12) : '\u2014'}</td>
-                        <td><span class={`badge badge--${task.status}`}>{task.status}</span></td>
-                        <td>{timeAgo(task.updated_at_ms)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+          <TaskTable tasks={snapshot.tasks} />
         </div>
 
-        <!-- ====== Runs ====== -->
+        <!-- Runs -->
         <div class="section" data-section="runs" hidden>
-          <div class="toolbar" style="padding-left:0;padding-right:0">
-            <div class="search-box">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              <input type="text" placeholder="Search runs..." />
-            </div>
-            <div class="filter-pills">
-              <span class="filter-pill active">All</span>
-              <span class="filter-pill">Running</span>
-              <span class="filter-pill">Completed</span>
-              <span class="filter-pill">Failed</span>
-            </div>
-            <select class="sort-select">
-              <option>Date updated (newest first)</option>
-            </select>
-          </div>
-          {snapshot.runs.length === 0 ? (
-            <div class="data-panel" style="margin-top:16px">
-              <div class="data-panel-body">
-                <div class="empty-state">
-                  <div class="empty-state-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
-                  </div>
-                  <div class="empty-state-title">No runs recorded yet</div>
-                  <p class="empty-state-desc">Runs are created when a crab starts executing a task.</p>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div class="data-panel" style="margin-top:16px">
-              <div class="data-table-wrap">
-                <table class="data-table">
-                  <thead>
-                    <tr>
-                      <th>Run</th>
-                      <th>Crab</th>
-                      <th>Status</th>
-                      <th>Tokens</th>
-                      <th>Latency</th>
-                      <th>Progress</th>
-                      <th>Updated</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {snapshot.runs.map((run) => (
-                      <tr>
-                        <td><code>{run.run_id.slice(0, 8)}</code></td>
-                        <td>{run.crab_id.slice(0, 12)}</td>
-                        <td><span class={`badge badge--${run.status}`}>{run.status}</span></td>
-                        <td>{formatTokens(run.metrics.total_tokens)}</td>
-                        <td>{formatMs(run.metrics.end_to_end_ms)}</td>
-                        <td>{run.progress_message.length > 50 ? run.progress_message.slice(0, 50) + '...' : run.progress_message}</td>
-                        <td>{timeAgo(run.updated_at_ms)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+          <RunTable runs={snapshot.runs} />
         </div>
+
+        <NewMissionModal colonies={snapshot.colonies} />
       </>
     ) : null}
   </div>
 </Layout>
 
 <script>
-  // Section navigation
-  const sectionCounts: Record<string, string> = {};
-
-  document.querySelectorAll<HTMLElement>('.nav-item[data-section]').forEach((item) => {
-    const badge = item.querySelector('.count-badge');
-    if (badge) {
-      sectionCounts[item.dataset.section!] = badge.textContent ?? '';
-    }
-  });
-
-  document.querySelectorAll<HTMLElement>('.nav-item[data-section]').forEach((navItem) => {
-    navItem.addEventListener('click', () => {
-      const section = navItem.dataset.section;
-      if (!section) return;
-
-      // Toggle active nav item
-      document.querySelectorAll('.nav-item').forEach((n) => n.classList.remove('active'));
-      navItem.classList.add('active');
-
-      // Toggle visible section
-      document.querySelectorAll<HTMLElement>('.section[data-section]').forEach((s) => {
-        s.hidden = s.dataset.section !== section;
-      });
-
-      // Update header
-      const titleEl = document.getElementById('page-title');
-      const countEl = document.getElementById('page-count');
-      if (titleEl) titleEl.textContent = navItem.textContent?.trim().replace(/\d+$/, '').trim() ?? '';
-      if (countEl) {
-        const count = sectionCounts[section];
-        countEl.textContent = count ?? '';
-        countEl.style.display = count ? '' : 'none';
-      }
-    });
-  });
-
-  // Hide count on initial overview
-  const countEl = document.getElementById('page-count');
-  if (countEl) countEl.style.display = 'none';
+  import '../scripts/nav';
+  import '../scripts/search';
+  import '../scripts/modal';
+  import '../scripts/ws-client';
 </script>

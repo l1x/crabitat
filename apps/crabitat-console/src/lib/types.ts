@@ -79,3 +79,14 @@ export interface StatusSnapshot {
   tasks: TaskRecord[];
   runs: RunRecord[];
 }
+
+export type ConsoleEvent =
+  | { type: 'snapshot' } & StatusSnapshot
+  | { type: 'crab_updated'; crab: CrabRecord }
+  | { type: 'colony_created'; colony: ColonyRecord }
+  | { type: 'mission_created'; mission: MissionRecord }
+  | { type: 'task_created'; task: TaskRecord }
+  | { type: 'task_updated'; task: TaskRecord }
+  | { type: 'run_created'; run: RunRecord }
+  | { type: 'run_updated'; run: RunRecord }
+  | { type: 'run_completed'; run: RunRecord };

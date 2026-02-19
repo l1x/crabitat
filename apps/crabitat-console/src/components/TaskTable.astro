@@ -1,0 +1,55 @@
+---
+import type { TaskRecord } from '../lib/types';
+import { timeAgo } from '../lib/format';
+import EmptyState from './EmptyState.astro';
+import SearchToolbar from './SearchToolbar.astro';
+
+interface Props {
+  tasks: TaskRecord[];
+}
+
+const { tasks } = Astro.props;
+---
+
+<SearchToolbar
+  placeholder="Search tasks..."
+  searchId="search-tasks"
+  filters={['All', 'Running', 'Completed', 'Failed']}
+  filterGroup="tasks"
+  showSort={true}
+  sortId="sort-tasks"
+/>
+
+{tasks.length === 0 ? (
+  <EmptyState
+    title="No tasks yet"
+    description="Tasks are created from missions. Assign a crab to get started."
+  />
+) : (
+  <div class="data-panel" style="margin-top:16px">
+    <div class="data-table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Task</th>
+            <th>Mission</th>
+            <th>Assigned Crab</th>
+            <th>Status</th>
+            <th>Updated</th>
+          </tr>
+        </thead>
+        <tbody id="task-container">
+          {tasks.map((task) => (
+            <tr data-id={task.task_id} data-searchable={`${task.title} ${task.task_id} ${task.mission_id}`} data-status={task.status} data-updated-at-ms={task.updated_at_ms}>
+              <td>{task.title}</td>
+              <td><code>{task.mission_id.slice(0, 8)}</code></td>
+              <td>{task.assigned_crab_id ? task.assigned_crab_id.slice(0, 12) : '\u2014'}</td>
+              <td><span class={`badge badge--${task.status}`}>{task.status}</span></td>
+              <td>{timeAgo(task.updated_at_ms)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+)}

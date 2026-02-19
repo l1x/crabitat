@@ -1,0 +1,45 @@
+---
+import type { StatusSummary } from '../lib/types';
+import { formatMs, formatTokens } from '../lib/format';
+
+interface Props {
+  summary: StatusSummary;
+}
+
+const { summary } = Astro.props;
+---
+
+<div class="metric-grid">
+  <div class="metric-card" data-metric="total_crabs">
+    <div class="metric-card-label">Total Crabs</div>
+    <div class="metric-card-value">{summary.total_crabs}</div>
+  </div>
+  <div class="metric-card" data-metric="busy_crabs">
+    <div class="metric-card-label">Busy Crabs</div>
+    <div class="metric-card-value">{summary.busy_crabs}</div>
+  </div>
+  <div class="metric-card" data-metric="running_runs">
+    <div class="metric-card-label">Running Runs</div>
+    <div class="metric-card-value">{summary.running_runs}</div>
+  </div>
+  <div class="metric-card" data-metric="completed_runs">
+    <div class="metric-card-label">Completed</div>
+    <div class="metric-card-value">{summary.completed_runs}</div>
+  </div>
+  <div class="metric-card" data-metric="failed_runs">
+    <div class="metric-card-label">Failed</div>
+    <div class="metric-card-value">{summary.failed_runs}</div>
+  </div>
+  <div class="metric-card" data-metric="total_tokens">
+    <div class="metric-card-label">Total Tokens</div>
+    <div class="metric-card-value">{formatTokens(summary.total_tokens)}</div>
+  </div>
+  <div class="metric-card" data-metric="running_tasks">
+    <div class="metric-card-label">Active Tasks</div>
+    <div class="metric-card-value">{summary.running_tasks}</div>
+  </div>
+  <div class="metric-card" data-metric="avg_end_to_end_ms">
+    <div class="metric-card-label">Avg Latency</div>
+    <div class="metric-card-value">{formatMs(summary.avg_end_to_end_ms)}</div>
+  </div>
+</div>

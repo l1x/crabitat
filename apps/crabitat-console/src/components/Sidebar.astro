@@ -1,0 +1,91 @@
+---
+interface Props {
+  colonyCount: number;
+  crabCount: number;
+  missionCount: number;
+  taskCount: number;
+  runCount: number;
+  hasActiveTasks: boolean;
+  controlPlaneUrl: string;
+  isOnline: boolean;
+}
+
+const { colonyCount, crabCount, missionCount, taskCount, runCount, hasActiveTasks, controlPlaneUrl, isOnline } = Astro.props;
+---
+
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <div class="sidebar-logo">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2 12c0-3 2.5-5 5-5s3 1 5 1 2.5-1 5-1 5 2 5 5" />
+        <path d="M3 15c0 2 3 4 9 4s9-2 9-4" />
+        <circle cx="8" cy="11" r="1" fill="currentColor" />
+        <circle cx="16" cy="11" r="1" fill="currentColor" />
+      </svg>
+    </div>
+    <span class="sidebar-brand">Crabitat</span>
+  </div>
+
+  <button class="sidebar-cta" id="cta-btn">
+    <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 2a.75.75 0 01.75.75v4.5h4.5a.75.75 0 010 1.5h-4.5v4.5a.75.75 0 01-1.5 0v-4.5h-4.5a.75.75 0 010-1.5h4.5v-4.5A.75.75 0 018 2z"/></svg>
+    New Mission
+  </button>
+
+  <nav class="sidebar-nav">
+    <div class="nav-group">
+      <div class="nav-group-header">
+        <svg class="nav-group-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+        Colony
+        <svg class="nav-group-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+      <a class="nav-item active" data-section="overview">
+        Overview
+      </a>
+      <a class="nav-item" data-section="colonies">
+        Colonies
+        <span class="count-badge" data-count="colonies">{colonyCount}</span>
+      </a>
+      <a class="nav-item" data-section="crabs">
+        Crabs
+        <span class="count-badge" data-count="crabs">{crabCount}</span>
+      </a>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-header">
+        <svg class="nav-group-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
+        Operations
+        <svg class="nav-group-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+      <a class="nav-item" data-section="missions">
+        Missions
+        <span class="count-badge" data-count="missions">{missionCount}</span>
+      </a>
+      <a class="nav-item" data-section="tasks">
+        Tasks
+        {hasActiveTasks && <span class="nav-dot nav-dot--warn"></span>}
+        <span class="count-badge" data-count="tasks">{taskCount}</span>
+      </a>
+      <a class="nav-item" data-section="runs">
+        Runs
+        <span class="count-badge" data-count="runs">{runCount}</span>
+      </a>
+    </div>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="footer-org">
+      <div>
+        <div class="footer-org-label">Control-plane</div>
+        <div class="footer-org-name">{controlPlaneUrl.replace(/^https?:\/\//, '')}</div>
+      </div>
+      <span id="connection-status" class={`footer-status ${isOnline ? 'footer-status--online' : 'footer-status--offline'}`}>
+        {isOnline ? 'ONLINE' : 'OFFLINE'}
+      </span>
+    </div>
+    <div class="footer-user">
+      <div class="footer-user-avatar">C</div>
+      <div class="footer-user-text">crabitat-console v0.1.0</div>
+    </div>
+  </div>
+</aside>
