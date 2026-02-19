@@ -48,7 +48,9 @@ pub enum MessageKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskAssigned {
     pub task_id: TaskId,
+    pub mission_id: MissionId,
     pub title: String,
+    pub mission_prompt: String,
     pub desired_status: TaskStatus,
 }
 

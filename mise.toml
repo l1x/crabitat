@@ -1,7 +1,8 @@
 # tools
 [tools]
 rust = "1.90.0"
-node = "24.11.1"
+node = "lts"
+bun = "latest"
 python = "3.13.10"
 
 # env
@@ -45,17 +46,17 @@ description = "Run chief watch mode"
 run = "cargo run -p crabitat-chief -- --chief-id chief-1 watch"
 
 [tasks.run-crab]
-description = "Run a sample crab client skeleton"
-run = "cargo run -p crabitat-crab -- --crab-id crab-1 connect --control-plane http://127.0.0.1:8800"
+description = "Run a crab agent (set COLONY_ID env var)"
+run = "cargo run -p crabitat-crab -- connect --control-plane http://127.0.0.1:8800 --colony-id ${COLONY_ID:-missing} --name crab-1 --role coder --repo ."
 
 [tasks.console-install]
 description = "Install Astro console dependencies"
-run = "cd apps/crabitat-console && npm install"
+run = "cd apps/crabitat-console && bun install"
 
 [tasks.console-dev]
 description = "Run Astro Colony Console in dev mode"
-run = "cd apps/crabitat-console && npm run dev"
+run = "cd apps/crabitat-console && bunx --bun astro dev"
 
 [tasks.console-build]
 description = "Build Astro Colony Console"
-run = "cd apps/crabitat-console && npm run build"
+run = "cd apps/crabitat-console && bunx --bun astro build"

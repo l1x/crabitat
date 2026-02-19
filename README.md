@@ -54,12 +54,38 @@ crates/
   crabitat-protocol/       Message envelope and protocol payloads
   crabitat-control-plane/  HTTP API + SQLite persistence
   crabitat-chief/          Chief orchestration runtime (skeleton)
-  crabitat-crab/           Crab executor runtime (skeleton)
+  crabitat-crab/           Crab agent runtime (WebSocket + Claude Code spawner)
 apps/
   crabitat-console/        Astro SSR operations console
 scripts/
   onboard-crab.sh          Register a crab via the control-plane API
+  spawn-crab.sh            Build and launch a crab agent
 ```
+
+## Crab Agent
+
+A crab is a long-running process that connects to the control-plane via WebSocket,
+listens for task assignments, and spawns Claude Code to execute them.
+
+```bash
+# Start a crab (auto-registers with the control-plane)
+cargo run -p crabitat-crab -- connect \
+  --control-plane http://127.0.0.1:8800 \
+  --colony-id <colony_id> \
+  --name Alice \
+  --role coder \
+  --repo .
+
+# Or use the convenience script
+./scripts/spawn-crab.sh <colony_id> Alice coder
+```
+
+When a task is assigned to the crab:
+1. A git worktree is created in `burrows/<task_id_short>/`
+2. A `CLAUDE.md` system prompt is written into the worktree
+3. `claude -p "<task title>"` is spawned in the worktree
+4. On completion the run is reported back to the control-plane
+5. The worktree is cleaned up
 
 ## Control-plane API
 
@@ -80,6 +106,7 @@ Base URL: `http://127.0.0.1:8800` (default)
 | POST   | /v1/runs/update       | Update a run's progress       |
 | POST   | /v1/runs/complete     | Complete a run                |
 | GET    | /v1/status            | Full status snapshot          |
+| GET    | /v1/ws/crab/{crab_id} | WebSocket for crab agent      |
 
 State is persisted in SQLite (default: `./var/crabitat-control-plane.db`).
 

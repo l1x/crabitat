@@ -1,25 +1,32 @@
 use anyhow::Result;
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{
+        Path, State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
+    },
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
 };
 use clap::{Parser, Subcommand};
 use crabitat_core::{
-    BurrowMode, Colony, Mission, RunId, RunMetrics, RunStatus, TaskId, TaskStatus, now_ms,
+    BurrowMode, Colony, Mission, MissionId, RunId, RunMetrics, RunStatus, TaskId, TaskStatus,
+    now_ms,
 };
+use crabitat_protocol::{Envelope, MessageKind};
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     fs,
     net::SocketAddr,
-    path::{Path, PathBuf},
+    path::{Path as StdPath, PathBuf},
     sync::Arc,
 };
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, mpsc};
 use tracing::info;
+use uuid::Uuid;
 
 #[derive(Debug, Parser)]
 #[command(name = "crabitat-control-plane", about = "Crabitat control-plane service")]
@@ -38,9 +45,12 @@ enum Command {
     },
 }
 
+type CrabChannels = Arc<Mutex<HashMap<String, mpsc::UnboundedSender<String>>>>;
+
 #[derive(Clone)]
 struct AppState {
     db: Arc<Mutex<Connection>>,
+    crab_channels: CrabChannels,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -285,9 +295,12 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn serve(port: u16, db_path: &Path) -> Result<()> {
+async fn serve(port: u16, db_path: &StdPath) -> Result<()> {
     let connection = init_db(db_path)?;
-    let state = AppState { db: Arc::new(Mutex::new(connection)) };
+    let state = AppState {
+        db: Arc::new(Mutex::new(connection)),
+        crab_channels: Arc::new(Mutex::new(HashMap::new())),
+    };
 
     let app = build_router(state);
 
@@ -315,6 +328,7 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/runs/update", post(update_run))
         .route("/v1/runs/complete", post(complete_run))
         .route("/v1/status", get(get_status))
+        .route("/v1/ws/crab/{crab_id}", get(ws_crab_handler))
         .with_state(state)
 }
 
@@ -393,7 +407,7 @@ fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
     )
 }
 
-fn init_db(db_path: &Path) -> Result<Connection> {
+fn init_db(db_path: &StdPath) -> Result<Connection> {
     if let Some(parent) = db_path.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -403,6 +417,78 @@ fn init_db(db_path: &Path) -> Result<Connection> {
     let conn = Connection::open(db_path)?;
     apply_schema(&conn)?;
     Ok(conn)
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket handler
+// ---------------------------------------------------------------------------
+
+async fn ws_crab_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+    Path(crab_id): Path<String>,
+) -> Response {
+    info!(crab_id = %crab_id, "WebSocket upgrade requested");
+    ws.on_upgrade(move |socket| handle_ws_crab(socket, state, crab_id))
+}
+
+async fn handle_ws_crab(mut socket: WebSocket, state: AppState, crab_id: String) {
+    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+
+    // Register the channel for this crab
+    {
+        let mut channels = state.crab_channels.lock().await;
+        channels.insert(crab_id.clone(), tx);
+    }
+    info!(crab_id = %crab_id, "WebSocket connected");
+
+    loop {
+        tokio::select! {
+            // Messages from the crab (heartbeats)
+            ws_msg = socket.recv() => {
+                match ws_msg {
+                    Some(Ok(Message::Text(text))) => {
+                        if let Ok(envelope) = serde_json::from_str::<Envelope>(&text)
+                            && let MessageKind::Heartbeat(_) = &envelope.kind
+                        {
+                            let db = state.db.lock().await;
+                            let _ = db.execute(
+                                "UPDATE crabs SET updated_at_ms = ?2 WHERE crab_id = ?1",
+                                params![crab_id, now_ms() as i64],
+                            );
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | None => break,
+                    _ => {}
+                }
+            }
+            // Messages to the crab (task assignments)
+            channel_msg = rx.recv() => {
+                match channel_msg {
+                    Some(text) => {
+                        if socket.send(Message::Text(text.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    None => break,
+                }
+            }
+        }
+    }
+
+    // Cleanup on disconnect
+    {
+        let mut channels = state.crab_channels.lock().await;
+        channels.remove(&crab_id);
+    }
+    {
+        let db = state.db.lock().await;
+        let _ = db.execute(
+            "UPDATE crabs SET state = 'offline', updated_at_ms = ?2 WHERE crab_id = ?1",
+            params![crab_id, now_ms() as i64],
+        );
+    }
+    info!(crab_id = %crab_id, "WebSocket disconnected");
 }
 
 // ---------------------------------------------------------------------------
@@ -555,46 +641,93 @@ async fn create_task(
         return Err(ApiError::bad_request("title is required"));
     }
 
-    let db = state.db.lock().await;
+    let notify_crab_id = request.assigned_crab_id.clone();
 
-    let mission_exists: i64 = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM missions WHERE mission_id = ?1)",
-        params![request.mission_id],
-        |row| row.get(0),
-    )?;
-    if mission_exists == 0 {
-        return Err(ApiError::not_found("mission_id not found"));
-    }
+    let (task, mission_prompt) = {
+        let db = state.db.lock().await;
 
-    let created_at_ms = now_ms();
-    let status = request.status.unwrap_or(TaskStatus::Queued);
-    let task_id = TaskId::new().to_string();
-
-    db.execute(
-        "
-        INSERT INTO tasks (task_id, mission_id, title, assigned_crab_id, status, created_at_ms, updated_at_ms)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-        ",
-        params![
-            task_id,
-            request.mission_id,
-            request.title,
-            request.assigned_crab_id,
-            task_status_to_db(status),
-            created_at_ms,
-            created_at_ms
-        ],
-    )?;
-
-    if let Some(crab_id) = request.assigned_crab_id {
-        db.execute(
-            "UPDATE crabs SET state = 'busy', current_task_id = ?2, updated_at_ms = ?3 WHERE crab_id = ?1",
-            params![crab_id, task_id, created_at_ms],
+        let mission_exists: i64 = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM missions WHERE mission_id = ?1)",
+            params![request.mission_id],
+            |row| row.get(0),
         )?;
+        if mission_exists == 0 {
+            return Err(ApiError::not_found("mission_id not found"));
+        }
+
+        let created_at_ms = now_ms();
+        let status = request.status.unwrap_or(TaskStatus::Queued);
+        let task_id = TaskId::new().to_string();
+
+        db.execute(
+            "
+            INSERT INTO tasks (task_id, mission_id, title, assigned_crab_id, status, created_at_ms, updated_at_ms)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            ",
+            params![
+                task_id,
+                request.mission_id,
+                request.title,
+                request.assigned_crab_id,
+                task_status_to_db(status),
+                created_at_ms,
+                created_at_ms
+            ],
+        )?;
+
+        if let Some(ref crab_id) = request.assigned_crab_id {
+            db.execute(
+                "UPDATE crabs SET state = 'busy', current_task_id = ?2, updated_at_ms = ?3 WHERE crab_id = ?1",
+                params![crab_id, task_id, created_at_ms],
+            )?;
+        }
+
+        let task = fetch_task(&db, &task_id)?
+            .ok_or_else(|| ApiError::internal("failed to reload task after creation"))?;
+
+        // Fetch mission prompt for WebSocket notification
+        let mission_prompt = if notify_crab_id.is_some() {
+            db.query_row(
+                "SELECT prompt FROM missions WHERE mission_id = ?1",
+                params![request.mission_id],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap_or_default()
+        } else {
+            String::new()
+        };
+
+        (task, mission_prompt)
+    };
+
+    // Push TaskAssigned via WebSocket if the crab is connected
+    if let Some(ref crab_id) = notify_crab_id {
+        let channels = state.crab_channels.lock().await;
+        if let Some(tx) = channels.get(crab_id.as_str()) {
+            let task_uuid: Uuid = task.task_id.parse().expect("task_id is a valid uuid");
+            let mission_uuid: Uuid = task.mission_id.parse().expect("mission_id is a valid uuid");
+
+            let mut envelope = Envelope::new(
+                "control-plane",
+                crab_id.as_str(),
+                MessageKind::TaskAssigned(crabitat_protocol::TaskAssigned {
+                    task_id: TaskId(task_uuid),
+                    mission_id: MissionId(mission_uuid),
+                    title: task.title.clone(),
+                    mission_prompt,
+                    desired_status: TaskStatus::Running,
+                }),
+                now_ms(),
+            );
+            envelope.task_id = Some(TaskId(task_uuid));
+            envelope.mission_id = Some(MissionId(mission_uuid));
+
+            if let Ok(json) = serde_json::to_string(&envelope) {
+                let _ = tx.send(json);
+            }
+        }
     }
 
-    let task = fetch_task(&db, &task_id)?
-        .ok_or_else(|| ApiError::internal("failed to reload task after creation"))?;
     Ok(Json(task))
 }
 
@@ -1157,7 +1290,10 @@ mod tests {
     fn test_state() -> AppState {
         let conn = Connection::open_in_memory().unwrap();
         apply_schema(&conn).unwrap();
-        AppState { db: Arc::new(Mutex::new(conn)) }
+        AppState {
+            db: Arc::new(Mutex::new(conn)),
+            crab_channels: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 
     async fn setup_colony(state: &AppState) -> ColonyRecord {
