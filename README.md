@@ -23,28 +23,94 @@ SQLite-backed control-plane.
 
 ## Quickstart
 
-Prerequisites: [mise](https://mise.jdx.dev/), Rust 1.90+, Node 24+
+Prerequisites: [mise](https://mise.jdx.dev/), Rust 1.90+, Node 24+, [bun](https://bun.sh/)
 
 ```bash
-# Install toolchain and build
 mise install
 mise run build
+```
 
-# Start the control-plane (SQLite DB auto-created)
+## Complete Onboarding
+
+### 1. Start the control-plane
+
+```bash
 mise run run-control-plane
+```
 
-# In another terminal, create a colony and register a crab
+The control-plane starts on `http://127.0.0.1:8800` with a SQLite database
+at `./var/crabitat-control-plane.db`.
+
+Verify it's running:
+
+```bash
+curl -s http://127.0.0.1:8800/healthz
+# {"ok":true}
+```
+
+### 2. Start the console
+
+In a second terminal:
+
+```bash
+mise run console-install   # first time only
+mise run console-start     # builds and serves on port 4321
+```
+
+Open `http://localhost:4321` to see the colony dashboard.
+
+### 3. Create a colony
+
+```bash
 curl -s -X POST http://127.0.0.1:8800/v1/colonies \
   -H 'Content-Type: application/json' \
-  -d '{"name":"my-project","description":"My first colony"}'
-# note the colony_id from the response, then:
-./scripts/onboard-crab.sh <colony_id> crab-1 Alice coder
-
-# Open the console (requires npm install first)
-mise run console-install
-mise run console-dev
-# Visit http://localhost:4321
+  -d '{"name":"my-project","description":"Building feature X"}'
 ```
+
+Save the `colony_id` from the response — you'll need it for the next steps.
+
+### 4. Start a crab agent
+
+In a third terminal, run the crab binary. It registers itself, connects via
+WebSocket, and waits for task assignments:
+
+```bash
+cargo run -p crabitat-crab -- connect \
+  --control-plane http://127.0.0.1:8800 \
+  --colony-id <colony_id> \
+  --name Alice \
+  --role coder \
+  --repo .
+```
+
+The crab appears as **idle** in the console. You can start multiple crabs
+in separate terminals with different names and roles.
+
+### 5. Create a mission and assign a task
+
+```bash
+# Create a mission
+curl -s -X POST http://127.0.0.1:8800/v1/missions \
+  -H 'Content-Type: application/json' \
+  -d '{"colony_id":"<colony_id>","prompt":"Implement feature X"}'
+
+# Create a task and assign it to the crab (use crab_id from step 4 logs)
+curl -s -X POST http://127.0.0.1:8800/v1/tasks \
+  -H 'Content-Type: application/json' \
+  -d '{"mission_id":"<mission_id>","title":"Write the implementation","assigned_crab_id":"<crab_id>"}'
+```
+
+The control-plane pushes a `TaskAssigned` message over WebSocket. The crab
+automatically:
+
+1. Creates a git worktree in `burrows/<task_id_short>/`
+2. Writes a `CLAUDE.md` system prompt into the worktree
+3. Starts a run via the control-plane API
+4. Spawns `claude -p "<task title>"` inside the worktree
+5. Reports results back via `POST /v1/runs/complete`
+6. Cleans up the worktree
+
+The console updates to show run progress and completion.
 
 ## Workspace Layout
 
@@ -52,40 +118,14 @@ mise run console-dev
 crates/
   crabitat-core/           Shared domain types (Colony, Mission, Task, Run, IDs, metrics)
   crabitat-protocol/       Message envelope and protocol payloads
-  crabitat-control-plane/  HTTP API + SQLite persistence
+  crabitat-control-plane/  HTTP API + SQLite persistence + WebSocket task dispatch
   crabitat-chief/          Chief orchestration runtime (skeleton)
   crabitat-crab/           Crab agent runtime (WebSocket + Claude Code spawner)
 apps/
   crabitat-console/        Astro SSR operations console
 scripts/
   onboard-crab.sh          Register a crab via the control-plane API
-  spawn-crab.sh            Build and launch a crab agent
 ```
-
-## Crab Agent
-
-A crab is a long-running process that connects to the control-plane via WebSocket,
-listens for task assignments, and spawns Claude Code to execute them.
-
-```bash
-# Start a crab (auto-registers with the control-plane)
-cargo run -p crabitat-crab -- connect \
-  --control-plane http://127.0.0.1:8800 \
-  --colony-id <colony_id> \
-  --name Alice \
-  --role coder \
-  --repo .
-
-# Or use the convenience script
-./scripts/spawn-crab.sh <colony_id> Alice coder
-```
-
-When a task is assigned to the crab:
-1. A git worktree is created in `burrows/<task_id_short>/`
-2. A `CLAUDE.md` system prompt is written into the worktree
-3. `claude -p "<task title>"` is spawned in the worktree
-4. On completion the run is reported back to the control-plane
-5. The worktree is cleaned up
 
 ## Control-plane API
 
@@ -110,52 +150,20 @@ Base URL: `http://127.0.0.1:8800` (default)
 
 State is persisted in SQLite (default: `./var/crabitat-control-plane.db`).
 
-## Onboarding Flow
-
-```bash
-# 1. Start the control-plane
-mise run run-control-plane
-
-# 2. Create a colony (project)
-curl -s -X POST http://127.0.0.1:8800/v1/colonies \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"my-project","description":"Building feature X"}'
-
-# 3. Register crabs into the colony
-./scripts/onboard-crab.sh <colony_id> crab-1 Alice coder
-./scripts/onboard-crab.sh <colony_id> crab-2 Bob reviewer idle
-
-# Or register via curl directly
-curl -s -X POST http://127.0.0.1:8800/v1/crabs/register \
-  -H 'Content-Type: application/json' \
-  -d '{"crab_id":"crab-3","colony_id":"<colony_id>","name":"Carol","role":"architect"}'
-```
-
-## Run Lifecycle
-
-1. **Create a colony** — `POST /v1/colonies` with name and description
-2. **Register crabs** — `POST /v1/crabs/register` with crab details and colony_id
-3. **Create a mission** — `POST /v1/missions` with prompt and colony_id
-4. **Create a task** — `POST /v1/tasks` referencing the mission, optionally assign a crab
-5. **Start a run** — `POST /v1/runs/start` with task, crab, and burrow config
-6. **Update progress** — `POST /v1/runs/update` with status, progress, token usage, timing
-7. **Complete the run** — `POST /v1/runs/complete` with final status, summary, and metrics
-
-Each step updates the crab's state and the task's status automatically.
-
 ## mise Commands
 
-| Command                     | Description                              |
-|-----------------------------|------------------------------------------|
-| `mise run fmt`              | Format all Rust code                     |
-| `mise run check`            | Typecheck the workspace                  |
-| `mise run clippy`           | Lint the workspace                       |
-| `mise run test`             | Run all tests                            |
-| `mise run build`            | Build all workspace members              |
-| `mise run verify`           | Run fmt + clippy + test                  |
-| `mise run run-control-plane`| Start the control-plane on port 8800     |
-| `mise run run-chief`        | Start the chief in watch mode            |
-| `mise run run-crab`         | Start a crab client                      |
-| `mise run console-install`  | Install Astro console dependencies       |
-| `mise run console-dev`      | Run console in dev mode (port 4321)      |
-| `mise run console-build`    | Build the console for production         |
+| Command                      | Description                              |
+|------------------------------|------------------------------------------|
+| `mise run fmt`               | Format all Rust code                     |
+| `mise run check`             | Typecheck the workspace                  |
+| `mise run clippy`            | Lint the workspace                       |
+| `mise run test`              | Run all tests                            |
+| `mise run build`             | Build all workspace members              |
+| `mise run verify`            | Run fmt + clippy + test                  |
+| `mise run run-control-plane` | Start the control-plane on port 8800     |
+| `mise run run-chief`         | Start the chief in watch mode            |
+| `mise run run-crab`          | Start a crab agent (set COLONY_ID env)   |
+| `mise run console-install`   | Install Astro console dependencies       |
+| `mise run console-dev`       | Run console in dev mode (port 4321)      |
+| `mise run console-build`     | Build the console for production         |
+| `mise run console-start`     | Build and serve console (port 4321)      |

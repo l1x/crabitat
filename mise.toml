@@ -60,3 +60,7 @@ run = "cd apps/crabitat-console && bunx --bun astro dev"
 [tasks.console-build]
 description = "Build Astro Colony Console"
 run = "cd apps/crabitat-console && bunx --bun astro build"
+
+[tasks.console-start]
+description = "Build and start the console in production mode (port 4321)"
+run = "cd apps/crabitat-console && bunx --bun astro build && HOST=0.0.0.0 PORT=4321 bun dist/server/entry.mjs"

@@ -4,3 +4,5 @@ node_modules/
 apps/*/node_modules/
 apps/*/.astro/
 var/
+burrows/
+apps/*/dist/

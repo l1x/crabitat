@@ -229,4 +229,9 @@ mod tests {
         let b = MissionId::new();
         assert_ne!(a, b);
     }
+
+    #[test]
+    fn hello_world() {
+        assert_eq!(1 + 1, 2);
+    }
 }
