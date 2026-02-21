@@ -764,6 +764,24 @@ async fn register_crab(
     let updated_at_ms = now_ms();
     let crab_state = request.state.unwrap_or(CrabState::Idle);
 
+    // Enforce one crab per role per colony (except "any" which allows multiple)
+    if request.role != "any" {
+        let existing: Option<String> = db
+            .query_row(
+                "SELECT crab_id FROM crabs WHERE colony_id = ?1 AND role = ?2 AND crab_id != ?3",
+                params![request.colony_id, request.role, request.crab_id],
+                |row| row.get(0),
+            )
+            .ok();
+
+        if let Some(existing_crab_id) = existing {
+            return Err(ApiError::bad_request(format!(
+                "role '{}' is already taken in this colony by crab '{}'",
+                request.role, existing_crab_id
+            )));
+        }
+    }
+
     db.execute(
         "
         INSERT INTO crabs (crab_id, colony_id, name, role, state, current_task_id, current_run_id, updated_at_ms)
@@ -1713,10 +1731,15 @@ fn run_scheduler_tick_db(
 
         let task_role = task.role.as_deref().unwrap_or("any");
 
-        // Find a matching crab
-        let crab_idx = idle_crabs.iter().position(|(_, crab_role)| {
-            task_role == "any" || crab_role == task_role || crab_role == "any"
-        });
+        // Find a matching crab — prefer exact role match, fall back to "any"
+        let crab_idx = idle_crabs
+            .iter()
+            .position(|(_, crab_role)| crab_role == task_role)
+            .or_else(|| {
+                idle_crabs
+                    .iter()
+                    .position(|(_, crab_role)| task_role == "any" || crab_role == "any")
+            });
 
         if let Some(idx) = crab_idx {
             let (crab_id, _) = idle_crabs.remove(idx);

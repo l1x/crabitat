@@ -24,6 +24,10 @@ agent-prompts/              Control-Plane                  Crabs
 │                           └─────────────────────┘
 ```
 
+## Full Lifecycle
+
+![Workflow Engine Lifecycle](illustrations/lifecycle.svg)
+
 ## Data Flow
 
 ### 1. Boot
@@ -69,8 +73,12 @@ pr         → Blocked (depends on review, condition: review.result == 'PASS')
 2. Queries `idle` crabs
 3. For each queued task:
    - **Worktree safety**: if another task in the same mission is `Running`, skip (all workflow steps share one worktree)
-   - **Role matching**: task role must match crab role, or either is `any`
+   - **Role matching** (two-pass):
+     1. **Exact match first**: find an idle crab whose role matches the task role exactly (e.g. `reviewer` → `reviewer`)
+     2. **Fallback to `any`**: if no exact match, accept a crab with role `any`, or a task with role `any`
    - If matched: sets task to `Assigned`, marks crab `busy`, sends `TaskAssigned` via WebSocket
+
+This two-pass approach prevents a crab with role `any` from stealing work meant for a specialist (e.g. a worker grabbing a review task before the reviewer polls).
 
 The `TaskAssigned` message includes the rendered prompt, accumulated context, and worktree path so the crab has everything it needs.
 
@@ -137,6 +145,49 @@ When `fix` completes:
 3. The reviewer re-runs, potentially producing `PASS` this time
 4. If `PASS`: `pr` becomes `Queued`, new `fix` is `Skipped`
 5. If `FAIL` again: `fix` re-queues (up to `max_retries`)
+
+## Colony Role Model
+
+### One Named Role Per Colony
+
+Each colony enforces **at most one crab per named role** (`planner`, `worker`, `reviewer`). The role `any` is exempt — unlimited crabs can register as `any`.
+
+```
+Colony "crabitat-dev"
+├── Sage    role: planner    ← only planner allowed
+├── Atlas   role: worker     ← only worker allowed
+├── Coral   role: reviewer   ← only reviewer allowed
+├── Extra1  role: any        ← OK, unlimited
+└── Extra2  role: any        ← OK, unlimited
+```
+
+If a second crab tries to register as `worker` in the same colony, the API returns:
+
+```json
+{"error": "role 'worker' is already taken in this colony by crab 'atlas-id'"}
+```
+
+This guarantees clear ownership: one agent is responsible for each role. For parallel work across missions, add more crabs with role `any` or spin up additional colonies.
+
+### Registration Enforcement
+
+Registration is serialized under a Mutex to prevent race conditions. The check-then-insert happens atomically:
+
+1. Lock the registration mutex
+2. Query: is there an existing crab with this role in this colony?
+3. If yes → reject with 400
+4. If no → upsert the crab row
+5. Release the lock
+
+Re-registering the **same** crab (same `crab_id`) with a different role is allowed — this is an upsert.
+
+### Recommended Colony Setup
+
+| Agents | Setup |
+|--------|-------|
+| 3 (production) | `planner` + `worker` + `reviewer` — full separation of concerns |
+| 2 (minimal) | `worker` + `reviewer` — worker handles plan + implement + fix + pr |
+| 1 (testing) | `any` — solo agent does everything sequentially |
 
 ## Database Schema
 

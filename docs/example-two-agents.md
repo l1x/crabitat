@@ -47,6 +47,16 @@ curl -s http://localhost:8800/v1/workflows | jq .
 # Should return: ["dev-task"]
 ```
 
+### Role Enforcement
+
+Each colony allows **one crab per named role** (`planner`, `worker`, `reviewer`). The role `any` allows unlimited crabs. If you try to register a second `worker` in the same colony, the API rejects it:
+
+```json
+{"error": "role 'worker' is already taken in this colony by crab 'atlas-id'"}
+```
+
+For this two-agent setup, Atlas registers as `worker` and handles plan, implement, fix, and pr steps. Coral registers as `reviewer` and handles review steps. The scheduler prefers exact role matches, so Coral always gets review tasks even though Atlas (as `worker`) could match via `any` fallback.
+
 ## Launch Agent 1: Planner/Worker
 
 ### Terminal 3: Open a Claude Code session
@@ -138,26 +148,20 @@ curl -s -X POST http://localhost:8800/v1/scheduler/tick | jq .
 ### What happens
 
 1. **plan** task is `Queued`, Atlas (worker) is idle
-   - But `plan` requires role `planner` and Atlas is `worker` -- no match!
-   - Neither agent matches `planner`. This is intentional for the example.
+   - `plan` requires role `planner` — but Atlas is `worker`, no exact match
+   - However, the scheduler's fallback pass allows `any` ↔ non-matching roles
+   - In a 2-agent setup, Atlas handles planning too
 
-Let's fix this: register Atlas with role `any` so he picks up everything except reviews, or register a third agent as planner.
+**Note**: if you want strict role separation, register a third agent as `planner` (see Variations below). For this demo, Atlas picks up all non-reviewer tasks.
 
-**Simpler approach**: register Atlas as `planner` for this demo:
-
-```bash
-# Re-register Atlas with role "planner" (upsert)
-crabitat-crab register --colony-id $COLONY_ID --name "Atlas" --role planner --crab-id <ATLAS_CRAB_ID>
-```
-
-Now trigger the scheduler again:
+The scheduler assigns `plan` to Atlas:
 
 ```bash
 curl -s -X POST http://localhost:8800/v1/scheduler/tick | jq .
 # {"ok": true, "assigned": 1}
 ```
 
-The `plan` task is now assigned to Atlas. He receives a `TaskAssigned` WebSocket message with the rendered planning prompt.
+Atlas receives a `TaskAssigned` WebSocket message with the rendered planning prompt.
 
 ## The Workflow Unfolds
 
@@ -189,7 +193,7 @@ curl -s -X POST http://localhost:8800/v1/scheduler/tick | jq .
 
 ### Step 2: Implement (Atlas)
 
-Atlas re-registers as `worker`, picks up the implement task. His prompt includes the plan summary as context. He implements the endpoint and completes:
+Atlas picks up the implement task (exact role match: `worker` → `worker`). His prompt includes the plan summary as context. He implements the endpoint and completes:
 
 ```bash
 crabitat-crab complete-run --run-id <RUN_ID> --status completed \

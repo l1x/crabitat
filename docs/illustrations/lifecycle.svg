@@ -1,0 +1,228 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 864" role="img" aria-labelledby="lc-title lc-desc">
+  <title id="lc-title">Crabitat Workflow Engine Lifecycle</title>
+  <desc id="lc-desc">Full lifecycle: boot, register crabs, submit mission, scheduler tick, crab executes, cascade resolution.</desc>
+
+  <defs>
+    <style>
+      .lc-title  { font-family: "Helvetica Neue", Arial, sans-serif; fill: #1f2937; font-size: 22px; font-weight: 700; }
+      .lc-phase  { font-family: "Helvetica Neue", Arial, sans-serif; fill: #1f2937; font-size: 16px; font-weight: 600; }
+      .lc-label  { font-family: "Helvetica Neue", Arial, sans-serif; fill: #1f2937; font-size: 12px; font-weight: 600; }
+      .lc-sub    { font-family: "Helvetica Neue", Arial, sans-serif; fill: #6b7280; font-size: 11px; }
+      .lc-mono   { font-family: "SF Mono", "Fira Code", monospace; fill: #6b7280; font-size: 10px; }
+      .lc-step   { font-family: "Helvetica Neue", Arial, sans-serif; fill: #b45309; font-size: 11px; font-weight: 600; letter-spacing: 0.3px; }
+      .lc-num    { font-family: "Helvetica Neue", Arial, sans-serif; fill: #ffffff; font-size: 12px; font-weight: 700; }
+      .lc-status { font-family: "SF Mono", "Fira Code", monospace; font-size: 10px; font-weight: 600; }
+    </style>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#9ca3af"/>
+    </marker>
+    <marker id="arr-o" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#f59e0b"/>
+    </marker>
+  </defs>
+
+  <rect width="1100" height="864" fill="#fafafa" rx="4"/>
+  <text x="550" y="32" text-anchor="middle" class="lc-title">Workflow Engine Lifecycle</text>
+
+  <!-- ═══════════ ROW 1 ═══════════ -->
+
+  <!-- Phase 1: Boot  (box 20..330) -->
+  <circle cx="60" cy="68" r="14" fill="#262626"/>
+  <text x="60" y="72" text-anchor="middle" class="lc-num">1</text>
+  <text x="82" y="72" class="lc-phase">Boot</text>
+  <rect x="20" y="88" width="310" height="110" rx="10" fill="#f5f5f5" stroke="#d4d4d4" stroke-width="1.5"/>
+  <text x="175" y="111" text-anchor="middle" class="lc-label">control-plane starts</text>
+  <line x1="46" y1="121" x2="304" y2="121" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="46" y="139" class="lc-mono">loads SQLite DB</text>
+  <text x="46" y="155" class="lc-mono">loads workflow TOML</text>
+  <text x="46" y="171" class="lc-mono">opens HTTP + WebSocket</text>
+  <text x="46" y="187" class="lc-mono">prints version banner</text>
+
+  <!-- arrow 1→2 (gap 330..378) -->
+  <line x1="330" y1="143" x2="370" y2="143" stroke="#a3a3a3" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Phase 2: Register  (box 378..688) -->
+  <circle cx="418" cy="68" r="14" fill="#262626"/>
+  <text x="418" y="72" text-anchor="middle" class="lc-num">2</text>
+  <text x="440" y="72" class="lc-phase">Register Crabs</text>
+  <rect x="378" y="88" width="310" height="110" rx="10" fill="#f5f5f5" stroke="#d4d4d4" stroke-width="1.5"/>
+  <text x="533" y="111" text-anchor="middle" class="lc-mono">POST /v1/crabs</text>
+  <line x1="404" y1="121" x2="662" y2="121" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="404" y="139" class="lc-mono">role uniqueness check</text>
+  <text x="404" y="155" class="lc-sub">1 named role per colony</text>
+  <text x="404" y="171" class="lc-sub">"any" allows unlimited</text>
+  <text x="404" y="187" class="lc-mono">crab starts polling</text>
+
+  <!-- arrow 2→3 (gap 688..736) -->
+  <line x1="688" y1="143" x2="728" y2="143" stroke="#a3a3a3" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Phase 3: Submit  (box 736..1080, orange) -->
+  <circle cx="776" cy="68" r="14" fill="#262626"/>
+  <text x="776" y="72" text-anchor="middle" class="lc-num">3</text>
+  <text x="798" y="72" class="lc-phase">Submit Mission</text>
+  <rect x="736" y="88" width="344" height="110" rx="10" fill="#fefce8" stroke="#f59e0b" stroke-width="2"/>
+  <text x="908" y="111" text-anchor="middle" class="lc-mono">POST /v1/missions</text>
+  <line x1="762" y1="121" x2="1054" y2="121" stroke="#fde68a" stroke-width="1"/>
+  <text x="762" y="139" class="lc-mono">lookup workflow manifest</text>
+  <text x="762" y="155" class="lc-mono">expand_workflow_into_tasks()</text>
+  <text x="762" y="171" class="lc-sub">plan → Queued, rest → Blocked</text>
+  <text x="762" y="187" class="lc-sub">mission status = Running</text>
+
+  <!-- ═══════════ ROW 2: Task DAG ═══════════ -->
+
+  <!-- arrow Submit→DAG (gap 198..238) -->
+  <line x1="908" y1="198" x2="908" y2="230" stroke="#f59e0b" stroke-width="2" marker-end="url(#arr-o)"/>
+  <text x="924" y="220" class="lc-step">expands into</text>
+
+  <!-- DAG container (60..1040 × 238..368) -->
+  <rect x="60" y="238" width="980" height="130" rx="10" fill="#f5f5f5" stroke="#d4d4d4" stroke-width="1.5"/>
+  <text x="82" y="258" class="lc-label">Task DAG</text>
+
+  <!-- plan  (110..200 × 270..306)  role=planner → blue -->
+  <rect x="110" y="270" width="90" height="36" rx="6" fill="#dbeafe" stroke="#93c5fd" stroke-width="1.5"/>
+  <text x="155" y="286" text-anchor="middle" class="lc-label">plan</text>
+  <text x="155" y="300" text-anchor="middle" class="lc-status" fill="#1e40af">Queued</text>
+
+  <!-- arrow plan→implement (gap 200..258) -->
+  <line x1="200" y1="288" x2="250" y2="288" stroke="#a3a3a3" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- implement  (258..366 × 270..306) -->
+  <rect x="258" y="270" width="108" height="36" rx="6" fill="#e5e7eb" stroke="#d4d4d4" stroke-width="1.5"/>
+  <text x="312" y="286" text-anchor="middle" class="lc-label">implement</text>
+  <text x="312" y="300" text-anchor="middle" class="lc-status" fill="#6b7280">Blocked</text>
+
+  <!-- arrow implement→review (gap 366..424) -->
+  <line x1="366" y1="288" x2="416" y2="288" stroke="#a3a3a3" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- review  (424..514 × 270..306)  role=reviewer → pink -->
+  <rect x="424" y="270" width="90" height="36" rx="6" fill="#fce7f3" stroke="#f9a8d4" stroke-width="1.5"/>
+  <text x="469" y="286" text-anchor="middle" class="lc-label">review</text>
+  <text x="469" y="300" text-anchor="middle" class="lc-status" fill="#6b7280">Blocked</text>
+
+  <!-- arrow review→pr  PASS (gap 514..640, dashed) -->
+  <line x1="514" y1="288" x2="632" y2="288" stroke="#a3a3a3" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr)"/>
+  <text x="573" y="280" text-anchor="middle" class="lc-sub">PASS</text>
+
+  <!-- pr  (640..700 × 270..306)  role=any → stone -->
+  <rect x="640" y="270" width="60" height="36" rx="6" fill="#f5f5f4" stroke="#d6d3d1" stroke-width="1.5"/>
+  <text x="670" y="286" text-anchor="middle" class="lc-label">pr</text>
+  <text x="670" y="300" text-anchor="middle" class="lc-status" fill="#6b7280">Blocked</text>
+
+  <!-- arrow review→fix  FAIL (straight down from review bottom, dashed) -->
+  <line x1="469" y1="306" x2="469" y2="320" stroke="#a3a3a3" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr)"/>
+  <text x="484" y="318" class="lc-sub">FAIL</text>
+
+  <!-- fix  (434..504 × 326..358)  centered under review -->
+  <rect x="434" y="326" width="70" height="32" rx="6" fill="#e5e7eb" stroke="#d4d4d4" stroke-width="1.5"/>
+  <text x="469" y="342" text-anchor="middle" class="lc-label">fix</text>
+  <text x="469" y="354" text-anchor="middle" class="lc-status" fill="#6b7280">max 3x</text>
+
+  <!-- arrow fix→review  RETRY
+       Route: fix left (434,342) → left to gap (394,342) → up (394,258) → right (469,258) → review top (469,270)
+       Stays in the implement-review gap (x 366..424), above all boxes (y 258 < 270).
+       Does NOT cross pr box. -->
+  <path d="M434 342 L394 342 L394 258 L469 258 L469 262" fill="none" stroke="#a3a3a3" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr)"/>
+  <text x="388" y="300" text-anchor="end" class="lc-sub">retry</text>
+
+  <!-- Roles legend (stacked, right side of DAG container) -->
+  <text x="800" y="278" class="lc-label">Roles</text>
+  <rect x="800" y="288" width="8" height="8" rx="2" fill="#dbeafe" stroke="#93c5fd" stroke-width="1"/>
+  <text x="814" y="296" class="lc-sub">planner</text>
+  <rect x="800" y="304" width="8" height="8" rx="2" fill="#e5e7eb" stroke="#d4d4d4" stroke-width="1"/>
+  <text x="814" y="312" class="lc-sub">worker</text>
+  <rect x="800" y="320" width="8" height="8" rx="2" fill="#fce7f3" stroke="#f9a8d4" stroke-width="1"/>
+  <text x="814" y="328" class="lc-sub">reviewer</text>
+  <rect x="800" y="336" width="8" height="8" rx="2" fill="#f5f5f4" stroke="#d6d3d1" stroke-width="1"/>
+  <text x="814" y="344" class="lc-sub">any</text>
+
+  <!-- ═══════════ ROW 3  (all boxes h=164, bottom=594) ═══════════ -->
+
+  <!-- Phase 4: Scheduler  (box 20..350 × 430..594) -->
+  <circle cx="60" cy="410" r="14" fill="#262626"/>
+  <text x="60" y="414" text-anchor="middle" class="lc-num">4</text>
+  <text x="82" y="414" class="lc-phase">Scheduler Tick</text>
+  <rect x="20" y="430" width="330" height="164" rx="10" fill="#f5f5f5" stroke="#d4d4d4" stroke-width="1.5"/>
+  <text x="185" y="453" text-anchor="middle" class="lc-mono">POST /v1/scheduler/tick</text>
+  <line x1="46" y1="463" x2="324" y2="463" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="46" y="481" class="lc-mono">query Queued tasks</text>
+  <text x="46" y="497" class="lc-mono">query idle crabs</text>
+  <text x="46" y="513" class="lc-sub">worktree safety check</text>
+  <text x="56" y="527" class="lc-sub">1 running task per mission</text>
+  <text x="46" y="545" class="lc-label">Two-pass role matching:</text>
+  <text x="56" y="559" class="lc-sub">1. exact role match first</text>
+  <text x="56" y="573" class="lc-sub">2. fallback to "any"</text>
+
+  <!-- arrow 4→5 (gap 350..410) -->
+  <line x1="350" y1="512" x2="402" y2="512" stroke="#a3a3a3" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Phase 5: Execute  (box 410..690 × 430..594) -->
+  <circle cx="450" cy="410" r="14" fill="#262626"/>
+  <text x="450" y="414" text-anchor="middle" class="lc-num">5</text>
+  <text x="472" y="414" class="lc-phase">Crab Executes</text>
+  <rect x="410" y="430" width="280" height="164" rx="10" fill="#f5f5f5" stroke="#d4d4d4" stroke-width="1.5"/>
+  <text x="550" y="453" text-anchor="middle" class="lc-sub">receives task via WebSocket</text>
+  <line x1="436" y1="463" x2="664" y2="463" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="436" y="481" class="lc-mono">start-run</text>
+  <text x="436" y="501" class="lc-mono">do the work</text>
+  <text x="446" y="517" class="lc-sub">read prompt + context</text>
+  <text x="446" y="533" class="lc-sub">use tools (Read, Write, Bash)</text>
+  <text x="436" y="553" class="lc-mono">complete-run</text>
+  <text x="446" y="567" class="lc-sub">--summary --result</text>
+
+  <!-- arrow 5→6 (gap 690..750, orange) -->
+  <line x1="690" y1="512" x2="742" y2="512" stroke="#f59e0b" stroke-width="2" marker-end="url(#arr-o)"/>
+
+  <!-- Phase 6: Cascade  (box 750..1080 × 430..594, orange) -->
+  <circle cx="790" cy="410" r="14" fill="#262626"/>
+  <text x="790" y="414" text-anchor="middle" class="lc-num">6</text>
+  <text x="812" y="414" class="lc-phase">Cascade</text>
+  <rect x="750" y="430" width="330" height="164" rx="10" fill="#fefce8" stroke="#f59e0b" stroke-width="2"/>
+  <text x="915" y="453" text-anchor="middle" class="lc-mono">POST /v1/runs/complete</text>
+  <line x1="776" y1="463" x2="1054" y2="463" stroke="#fde68a" stroke-width="1"/>
+  <text x="776" y="481" class="lc-mono">mark task Completed/Failed</text>
+  <text x="776" y="497" class="lc-mono">find dependents in task_deps</text>
+  <text x="776" y="517" class="lc-label">For each dependent:</text>
+  <text x="786" y="533" class="lc-sub">all deps terminal?</text>
+  <text x="786" y="549" class="lc-sub">condition met → Queued</text>
+  <text x="786" y="565" class="lc-sub">condition not met → Skipped</text>
+
+  <!-- loop arrow: Cascade bottom (594) → below all boxes → Scheduler bottom
+       Path stays in clear space at y=620 (boxes end at y=594) -->
+  <path d="M915 594 L915 620 L185 620 L185 600" fill="none" stroke="#a3a3a3" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#arr)"/>
+  <text x="550" y="616" text-anchor="middle" class="lc-step">next task queued → scheduler assigns</text>
+
+  <!-- ═══════════ ROW 4: Terminal ═══════════ -->
+
+  <!-- orange arrow: Cascade → terminal -->
+  <line x1="915" y1="620" x2="915" y2="650" stroke="#f59e0b" stroke-width="2"/>
+  <line x1="915" y1="650" x2="570" y2="650" stroke="#f59e0b" stroke-width="2" marker-end="url(#arr-o)"/>
+  <text x="740" y="646" text-anchor="middle" class="lc-step">all tasks terminal?</text>
+
+  <!-- Mission Complete  (360..740 × 670..730) -->
+  <rect x="360" y="670" width="380" height="60" rx="12" fill="#262626"/>
+  <text x="550" y="696" text-anchor="middle" font-family="Helvetica Neue, Arial, sans-serif" fill="#ffffff" font-size="16px" font-weight="600">Mission Complete</text>
+  <text x="550" y="718" text-anchor="middle" font-family="SF Mono, Fira Code, monospace" fill="#9ca3af" font-size="11px">status = Completed | Failed</text>
+
+  <!-- Colony Role Model  (20..330 × 670..830) -->
+  <rect x="20" y="670" width="310" height="160" rx="10" fill="#f5f5f5" stroke="#d4d4d4" stroke-width="1.5"/>
+  <text x="175" y="692" text-anchor="middle" class="lc-label">Colony Role Model</text>
+  <line x1="46" y1="700" x2="304" y2="700" stroke="#e5e7eb" stroke-width="1"/>
+  <rect x="46" y="712" width="10" height="10" rx="2" fill="#dbeafe" stroke="#93c5fd" stroke-width="1"/>
+  <text x="64" y="722" class="lc-sub">Sage — planner (1 max)</text>
+  <rect x="46" y="732" width="10" height="10" rx="2" fill="#e5e7eb" stroke="#d4d4d4" stroke-width="1"/>
+  <text x="64" y="742" class="lc-sub">Atlas — worker (1 max)</text>
+  <rect x="46" y="752" width="10" height="10" rx="2" fill="#fce7f3" stroke="#f9a8d4" stroke-width="1"/>
+  <text x="64" y="762" class="lc-sub">Coral — reviewer (1 max)</text>
+  <rect x="46" y="772" width="10" height="10" rx="2" fill="#f5f5f4" stroke="#d6d3d1" stroke-width="1"/>
+  <text x="64" y="782" class="lc-sub">Extra — any (unlimited)</text>
+  <text x="46" y="816" class="lc-sub">Enforced at registration</text>
+
+  <!-- Monitoring  (780..1080 × 670..780) -->
+  <rect x="780" y="670" width="300" height="110" rx="10" fill="#f5f5f5" stroke="#d4d4d4" stroke-width="1.5"/>
+  <text x="930" y="692" text-anchor="middle" class="lc-label">Monitoring</text>
+  <line x1="806" y1="700" x2="1054" y2="700" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="806" y="718" class="lc-mono">GET /v1/status</text>
+  <text x="806" y="734" class="lc-mono">GET /v1/tasks</text>
+  <text x="806" y="750" class="lc-mono">ws://.../v1/ws/console</text>
+  <text x="806" y="770" class="lc-sub">Astro console UI</text>
+</svg>
