@@ -396,6 +396,8 @@ async fn main() -> Result<()> {
 }
 
 async fn serve(port: u16, db_path: &StdPath, prompts_path: &StdPath) -> Result<()> {
+    info!("crabitat control-plane v{}", env!("CARGO_PKG_VERSION"));
+
     let connection = init_db(db_path)?;
     let (console_tx, _) = broadcast::channel::<String>(256);
     let workflows = WorkflowRegistry::load(prompts_path);
@@ -411,9 +413,9 @@ async fn serve(port: u16, db_path: &StdPath, prompts_path: &StdPath) -> Result<(
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    info!("control-plane listening on http://{}", addr);
-    info!("sqlite database at {}", db_path.display());
-    info!("prompts path at {}", prompts_path.display());
+    info!("listening on http://{}", addr);
+    info!("database: {}", db_path.display());
+    info!("prompts:  {}", prompts_path.display());
     axum::serve(listener, app)
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
@@ -429,6 +431,7 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/crabs", get(list_crabs))
         .route("/v1/crabs/register", post(register_crab))
         .route("/v1/missions", post(create_mission).get(list_missions))
+        .route("/v1/missions/{mission_id}", get(get_mission))
         .route("/v1/tasks", post(create_task).get(list_tasks))
         .route("/v1/runs/start", post(start_run))
         .route("/v1/runs/update", post(update_run))
@@ -962,6 +965,16 @@ async fn list_missions(
     let db = state.db.lock().await;
     let missions = query_missions(&db)?;
     Ok(Json(missions))
+}
+
+async fn get_mission(
+    State(state): State<AppState>,
+    Path(mission_id): Path<String>,
+) -> Result<Json<MissionRecord>, ApiError> {
+    let db = state.db.lock().await;
+    let mission =
+        fetch_mission(&db, &mission_id)?.ok_or_else(|| ApiError::not_found("mission not found"))?;
+    Ok(Json(mission))
 }
 
 async fn create_task(
@@ -1881,6 +1894,25 @@ fn query_missions(conn: &Connection) -> Result<Vec<MissionRecord>, ApiError> {
     Ok(rows.filter_map(Result::ok).collect())
 }
 
+fn fetch_mission(conn: &Connection, mission_id: &str) -> Result<Option<MissionRecord>, ApiError> {
+    let mut stmt = conn.prepare(
+        "SELECT mission_id, colony_id, prompt, workflow_name, status, worktree_path, created_at_ms FROM missions WHERE mission_id = ?1",
+    )?;
+    let mut rows = stmt.query(params![mission_id])?;
+    if let Some(row) = rows.next()? {
+        return Ok(Some(MissionRecord {
+            mission_id: row.get(0)?,
+            colony_id: row.get(1)?,
+            prompt: row.get(2)?,
+            workflow_name: row.get(3)?,
+            status: mission_status_from_db(&row.get::<_, String>(4)?),
+            worktree_path: row.get(5)?,
+            created_at_ms: row.get::<_, i64>(6)? as u64,
+        }));
+    }
+    Ok(None)
+}
+
 fn query_tasks(conn: &Connection) -> Result<Vec<TaskRecord>, ApiError> {
     let mut stmt = conn.prepare(
         "
@@ -2473,5 +2505,42 @@ mod tests {
         assert_eq!(snapshot.summary.total_tokens, 800);
         assert_eq!(snapshot.summary.avg_end_to_end_ms, Some(4000));
         assert_eq!(snapshot.colonies.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn get_mission_by_id() {
+        let state = test_state();
+        let colony = setup_colony(&state).await;
+
+        let mission = create_mission(
+            State(state.clone()),
+            Json(CreateMissionRequest {
+                colony_id: colony.colony_id.clone(),
+                prompt: "Implement feature Y".into(),
+                workflow: None,
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        let fetched =
+            get_mission(State(state.clone()), Path(mission.mission_id.clone())).await.unwrap().0;
+
+        assert_eq!(fetched.mission_id, mission.mission_id);
+        assert_eq!(fetched.colony_id, colony.colony_id);
+        assert_eq!(fetched.prompt, "Implement feature Y");
+    }
+
+    #[tokio::test]
+    async fn get_mission_not_found() {
+        let state = test_state();
+        let result =
+            get_mission(State(state.clone()), Path("00000000-0000-0000-0000-000000000000".into()))
+                .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status, StatusCode::NOT_FOUND);
     }
 }
