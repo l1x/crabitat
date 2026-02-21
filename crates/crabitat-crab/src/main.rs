@@ -69,7 +69,7 @@ enum Cmd {
         #[arg(long)]
         crab_id: String,
 
-        /// Working directory for this run
+        /// Working directory for this run (uses mission worktree if not specified)
         #[arg(long, default_value = ".")]
         burrow_path: String,
     },
@@ -86,6 +86,10 @@ enum Cmd {
         /// Brief summary of what happened
         #[arg(long)]
         summary: Option<String>,
+
+        /// Structured result (e.g. "PASS" or "FAIL") for workflow condition evaluation
+        #[arg(long)]
+        result: Option<String>,
 
         /// End-to-end duration in milliseconds
         #[arg(long)]
@@ -170,6 +174,10 @@ struct TaskRecord {
     title: String,
     assigned_crab_id: Option<String>,
     status: String,
+    step_id: Option<String>,
+    role: Option<String>,
+    prompt: Option<String>,
+    context: Option<String>,
     created_at_ms: u64,
     updated_at_ms: u64,
 }
@@ -197,8 +205,8 @@ async fn main() -> Result<()> {
         Cmd::StartRun { mission_id, task_id, crab_id, burrow_path } => {
             cmd_start_run(cp, &mission_id, &task_id, &crab_id, &burrow_path).await?;
         }
-        Cmd::CompleteRun { run_id, status, summary, duration_ms } => {
-            cmd_complete_run(cp, &run_id, &status, summary, duration_ms).await?;
+        Cmd::CompleteRun { run_id, status, summary, result, duration_ms } => {
+            cmd_complete_run(cp, &run_id, &status, summary, result, duration_ms).await?;
         }
         Cmd::Guide => {
             cmd_guide(cp);
@@ -329,13 +337,12 @@ Go back to Step 2 and poll for the next task. Never stop unless told to shut dow
 
 async fn cmd_poll(cp: &str, crab_id: &str) -> Result<()> {
     let http = Client::new();
-    let resp = http
-        .get(format!("{cp}/v1/tasks"))
-        .send()
-        .await
-        .context("failed to reach control-plane")?;
+    let resp =
+        http.get(format!("{cp}/v1/tasks")).send().await.context("failed to reach control-plane")?;
 
     let tasks: Vec<TaskRecord> = resp.json().await.context("bad response")?;
+
+    // Find tasks assigned to this crab (queued or assigned status)
     let pending: Vec<&TaskRecord> = tasks
         .iter()
         .filter(|t| {
@@ -345,11 +352,9 @@ async fn cmd_poll(cp: &str, crab_id: &str) -> Result<()> {
         .collect();
 
     if pending.is_empty() {
-        // Print nothing — no tasks available
         return Ok(());
     }
 
-    // Print the first pending task as JSON
     let json = serde_json::to_string_pretty(&pending[0])?;
     println!("{json}");
     Ok(())
@@ -393,16 +398,27 @@ async fn cmd_complete_run(
     run_id: &str,
     status: &str,
     summary: Option<String>,
+    result: Option<String>,
     duration_ms: Option<u64>,
 ) -> Result<()> {
     let http = Client::new();
+
+    // If a result is provided, wrap it in a JSON summary
+    let final_summary = match (summary, result) {
+        (Some(sum), Some(res)) => {
+            Some(serde_json::json!({"summary": sum, "result": res}).to_string())
+        }
+        (Some(sum), None) => Some(sum),
+        (None, Some(res)) => Some(serde_json::json!({"result": res}).to_string()),
+        (None, None) => None,
+    };
 
     let resp = http
         .post(format!("{cp}/v1/runs/complete"))
         .json(&CompleteRunBody {
             run_id: run_id.to_string(),
             status: status.to_string(),
-            summary,
+            summary: final_summary,
             timing: duration_ms.map(|ms| TimingBody { end_to_end_ms: Some(ms) }),
         })
         .send()
@@ -455,11 +471,8 @@ async fn cmd_missions(cp: &str) -> Result<()> {
 
 async fn cmd_tasks(cp: &str) -> Result<()> {
     let http = Client::new();
-    let resp = http
-        .get(format!("{cp}/v1/tasks"))
-        .send()
-        .await
-        .context("failed to reach control-plane")?;
+    let resp =
+        http.get(format!("{cp}/v1/tasks")).send().await.context("failed to reach control-plane")?;
 
     let body = resp.text().await.unwrap_or_default();
     if let Ok(val) = serde_json::from_str::<serde_json::Value>(&body) {
@@ -639,8 +652,8 @@ async fn handle_task(
         }
     };
 
-    let result = execute_in_burrow(crab_name, crab_role, colony_name, repo, task, &burrow_dir)
-        .await;
+    let result =
+        execute_in_burrow(crab_name, crab_role, colony_name, repo, task, &burrow_dir).await;
 
     let end_to_end_ms = now_ms().saturating_sub(started_at);
 
@@ -780,11 +793,7 @@ async fn execute_in_burrow(
         if stderr.is_empty() { "(no output)".to_string() } else { stderr }
     } else {
         let max = 4096;
-        if stdout.len() > max {
-            format!("{}... [truncated]", &stdout[..max])
-        } else {
-            stdout
-        }
+        if stdout.len() > max { format!("{}... [truncated]", &stdout[..max]) } else { stdout }
     };
 
     Ok(TaskOutput { success, summary })

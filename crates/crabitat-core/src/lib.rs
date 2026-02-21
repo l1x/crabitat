@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -118,6 +119,16 @@ pub enum TaskStatus {
     Blocked,
     Completed,
     Failed,
+    Skipped,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MissionStatus {
+    Pending,
+    Running,
+    Completed,
+    Failed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -154,13 +165,23 @@ impl Colony {
 pub struct Mission {
     pub id: MissionId,
     pub prompt: String,
+    pub workflow_name: Option<String>,
+    pub status: MissionStatus,
+    pub worktree_path: Option<String>,
     pub created_at_ms: u64,
 }
 
 impl Mission {
     #[must_use]
     pub fn new(prompt: impl Into<String>) -> Self {
-        Self { id: MissionId::new(), prompt: prompt.into(), created_at_ms: now_ms() }
+        Self {
+            id: MissionId::new(),
+            prompt: prompt.into(),
+            workflow_name: None,
+            status: MissionStatus::Pending,
+            worktree_path: None,
+            created_at_ms: now_ms(),
+        }
     }
 }
 
@@ -171,8 +192,55 @@ pub struct Task {
     pub title: String,
     pub assigned_crab_id: Option<String>,
     pub status: TaskStatus,
+    pub step_id: Option<String>,
+    pub role: Option<String>,
+    pub prompt: Option<String>,
+    pub context: Option<String>,
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
+}
+
+// ---------------------------------------------------------------------------
+// Workflow manifest types (parsed from TOML)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowMeta {
+    pub name: String,
+    pub description: String,
+    pub version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowStep {
+    pub id: String,
+    pub role: String,
+    pub prompt_file: String,
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+    pub condition: Option<String>,
+    #[serde(default)]
+    pub max_retries: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowManifest {
+    pub workflow: WorkflowMeta,
+    #[serde(rename = "steps")]
+    pub steps: Vec<WorkflowStep>,
+}
+
+/// Evaluate a simple condition expression like `step_id.field == 'value'`
+/// against a context map of `{"step_id.field": "value"}`.
+pub fn evaluate_condition(condition: &str, context: &HashMap<String, String>) -> bool {
+    // Parse: "step_id.field == 'value'"
+    let parts: Vec<&str> = condition.splitn(2, "==").collect();
+    if parts.len() != 2 {
+        return false;
+    }
+    let key = parts[0].trim();
+    let expected = parts[1].trim().trim_matches('\'').trim_matches('"');
+    context.get(key).is_some_and(|v| v == expected)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

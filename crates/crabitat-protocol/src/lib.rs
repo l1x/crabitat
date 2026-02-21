@@ -52,6 +52,11 @@ pub struct TaskAssigned {
     pub title: String,
     pub mission_prompt: String,
     pub desired_status: TaskStatus,
+    pub step_id: Option<String>,
+    pub role: Option<String>,
+    pub prompt: Option<String>,
+    pub context: Option<String>,
+    pub worktree_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

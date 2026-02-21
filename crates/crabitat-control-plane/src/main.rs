@@ -11,8 +11,8 @@ use axum::{
 };
 use clap::{Parser, Subcommand};
 use crabitat_core::{
-    BurrowMode, Colony, Mission, MissionId, RunId, RunMetrics, RunStatus, TaskId, TaskStatus,
-    now_ms,
+    BurrowMode, Colony, Mission, MissionId, MissionStatus, RunId, RunMetrics, RunStatus, TaskId,
+    TaskStatus, WorkflowManifest, evaluate_condition, now_ms,
 };
 use crabitat_protocol::{Envelope, MessageKind};
 use rusqlite::{Connection, params};
@@ -42,16 +42,91 @@ enum Command {
         port: u16,
         #[arg(long, default_value = "./var/crabitat-control-plane.db")]
         db_path: PathBuf,
+        #[arg(long, default_value = "./agent-prompts")]
+        prompts_path: PathBuf,
     },
 }
 
 type CrabChannels = Arc<Mutex<HashMap<String, mpsc::UnboundedSender<String>>>>;
+
+// ---------------------------------------------------------------------------
+// Workflow Registry
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+struct WorkflowRegistry {
+    manifests: HashMap<String, WorkflowManifest>,
+    prompts_path: PathBuf,
+}
+
+impl WorkflowRegistry {
+    fn load(prompts_path: &StdPath) -> Self {
+        let mut manifests = HashMap::new();
+        let workflows_dir = prompts_path.join("workflows");
+
+        if workflows_dir.is_dir()
+            && let Ok(entries) = fs::read_dir(&workflows_dir)
+        {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("toml") {
+                    match fs::read_to_string(&path) {
+                        Ok(content) => match toml::from_str::<WorkflowManifest>(&content) {
+                            Ok(manifest) => {
+                                info!(
+                                    name = %manifest.workflow.name,
+                                    steps = manifest.steps.len(),
+                                    "loaded workflow"
+                                );
+                                manifests.insert(manifest.workflow.name.clone(), manifest);
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    path = %path.display(),
+                                    err = %e,
+                                    "failed to parse workflow TOML"
+                                );
+                            }
+                        },
+                        Err(e) => {
+                            tracing::warn!(
+                                path = %path.display(),
+                                err = %e,
+                                "failed to read workflow file"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        Self { manifests, prompts_path: prompts_path.to_path_buf() }
+    }
+
+    fn get(&self, name: &str) -> Option<&WorkflowManifest> {
+        self.manifests.get(name)
+    }
+
+    fn list_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.manifests.keys().cloned().collect();
+        names.sort();
+        names
+    }
+
+    fn load_prompt_file(&self, prompt_file: &str) -> Result<String, ApiError> {
+        let path = self.prompts_path.join(prompt_file);
+        fs::read_to_string(&path).map_err(|e| {
+            ApiError::internal(format!("failed to read prompt file {}: {e}", path.display()))
+        })
+    }
+}
 
 #[derive(Clone)]
 struct AppState {
     db: Arc<Mutex<Connection>>,
     crab_channels: CrabChannels,
     console_tx: broadcast::Sender<String>,
+    workflows: Arc<WorkflowRegistry>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -161,6 +236,9 @@ struct MissionRecord {
     mission_id: String,
     colony_id: String,
     prompt: String,
+    workflow_name: Option<String>,
+    status: MissionStatus,
+    worktree_path: Option<String>,
     created_at_ms: u64,
 }
 
@@ -171,6 +249,10 @@ struct TaskRecord {
     title: String,
     assigned_crab_id: Option<String>,
     status: TaskStatus,
+    step_id: Option<String>,
+    role: Option<String>,
+    prompt: Option<String>,
+    context: Option<String>,
     created_at_ms: u64,
     updated_at_ms: u64,
 }
@@ -238,6 +320,7 @@ struct RegisterCrabRequest {
 struct CreateMissionRequest {
     colony_id: String,
     prompt: String,
+    workflow: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -304,19 +387,24 @@ async fn main() -> Result<()> {
         .init();
 
     match Cli::parse().command {
-        Command::Serve { port, db_path } => serve(port, &db_path).await?,
+        Command::Serve { port, db_path, prompts_path } => {
+            serve(port, &db_path, &prompts_path).await?;
+        }
     }
 
     Ok(())
 }
 
-async fn serve(port: u16, db_path: &StdPath) -> Result<()> {
+async fn serve(port: u16, db_path: &StdPath, prompts_path: &StdPath) -> Result<()> {
     let connection = init_db(db_path)?;
     let (console_tx, _) = broadcast::channel::<String>(256);
+    let workflows = WorkflowRegistry::load(prompts_path);
+    info!(count = workflows.manifests.len(), "workflow registry loaded");
     let state = AppState {
         db: Arc::new(Mutex::new(connection)),
         crab_channels: Arc::new(Mutex::new(HashMap::new())),
         console_tx,
+        workflows: Arc::new(workflows),
     };
 
     let app = build_router(state);
@@ -325,6 +413,7 @@ async fn serve(port: u16, db_path: &StdPath) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     info!("control-plane listening on http://{}", addr);
     info!("sqlite database at {}", db_path.display());
+    info!("prompts path at {}", prompts_path.display());
     axum::serve(listener, app)
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
@@ -344,6 +433,8 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/runs/start", post(start_run))
         .route("/v1/runs/update", post(update_run))
         .route("/v1/runs/complete", post(complete_run))
+        .route("/v1/workflows", get(list_workflows))
+        .route("/v1/scheduler/tick", post(scheduler_tick))
         .route("/v1/status", get(get_status))
         .route("/v1/ws/crab/{crab_id}", get(ws_crab_handler))
         .route("/v1/ws/console", get(ws_console_handler))
@@ -383,6 +474,9 @@ fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
           mission_id TEXT PRIMARY KEY,
           colony_id TEXT NOT NULL,
           prompt TEXT NOT NULL,
+          workflow_name TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          worktree_path TEXT,
           created_at_ms INTEGER NOT NULL,
           FOREIGN KEY(colony_id) REFERENCES colonies(colony_id)
         );
@@ -393,9 +487,19 @@ fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
           title TEXT NOT NULL,
           assigned_crab_id TEXT,
           status TEXT NOT NULL,
+          step_id TEXT,
+          role TEXT,
+          prompt TEXT,
+          context TEXT,
           created_at_ms INTEGER NOT NULL,
           updated_at_ms INTEGER NOT NULL,
           FOREIGN KEY(mission_id) REFERENCES missions(mission_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS task_deps (
+          task_id TEXT NOT NULL,
+          depends_on_task_id TEXT NOT NULL,
+          PRIMARY KEY (task_id, depends_on_task_id)
         );
 
         CREATE TABLE IF NOT EXISTS runs (
@@ -596,6 +700,10 @@ async fn healthz() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "ok": true }))
 }
 
+async fn list_workflows(State(state): State<AppState>) -> Json<Vec<String>> {
+    Json(state.workflows.list_names())
+}
+
 async fn create_colony(
     State(state): State<AppState>,
     Json(request): Json<CreateColonyRequest>,
@@ -707,22 +815,145 @@ async fn create_mission(
         return Err(ApiError::not_found("colony_id not found"));
     }
 
-    let mission = Mission::new(request.prompt);
+    let mission = Mission::new(&request.prompt);
     let row = MissionRecord {
         mission_id: mission.id.to_string(),
         colony_id: request.colony_id,
         prompt: mission.prompt,
+        workflow_name: request.workflow.clone(),
+        status: MissionStatus::Pending,
+        worktree_path: None,
         created_at_ms: mission.created_at_ms,
     };
 
     let db_ref = &*db;
     db_ref.execute(
-        "INSERT INTO missions (mission_id, colony_id, prompt, created_at_ms) VALUES (?1, ?2, ?3, ?4)",
-        params![row.mission_id, row.colony_id, row.prompt, row.created_at_ms],
+        "INSERT INTO missions (mission_id, colony_id, prompt, workflow_name, status, worktree_path, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            row.mission_id,
+            row.colony_id,
+            row.prompt,
+            row.workflow_name,
+            mission_status_to_db(row.status),
+            row.worktree_path,
+            row.created_at_ms
+        ],
     )?;
 
     emit_console_event(&state.console_tx, ConsoleEvent::MissionCreated { mission: row.clone() });
+
+    // If a workflow is specified, expand it into tasks
+    if let Some(ref workflow_name) = request.workflow {
+        let manifest = state
+            .workflows
+            .get(workflow_name)
+            .ok_or_else(|| ApiError::not_found(format!("workflow '{workflow_name}' not found")))?
+            .clone();
+
+        let worktree_path = format!("burrows/mission-{}", row.mission_id);
+        db.execute(
+            "UPDATE missions SET status = ?2, worktree_path = ?3 WHERE mission_id = ?1",
+            params![row.mission_id, mission_status_to_db(MissionStatus::Running), worktree_path],
+        )?;
+
+        expand_workflow_into_tasks(
+            &db,
+            &state.workflows,
+            &manifest,
+            &row.mission_id,
+            &request.prompt,
+            &state.console_tx,
+        )?;
+    }
+
     Ok(Json(row))
+}
+
+fn expand_workflow_into_tasks(
+    conn: &Connection,
+    registry: &WorkflowRegistry,
+    manifest: &WorkflowManifest,
+    mission_id: &str,
+    mission_prompt: &str,
+    console_tx: &broadcast::Sender<String>,
+) -> Result<(), ApiError> {
+    let now = now_ms();
+
+    // Map step_id -> task_id for dependency linking
+    let mut step_to_task: HashMap<String, String> = HashMap::new();
+
+    for step in &manifest.steps {
+        let task_id = TaskId::new().to_string();
+        let has_deps = !step.depends_on.is_empty();
+        let status = if has_deps { TaskStatus::Blocked } else { TaskStatus::Queued };
+
+        // Load and render the prompt template
+        let prompt_template = registry.load_prompt_file(&step.prompt_file).unwrap_or_default();
+        let rendered_prompt = prompt_template
+            .replace("{{mission_prompt}}", mission_prompt)
+            .replace("{{context}}", "")
+            .replace("{{worktree_path}}", &format!("burrows/mission-{mission_id}"));
+
+        // Store condition and max_retries in context JSON if present
+        let context_json = if step.condition.is_some() || step.max_retries > 0 {
+            let mut ctx = serde_json::Map::new();
+            if let Some(ref cond) = step.condition {
+                ctx.insert("_condition".to_string(), serde_json::Value::String(cond.clone()));
+            }
+            if step.max_retries > 0 {
+                ctx.insert(
+                    "_max_retries".to_string(),
+                    serde_json::Value::Number(step.max_retries.into()),
+                );
+            }
+            Some(serde_json::to_string(&ctx).unwrap_or_default())
+        } else {
+            None
+        };
+
+        conn.execute(
+            "
+            INSERT INTO tasks (task_id, mission_id, title, assigned_crab_id, status,
+                               step_id, role, prompt, context,
+                               created_at_ms, updated_at_ms)
+            VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            ",
+            params![
+                task_id,
+                mission_id,
+                format!("[{}] {}", step.id, step.role),
+                task_status_to_db(status),
+                step.id,
+                step.role,
+                rendered_prompt,
+                context_json,
+                now,
+                now
+            ],
+        )?;
+
+        step_to_task.insert(step.id.clone(), task_id.clone());
+
+        if let Ok(Some(task)) = fetch_task(conn, &task_id) {
+            emit_console_event(console_tx, ConsoleEvent::TaskCreated { task });
+        }
+    }
+
+    // Insert dependency edges
+    for step in &manifest.steps {
+        if let Some(task_id) = step_to_task.get(&step.id) {
+            for dep_step_id in &step.depends_on {
+                if let Some(dep_task_id) = step_to_task.get(dep_step_id) {
+                    conn.execute(
+                        "INSERT INTO task_deps (task_id, depends_on_task_id) VALUES (?1, ?2)",
+                        params![task_id, dep_task_id],
+                    )?;
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 async fn list_missions(
@@ -761,8 +992,10 @@ async fn create_task(
 
         db.execute(
             "
-            INSERT INTO tasks (task_id, mission_id, title, assigned_crab_id, status, created_at_ms, updated_at_ms)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            INSERT INTO tasks (task_id, mission_id, title, assigned_crab_id, status,
+                               step_id, role, prompt, context,
+                               created_at_ms, updated_at_ms)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
             ",
             params![
                 task_id,
@@ -770,6 +1003,10 @@ async fn create_task(
                 request.title,
                 request.assigned_crab_id,
                 task_status_to_db(status),
+                Option::<String>::None,
+                Option::<String>::None,
+                Option::<String>::None,
+                Option::<String>::None,
                 created_at_ms,
                 created_at_ms
             ],
@@ -818,6 +1055,11 @@ async fn create_task(
                     title: task.title.clone(),
                     mission_prompt,
                     desired_status: TaskStatus::Running,
+                    step_id: task.step_id.clone(),
+                    role: task.role.clone(),
+                    prompt: task.prompt.clone(),
+                    context: task.context.clone(),
+                    worktree_path: None,
                 }),
                 now_ms(),
             );
@@ -1062,7 +1304,474 @@ async fn complete_run(
     let run = fetch_run(&db, &request.run_id)?
         .ok_or_else(|| ApiError::internal("failed to reload run after completion"))?;
     emit_console_event(&state.console_tx, ConsoleEvent::RunCompleted { run: run.clone() });
+
+    // Cascade workflow dependencies
+    cascade_workflow(&db, &existing.mission_id, &existing.task_id, &state.console_tx)?;
+
     Ok(Json(run))
+}
+
+/// After a task completes/fails, check dependent tasks and update their status.
+fn cascade_workflow(
+    conn: &Connection,
+    mission_id: &str,
+    completed_task_id: &str,
+    console_tx: &broadcast::Sender<String>,
+) -> Result<(), ApiError> {
+    let now = now_ms();
+
+    // Get the completed task's info
+    let completed_task = match fetch_task(conn, completed_task_id)? {
+        Some(t) => t,
+        None => return Ok(()),
+    };
+
+    // If this task has no step_id, it's not part of a workflow — skip cascade
+    if completed_task.step_id.is_none() {
+        return Ok(());
+    }
+
+    let completed_step_id = completed_task.step_id.as_deref().unwrap_or("");
+
+    // If the task failed, cascade failure to all dependents
+    if matches!(completed_task.status, TaskStatus::Failed) {
+        cascade_failure(conn, completed_task_id, now, console_tx)?;
+        update_mission_status(conn, mission_id, now)?;
+        return Ok(());
+    }
+
+    // Build context map from completed runs in this mission
+    let context_map = build_context_map(conn, mission_id)?;
+
+    // Find tasks that depend on the completed task
+    let mut stmt = conn.prepare("SELECT task_id FROM task_deps WHERE depends_on_task_id = ?1")?;
+    let dependent_task_ids: Vec<String> = stmt
+        .query_map(params![completed_task_id], |row| row.get(0))?
+        .filter_map(Result::ok)
+        .collect();
+
+    for dep_task_id in &dependent_task_ids {
+        let dep_task = match fetch_task(conn, dep_task_id)? {
+            Some(t) => t,
+            None => continue,
+        };
+
+        // Only process blocked tasks
+        if !matches!(dep_task.status, TaskStatus::Blocked) {
+            continue;
+        }
+
+        // Check if ALL dependencies are terminal (Completed or Skipped)
+        let blocked_count: i64 = conn.query_row(
+            "
+            SELECT COUNT(*) FROM task_deps td
+            JOIN tasks t ON td.depends_on_task_id = t.task_id
+            WHERE td.task_id = ?1 AND t.status NOT IN ('completed', 'skipped')
+            ",
+            params![dep_task_id],
+            |row| row.get(0),
+        )?;
+
+        if blocked_count > 0 {
+            continue; // Still has unresolved dependencies
+        }
+
+        // All deps done — evaluate condition
+        let _step_id = dep_task.step_id.as_deref().unwrap_or("");
+
+        // Look up the condition from the step_id / task's workflow context
+        // The condition is stored implicitly — we check if this step has a condition
+        // by querying the task's prompt metadata. For now, we look at the task_deps
+        // to find the original step's condition from the workflow.
+        // Since conditions are evaluated at cascade time, we store them in task context.
+        let condition = get_task_condition(conn, dep_task_id)?;
+
+        let should_queue =
+            if let Some(cond) = condition { evaluate_condition(&cond, &context_map) } else { true };
+
+        if should_queue {
+            // Build accumulated context from dependency chain
+            let accumulated_context = build_accumulated_context(conn, dep_task_id)?;
+
+            conn.execute(
+                "UPDATE tasks SET status = ?2, context = ?3, updated_at_ms = ?4 WHERE task_id = ?1",
+                params![
+                    dep_task_id,
+                    task_status_to_db(TaskStatus::Queued),
+                    accumulated_context,
+                    now
+                ],
+            )?;
+        } else {
+            conn.execute(
+                "UPDATE tasks SET status = ?2, updated_at_ms = ?3 WHERE task_id = ?1",
+                params![dep_task_id, task_status_to_db(TaskStatus::Skipped), now],
+            )?;
+        }
+
+        if let Ok(Some(updated_task)) = fetch_task(conn, dep_task_id) {
+            emit_console_event(console_tx, ConsoleEvent::TaskUpdated { task: updated_task });
+        }
+
+        // If we just skipped a task, recurse to cascade further
+        if !should_queue {
+            cascade_workflow(conn, mission_id, dep_task_id, console_tx)?;
+        }
+    }
+
+    // Handle fix→review retry loop: if a "fix" step completed, find the "review"
+    // step that depends on "implement" (same mission) and re-queue it
+    if completed_step_id == "fix" {
+        requeue_review_after_fix(conn, mission_id, now, console_tx)?;
+    }
+
+    update_mission_status(conn, mission_id, now)?;
+    Ok(())
+}
+
+fn cascade_failure(
+    conn: &Connection,
+    failed_task_id: &str,
+    now: u64,
+    console_tx: &broadcast::Sender<String>,
+) -> Result<(), ApiError> {
+    let mut stmt = conn.prepare("SELECT task_id FROM task_deps WHERE depends_on_task_id = ?1")?;
+    let dependent_task_ids: Vec<String> =
+        stmt.query_map(params![failed_task_id], |row| row.get(0))?.filter_map(Result::ok).collect();
+
+    for dep_task_id in &dependent_task_ids {
+        conn.execute(
+            "UPDATE tasks SET status = ?2, updated_at_ms = ?3 WHERE task_id = ?1",
+            params![dep_task_id, task_status_to_db(TaskStatus::Failed), now],
+        )?;
+        if let Ok(Some(task)) = fetch_task(conn, dep_task_id) {
+            emit_console_event(console_tx, ConsoleEvent::TaskUpdated { task });
+        }
+        cascade_failure(conn, dep_task_id, now, console_tx)?;
+    }
+    Ok(())
+}
+
+fn requeue_review_after_fix(
+    conn: &Connection,
+    mission_id: &str,
+    now: u64,
+    console_tx: &broadcast::Sender<String>,
+) -> Result<(), ApiError> {
+    // Find the "review" task in this mission and check its retry count
+    let review_task: Option<(String, i64)> = conn
+        .query_row(
+            "
+            SELECT task_id,
+                   (SELECT COUNT(*) FROM runs WHERE task_id = t.task_id AND status = 'completed') as run_count
+            FROM tasks t
+            WHERE mission_id = ?1 AND step_id = 'review'
+            ",
+            params![mission_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .ok();
+
+    if let Some((review_task_id, _run_count)) = review_task {
+        // Reset review to Queued so it re-runs
+        conn.execute(
+            "UPDATE tasks SET status = ?2, updated_at_ms = ?3 WHERE task_id = ?1",
+            params![review_task_id, task_status_to_db(TaskStatus::Queued), now],
+        )?;
+        if let Ok(Some(task)) = fetch_task(conn, &review_task_id) {
+            emit_console_event(console_tx, ConsoleEvent::TaskUpdated { task });
+        }
+    }
+    Ok(())
+}
+
+fn build_context_map(
+    conn: &Connection,
+    mission_id: &str,
+) -> Result<HashMap<String, String>, ApiError> {
+    let mut context: HashMap<String, String> = HashMap::new();
+
+    let mut stmt = conn.prepare(
+        "
+        SELECT t.step_id, r.summary
+        FROM tasks t
+        JOIN runs r ON r.task_id = t.task_id
+        WHERE t.mission_id = ?1 AND r.status = 'completed' AND t.step_id IS NOT NULL
+        ORDER BY r.completed_at_ms DESC
+        ",
+    )?;
+
+    let rows: Vec<(String, String)> = stmt
+        .query_map(params![mission_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?.unwrap_or_default()))
+        })?
+        .filter_map(Result::ok)
+        .collect();
+
+    for (step_id, summary) in rows {
+        context.insert(format!("{step_id}.summary"), summary.clone());
+        // Try to extract a "result" field from the summary (JSON)
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&summary)
+            && let Some(result) = val.get("result").and_then(|v| v.as_str())
+        {
+            context.insert(format!("{step_id}.result"), result.to_string());
+        }
+    }
+
+    Ok(context)
+}
+
+fn build_accumulated_context(conn: &Connection, task_id: &str) -> Result<String, ApiError> {
+    // Collect summaries from all transitive dependencies
+    let mut summaries = Vec::new();
+
+    let mut stmt = conn.prepare(
+        "
+        SELECT t.step_id, r.summary
+        FROM task_deps td
+        JOIN tasks t ON td.depends_on_task_id = t.task_id
+        LEFT JOIN runs r ON r.task_id = t.task_id AND r.status = 'completed'
+        WHERE td.task_id = ?1
+        ORDER BY t.created_at_ms ASC
+        ",
+    )?;
+
+    let rows: Vec<(Option<String>, Option<String>)> = stmt
+        .query_map(params![task_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .filter_map(Result::ok)
+        .collect();
+
+    for (step_id, summary) in rows {
+        let step = step_id.unwrap_or_else(|| "unknown".to_string());
+        let sum = summary.unwrap_or_else(|| "(no summary)".to_string());
+        summaries.push(format!("## {step}\n{sum}"));
+    }
+
+    Ok(summaries.join("\n\n"))
+}
+
+fn get_task_condition(conn: &Connection, task_id: &str) -> Result<Option<String>, ApiError> {
+    // We store conditions in the workflow manifest. Since we don't persist the condition
+    // in the DB, we look at the prompt field which was rendered from the step.
+    // A simpler approach: store the condition in an extra column. For now, we check
+    // if the task's prompt contains a condition marker.
+    // Actually, let's just query by step_id pattern. The condition is evaluated from
+    // the workflow manifest at expand time. We'll store it in the task context.
+    //
+    // For the MVP, we embed the condition in a tasks.context JSON field during expansion.
+    // Let's look for it there.
+    let context: Option<String> = conn
+        .query_row("SELECT context FROM tasks WHERE task_id = ?1", params![task_id], |row| {
+            row.get(0)
+        })
+        .ok();
+
+    if let Some(ctx) = context
+        && let Ok(val) = serde_json::from_str::<serde_json::Value>(&ctx)
+        && let Some(cond) = val.get("_condition").and_then(|v| v.as_str())
+    {
+        return Ok(Some(cond.to_string()));
+    }
+    Ok(None)
+}
+
+fn update_mission_status(conn: &Connection, mission_id: &str, _now: u64) -> Result<(), ApiError> {
+    // Check if all tasks in the mission are terminal
+    let non_terminal_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM tasks WHERE mission_id = ?1 AND status NOT IN ('completed', 'failed', 'skipped')",
+        params![mission_id],
+        |row| row.get(0),
+    )?;
+
+    if non_terminal_count == 0 {
+        // Check if any task failed
+        let failed_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM tasks WHERE mission_id = ?1 AND status = 'failed'",
+            params![mission_id],
+            |row| row.get(0),
+        )?;
+
+        let new_status =
+            if failed_count > 0 { MissionStatus::Failed } else { MissionStatus::Completed };
+
+        conn.execute(
+            "UPDATE missions SET status = ?2 WHERE mission_id = ?1",
+            params![mission_id, mission_status_to_db(new_status)],
+        )?;
+    }
+    Ok(())
+}
+
+async fn scheduler_tick(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    // Phase 1: DB work (synchronous — no await while holding Connection)
+    let assignments = {
+        let db = state.db.lock().await;
+        run_scheduler_tick_db(&db, &state.console_tx)?
+    };
+
+    // Phase 2: Send WebSocket messages (async — no Connection held)
+    let assigned_count = assignments.len() as u32;
+    let channels = state.crab_channels.lock().await;
+    for assignment in assignments {
+        if let Some(tx) = channels.get(&assignment.crab_id)
+            && let Ok(json) = serde_json::to_string(&assignment.envelope)
+        {
+            let _ = tx.send(json);
+        }
+    }
+
+    Ok(Json(serde_json::json!({ "ok": true, "assigned": assigned_count })))
+}
+
+struct SchedulerAssignment {
+    crab_id: String,
+    envelope: Envelope,
+}
+
+fn run_scheduler_tick_db(
+    conn: &Connection,
+    console_tx: &broadcast::Sender<String>,
+) -> Result<Vec<SchedulerAssignment>, ApiError> {
+    let now = now_ms();
+    let mut assignments = Vec::new();
+
+    // Get all queued tasks (ordered by created_at_ms)
+    let mut task_stmt = conn.prepare(
+        "
+        SELECT task_id, mission_id, title, step_id, role, prompt, context
+        FROM tasks
+        WHERE status = 'queued'
+        ORDER BY created_at_ms ASC
+        ",
+    )?;
+
+    struct QueuedTask {
+        task_id: String,
+        mission_id: String,
+        title: String,
+        step_id: Option<String>,
+        role: Option<String>,
+        prompt: Option<String>,
+        context: Option<String>,
+    }
+
+    let queued_tasks: Vec<QueuedTask> = task_stmt
+        .query_map([], |row| {
+            Ok(QueuedTask {
+                task_id: row.get(0)?,
+                mission_id: row.get(1)?,
+                title: row.get(2)?,
+                step_id: row.get(3)?,
+                role: row.get(4)?,
+                prompt: row.get(5)?,
+                context: row.get(6)?,
+            })
+        })?
+        .filter_map(Result::ok)
+        .collect();
+
+    // Get all idle crabs
+    let mut crab_stmt = conn.prepare("SELECT crab_id, role FROM crabs WHERE state = 'idle'")?;
+
+    let mut idle_crabs: Vec<(String, String)> = crab_stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .filter_map(Result::ok)
+        .collect();
+
+    for task in &queued_tasks {
+        if idle_crabs.is_empty() {
+            break;
+        }
+
+        // Check that no other task in the same mission is currently Running
+        // (worktree conflict prevention for workflow tasks)
+        if task.step_id.is_some() {
+            let running_in_mission: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM tasks WHERE mission_id = ?1 AND status = 'running'",
+                params![task.mission_id],
+                |row| row.get(0),
+            )?;
+            if running_in_mission > 0 {
+                continue;
+            }
+        }
+
+        let task_role = task.role.as_deref().unwrap_or("any");
+
+        // Find a matching crab
+        let crab_idx = idle_crabs.iter().position(|(_, crab_role)| {
+            task_role == "any" || crab_role == task_role || crab_role == "any"
+        });
+
+        if let Some(idx) = crab_idx {
+            let (crab_id, _) = idle_crabs.remove(idx);
+
+            // Assign the task
+            conn.execute(
+                "UPDATE tasks SET assigned_crab_id = ?2, status = ?3, updated_at_ms = ?4 WHERE task_id = ?1",
+                params![task.task_id, crab_id, task_status_to_db(TaskStatus::Assigned), now],
+            )?;
+
+            conn.execute(
+                "UPDATE crabs SET state = 'busy', current_task_id = ?2, updated_at_ms = ?3 WHERE crab_id = ?1",
+                params![crab_id, task.task_id, now],
+            )?;
+
+            // Get worktree_path for this mission
+            let worktree_path: Option<String> = conn
+                .query_row(
+                    "SELECT worktree_path FROM missions WHERE mission_id = ?1",
+                    params![task.mission_id],
+                    |row| row.get(0),
+                )
+                .ok();
+
+            // Get mission_prompt
+            let mission_prompt: String = conn
+                .query_row(
+                    "SELECT prompt FROM missions WHERE mission_id = ?1",
+                    params![task.mission_id],
+                    |row| row.get(0),
+                )
+                .unwrap_or_default();
+
+            let task_uuid: Uuid = task.task_id.parse().unwrap_or_else(|_| Uuid::new_v4());
+            let mission_uuid: Uuid = task.mission_id.parse().unwrap_or_else(|_| Uuid::new_v4());
+
+            let mut envelope = Envelope::new(
+                "control-plane",
+                &crab_id,
+                MessageKind::TaskAssigned(crabitat_protocol::TaskAssigned {
+                    task_id: TaskId(task_uuid),
+                    mission_id: MissionId(mission_uuid),
+                    title: task.title.clone(),
+                    mission_prompt,
+                    desired_status: TaskStatus::Running,
+                    step_id: task.step_id.clone(),
+                    role: task.role.clone(),
+                    prompt: task.prompt.clone(),
+                    context: task.context.clone(),
+                    worktree_path,
+                }),
+                now,
+            );
+            envelope.task_id = Some(TaskId(task_uuid));
+            envelope.mission_id = Some(MissionId(mission_uuid));
+
+            assignments.push(SchedulerAssignment { crab_id: crab_id.clone(), envelope });
+
+            if let Ok(Some(t)) = fetch_task(conn, &task.task_id) {
+                emit_console_event(console_tx, ConsoleEvent::TaskUpdated { task: t });
+            }
+            if let Ok(Some(crab)) = fetch_crab(conn, &crab_id) {
+                emit_console_event(console_tx, ConsoleEvent::CrabUpdated { crab });
+            }
+        }
+    }
+
+    Ok(assignments)
 }
 
 async fn get_status(State(state): State<AppState>) -> Result<Json<StatusSnapshot>, ApiError> {
@@ -1156,14 +1865,17 @@ fn query_crabs(conn: &Connection) -> Result<Vec<CrabRecord>, ApiError> {
 
 fn query_missions(conn: &Connection) -> Result<Vec<MissionRecord>, ApiError> {
     let mut stmt = conn.prepare(
-        "SELECT mission_id, colony_id, prompt, created_at_ms FROM missions ORDER BY created_at_ms DESC",
+        "SELECT mission_id, colony_id, prompt, workflow_name, status, worktree_path, created_at_ms FROM missions ORDER BY created_at_ms DESC",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(MissionRecord {
             mission_id: row.get(0)?,
             colony_id: row.get(1)?,
             prompt: row.get(2)?,
-            created_at_ms: row.get::<_, i64>(3)? as u64,
+            workflow_name: row.get(3)?,
+            status: mission_status_from_db(&row.get::<_, String>(4)?),
+            worktree_path: row.get(5)?,
+            created_at_ms: row.get::<_, i64>(6)? as u64,
         })
     })?;
     Ok(rows.filter_map(Result::ok).collect())
@@ -1172,7 +1884,9 @@ fn query_missions(conn: &Connection) -> Result<Vec<MissionRecord>, ApiError> {
 fn query_tasks(conn: &Connection) -> Result<Vec<TaskRecord>, ApiError> {
     let mut stmt = conn.prepare(
         "
-        SELECT task_id, mission_id, title, assigned_crab_id, status, created_at_ms, updated_at_ms
+        SELECT task_id, mission_id, title, assigned_crab_id, status,
+               step_id, role, prompt, context,
+               created_at_ms, updated_at_ms
         FROM tasks
         ORDER BY updated_at_ms DESC
         ",
@@ -1184,8 +1898,12 @@ fn query_tasks(conn: &Connection) -> Result<Vec<TaskRecord>, ApiError> {
             title: row.get(2)?,
             assigned_crab_id: row.get(3)?,
             status: task_status_from_db(&row.get::<_, String>(4)?),
-            created_at_ms: row.get::<_, i64>(5)? as u64,
-            updated_at_ms: row.get::<_, i64>(6)? as u64,
+            step_id: row.get(5)?,
+            role: row.get(6)?,
+            prompt: row.get(7)?,
+            context: row.get(8)?,
+            created_at_ms: row.get::<_, i64>(9)? as u64,
+            updated_at_ms: row.get::<_, i64>(10)? as u64,
         })
     })?;
     Ok(rows.filter_map(Result::ok).collect())
@@ -1233,7 +1951,9 @@ fn fetch_crab(conn: &Connection, crab_id: &str) -> Result<Option<CrabRecord>, Ap
 fn fetch_task(conn: &Connection, task_id: &str) -> Result<Option<TaskRecord>, ApiError> {
     let mut stmt = conn.prepare(
         "
-        SELECT task_id, mission_id, title, assigned_crab_id, status, created_at_ms, updated_at_ms
+        SELECT task_id, mission_id, title, assigned_crab_id, status,
+               step_id, role, prompt, context,
+               created_at_ms, updated_at_ms
         FROM tasks WHERE task_id = ?1
         ",
     )?;
@@ -1246,8 +1966,12 @@ fn fetch_task(conn: &Connection, task_id: &str) -> Result<Option<TaskRecord>, Ap
             title: row.get(2)?,
             assigned_crab_id: row.get(3)?,
             status: task_status_from_db(&row.get::<_, String>(4)?),
-            created_at_ms: row.get::<_, i64>(5)? as u64,
-            updated_at_ms: row.get::<_, i64>(6)? as u64,
+            step_id: row.get(5)?,
+            role: row.get(6)?,
+            prompt: row.get(7)?,
+            context: row.get(8)?,
+            created_at_ms: row.get::<_, i64>(9)? as u64,
+            updated_at_ms: row.get::<_, i64>(10)? as u64,
         }));
     }
     Ok(None)
@@ -1343,6 +2067,7 @@ fn task_status_to_db(status: TaskStatus) -> &'static str {
         TaskStatus::Blocked => "blocked",
         TaskStatus::Completed => "completed",
         TaskStatus::Failed => "failed",
+        TaskStatus::Skipped => "skipped",
     }
 }
 
@@ -1353,7 +2078,26 @@ fn task_status_from_db(raw: &str) -> TaskStatus {
         "blocked" => TaskStatus::Blocked,
         "completed" => TaskStatus::Completed,
         "failed" => TaskStatus::Failed,
+        "skipped" => TaskStatus::Skipped,
         _ => TaskStatus::Queued,
+    }
+}
+
+fn mission_status_to_db(status: MissionStatus) -> &'static str {
+    match status {
+        MissionStatus::Pending => "pending",
+        MissionStatus::Running => "running",
+        MissionStatus::Completed => "completed",
+        MissionStatus::Failed => "failed",
+    }
+}
+
+fn mission_status_from_db(raw: &str) -> MissionStatus {
+    match raw {
+        "running" => MissionStatus::Running,
+        "completed" => MissionStatus::Completed,
+        "failed" => MissionStatus::Failed,
+        _ => MissionStatus::Pending,
     }
 }
 
@@ -1404,10 +2148,15 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         apply_schema(&conn).unwrap();
         let (console_tx, _) = broadcast::channel::<String>(256);
+        let workflows = WorkflowRegistry {
+            manifests: HashMap::new(),
+            prompts_path: PathBuf::from("/tmp/test-prompts"),
+        };
         AppState {
             db: Arc::new(Mutex::new(conn)),
             crab_channels: Arc::new(Mutex::new(HashMap::new())),
             console_tx,
+            workflows: Arc::new(workflows),
         }
     }
 
@@ -1459,6 +2208,7 @@ mod tests {
             Json(CreateMissionRequest {
                 colony_id: colony.colony_id.clone(),
                 prompt: "Implement feature X".into(),
+                workflow: None,
             }),
         )
         .await
@@ -1521,6 +2271,7 @@ mod tests {
             Json(CreateMissionRequest {
                 colony_id: colony.colony_id.clone(),
                 prompt: "Build feature".into(),
+                workflow: None,
             }),
         )
         .await
@@ -1654,6 +2405,7 @@ mod tests {
             Json(CreateMissionRequest {
                 colony_id: colony.colony_id.clone(),
                 prompt: "Test mission".into(),
+                workflow: None,
             }),
         )
         .await
