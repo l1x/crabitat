@@ -2,8 +2,6 @@ import { fetchIssues, fetchQueue, queueIssue, removeFromQueue } from '../lib/api
 import { store } from './store';
 import type { GitHubIssueRecord, MissionRecord } from '../lib/types';
 
-const CONTROL_PLANE_URL = 'http://127.0.0.1:8800';
-
 function getSelectedColonyId(): string | null {
   const select = document.getElementById('queue-colony-select') as HTMLSelectElement | null;
   return select?.value ?? null;
@@ -131,4 +129,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // Auto-refresh on mission events
   store.addEventListener('mission_created', () => refreshAll());
   store.addEventListener('mission_updated', () => refreshAll());
+
+  // Auto-load if a colony is already selected
+  if (getSelectedColonyId()) {
+    refreshAll();
+  }
 });

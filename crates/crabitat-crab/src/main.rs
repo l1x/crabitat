@@ -94,6 +94,18 @@ enum Cmd {
         /// End-to-end duration in milliseconds
         #[arg(long)]
         duration_ms: Option<u64>,
+
+        /// Number of prompt/input tokens consumed
+        #[arg(long)]
+        prompt_tokens: Option<u32>,
+
+        /// Number of completion/output tokens generated
+        #[arg(long)]
+        completion_tokens: Option<u32>,
+
+        /// Total tokens (prompt + completion). Auto-computed if omitted.
+        #[arg(long)]
+        total_tokens: Option<u32>,
     },
 
     /// Print onboarding instructions for a Claude Code agent. Paste the output into a fresh session.
@@ -160,11 +172,19 @@ struct CompleteRunBody {
     status: String,
     summary: Option<String>,
     timing: Option<TimingBody>,
+    token_usage: Option<TokenUsageBody>,
 }
 
 #[derive(Debug, Serialize)]
 struct TimingBody {
     end_to_end_ms: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+struct TokenUsageBody {
+    prompt_tokens: Option<u32>,
+    completion_tokens: Option<u32>,
+    total_tokens: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -205,8 +225,28 @@ async fn main() -> Result<()> {
         Cmd::StartRun { mission_id, task_id, crab_id, burrow_path } => {
             cmd_start_run(cp, &mission_id, &task_id, &crab_id, &burrow_path).await?;
         }
-        Cmd::CompleteRun { run_id, status, summary, result, duration_ms } => {
-            cmd_complete_run(cp, &run_id, &status, summary, result, duration_ms).await?;
+        Cmd::CompleteRun {
+            run_id,
+            status,
+            summary,
+            result,
+            duration_ms,
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+        } => {
+            cmd_complete_run(
+                cp,
+                &run_id,
+                &status,
+                summary,
+                result,
+                duration_ms,
+                prompt_tokens,
+                completion_tokens,
+                total_tokens,
+            )
+            .await?;
         }
         Cmd::Guide => {
             cmd_guide(cp);
@@ -316,6 +356,8 @@ crabitat-crab complete-run --control-plane {cp} --run-id <RUN_ID> --status compl
 
 Use `--status failed` if the task could not be completed, with the error in `--summary`.
 
+Optional but recommended: report token usage with `--prompt-tokens <N> --completion-tokens <N>` (or `--total-tokens <N>`).
+
 ## Step 7: Loop
 
 Go back to Step 2 and poll for the next task. Never stop unless told to shut down.
@@ -393,6 +435,7 @@ async fn cmd_start_run(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn cmd_complete_run(
     cp: &str,
     run_id: &str,
@@ -400,6 +443,9 @@ async fn cmd_complete_run(
     summary: Option<String>,
     result: Option<String>,
     duration_ms: Option<u64>,
+    prompt_tokens: Option<u32>,
+    completion_tokens: Option<u32>,
+    total_tokens: Option<u32>,
 ) -> Result<()> {
     let http = Client::new();
 
@@ -413,6 +459,13 @@ async fn cmd_complete_run(
         (None, None) => None,
     };
 
+    let token_usage =
+        if prompt_tokens.is_some() || completion_tokens.is_some() || total_tokens.is_some() {
+            Some(TokenUsageBody { prompt_tokens, completion_tokens, total_tokens })
+        } else {
+            None
+        };
+
     let resp = http
         .post(format!("{cp}/v1/runs/complete"))
         .json(&CompleteRunBody {
@@ -420,6 +473,7 @@ async fn cmd_complete_run(
             status: status.to_string(),
             summary: final_summary,
             timing: duration_ms.map(|ms| TimingBody { end_to_end_ms: Some(ms) }),
+            token_usage,
         })
         .send()
         .await
@@ -657,12 +711,21 @@ async fn handle_task(
 
     let end_to_end_ms = now_ms().saturating_sub(started_at);
 
-    let (status, summary) = match &result {
+    let (status, summary, token_usage) = match &result {
         Ok(output) => {
             let status = if output.success { "completed" } else { "failed" };
-            (status, output.summary.clone())
+            let usage = if output.prompt_tokens.is_some() || output.completion_tokens.is_some() {
+                Some(TokenUsageBody {
+                    prompt_tokens: output.prompt_tokens,
+                    completion_tokens: output.completion_tokens,
+                    total_tokens: None,
+                })
+            } else {
+                None
+            };
+            (status, output.summary.clone(), usage)
         }
-        Err(e) => ("failed", format!("task setup failed: {e}")),
+        Err(e) => ("failed", format!("task setup failed: {e}"), None),
     };
 
     info!(status = status, "task finished");
@@ -675,6 +738,7 @@ async fn handle_task(
                 status: status.to_string(),
                 summary: Some(summary),
                 timing: Some(TimingBody { end_to_end_ms: Some(end_to_end_ms) }),
+                token_usage,
             })
             .send()
             .await;
@@ -719,6 +783,23 @@ async fn handle_task(
 struct TaskOutput {
     success: bool,
     summary: String,
+    prompt_tokens: Option<u32>,
+    completion_tokens: Option<u32>,
+}
+
+/// JSON output from `claude --output-format json`.
+/// Other LLM CLIs can adopt the same shape or callers can use
+/// `complete-run --prompt-tokens / --completion-tokens` directly.
+#[derive(Debug, Deserialize)]
+struct LlmCliJsonOutput {
+    result: Option<String>,
+    usage: Option<LlmCliUsage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LlmCliUsage {
+    input_tokens: Option<u32>,
+    output_tokens: Option<u32>,
 }
 
 async fn execute_in_burrow(
@@ -771,7 +852,7 @@ async fn execute_in_burrow(
         .arg("-p")
         .arg(&task.title)
         .arg("--output-format")
-        .arg("text")
+        .arg("json")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
@@ -789,12 +870,29 @@ async fn execute_in_burrow(
         }
     };
 
-    let summary = if stdout.is_empty() {
-        if stderr.is_empty() { "(no output)".to_string() } else { stderr }
-    } else {
+    // Try to parse as Claude JSON output for result text and token usage
+    let (summary, prompt_tokens, completion_tokens) =
+        if let Ok(parsed) = serde_json::from_str::<LlmCliJsonOutput>(&stdout) {
+            let text = parsed.result.unwrap_or_else(|| {
+                if stderr.is_empty() { "(no output)".to_string() } else { stderr.clone() }
+            });
+            let pt = parsed.usage.as_ref().and_then(|u| u.input_tokens);
+            let ct = parsed.usage.as_ref().and_then(|u| u.output_tokens);
+            (text, pt, ct)
+        } else {
+            // Fall back to raw stdout
+            let text = if stdout.is_empty() {
+                if stderr.is_empty() { "(no output)".to_string() } else { stderr }
+            } else {
+                stdout
+            };
+            (text, None, None)
+        };
+
+    let summary = {
         let max = 4096;
-        if stdout.len() > max { format!("{}... [truncated]", &stdout[..max]) } else { stdout }
+        if summary.len() > max { format!("{}... [truncated]", &summary[..max]) } else { summary }
     };
 
-    Ok(TaskOutput { success, summary })
+    Ok(TaskOutput { success, summary, prompt_tokens, completion_tokens })
 }

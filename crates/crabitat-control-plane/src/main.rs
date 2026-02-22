@@ -26,6 +26,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::{Mutex, broadcast, mpsc};
+use tower_http::cors::CorsLayer;
 use tracing::info;
 use uuid::Uuid;
 
@@ -841,6 +842,7 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/status", get(get_status))
         .route("/v1/ws/crab/{crab_id}", get(ws_crab_handler))
         .route("/v1/ws/console", get(ws_console_handler))
+        .layer(CorsLayer::very_permissive())
         .with_state(state)
 }
 
@@ -933,7 +935,24 @@ fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
           FOREIGN KEY(task_id) REFERENCES tasks(task_id)
         );
         ",
-    )
+    )?;
+
+    // Migrations: add columns to existing tables (safe to re-run)
+    let migrations = [
+        "ALTER TABLE colonies ADD COLUMN repo TEXT",
+        "ALTER TABLE missions ADD COLUMN workflow_name TEXT",
+        "ALTER TABLE missions ADD COLUMN queue_position INTEGER",
+        "ALTER TABLE missions ADD COLUMN github_issue_number INTEGER",
+        "ALTER TABLE missions ADD COLUMN github_pr_number INTEGER",
+    ];
+    for sql in migrations {
+        match conn.execute(sql, []) {
+            Ok(_) => {}
+            Err(e) if e.to_string().contains("duplicate column") => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
 }
 
 fn init_db(db_path: &StdPath) -> Result<Connection> {
