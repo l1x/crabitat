@@ -1,4 +1,4 @@
-# PRD: Manager-Worker Agent Mesh (HTTP + WebSocket + SQLite)
+# PRD: Manager-Worker Agent Mesh (HTTP + WebSocket + SQLite + Astro UI)
 
 ## 1. Objective
 
@@ -9,25 +9,14 @@ Build a simple webserver that coordinates one manager agent and three worker age
 - Workers execute tasks in isolated git worktrees or in configured external repos.
 - Workers can message each other through the server.
 - Manager can observe live debug logs to detect drift, stalls, and failures.
+- Workers report chunk lifecycle status with token usage and timing telemetry.
+- An Astro Web UI shows live agent activity, current chunks, and performance metrics.
 
 This replaces complex distributed/p2p behavior with a centralized control plane.
 
 ## 2. High-Level Architecture
 
-```
-Human
-  |
-  v
-Manager Agent <------------------------------+
-  |                                           |
-  | HTTP + WS                                | debug stream
-  v                                           |
-Agent Mesh Server (Axum + SQLite) -----------+
-  |      |      |
-  |      |      +---- Worker C (ws client)
-  |      +----------- Worker B (ws client)
-  +------------------ Worker A (ws client)
-```
+![Manager-worker architecture](../illustrations/manager-worker-architecture.svg)
 
 ### Components
 
@@ -46,6 +35,10 @@ Agent Mesh Server (Axum + SQLite) -----------+
   - Execute in `worktree` or `external_repo` mode.
   - Emit progress/results/errors.
   - Can message peers for handoffs/questions.
+- Astro Web UI:
+  - Reads status snapshot API for agents + chunks.
+  - Displays current work, token usage, and timing metrics.
+  - Supports operations/debug visibility for the manager and human operator.
 
 ## 3. Core Workflow
 
@@ -55,8 +48,10 @@ Agent Mesh Server (Axum + SQLite) -----------+
 4. Human sends prompt to manager.
 5. Manager creates parent task and sub-tasks, then assigns work.
 6. Workers execute and send `task.progress`, `task.handoff`, `task.result`, or `task.error`.
-7. Manager monitors all events and adapts plan if needed.
-8. Manager returns final answer to human.
+7. Workers emit chunk status telemetry (`start`, `update`, `complete`) with token/timing data.
+8. Manager and human observe the Astro UI dashboard.
+9. Manager monitors all events and adapts plan if needed.
+10. Manager returns final answer to human.
 
 ## 4. Execution Modes
 
@@ -122,6 +117,94 @@ Query structured logs/events with filters (`task_id`, `agent_id`, `level`, `sinc
 ### `GET /v1/ws/debug`
 
 Realtime debug event stream for manager/observer clients.
+
+### `GET /v1/status`
+
+Returns a dashboard snapshot of agents and work chunks.
+
+### `POST /v1/status/agents`
+
+Upserts current worker/manager status so UI can show who is doing what.
+
+Request:
+```json
+{
+  "agent_id": "worker-a",
+  "agent_name": "Worker A",
+  "role": "implementation specialist",
+  "state": "busy",
+  "current_chunk_id": "chunk-42",
+  "current_task": "Implement rate limiter middleware",
+  "updated_at": "2026-02-18T10:04:12Z"
+}
+```
+
+### `POST /v1/status/chunk-start`
+
+Creates a chunk execution record when work begins.
+
+Request:
+```json
+{
+  "chunk_id": "chunk-42",
+  "task_id": "task-9",
+  "agent_id": "worker-a",
+  "title": "Implement rate limiter middleware",
+  "repo_mode": "worktree",
+  "status": "running",
+  "started_at": "2026-02-18T10:04:15Z"
+}
+```
+
+### `POST /v1/status/chunk-update`
+
+Sends incremental progress including token usage and timing.
+
+Request:
+```json
+{
+  "chunk_id": "chunk-42",
+  "status": "running",
+  "progress_message": "Added middleware and tests; running verification.",
+  "token_usage": {
+    "prompt_tokens": 1820,
+    "completion_tokens": 640,
+    "total_tokens": 2460
+  },
+  "timing": {
+    "first_token_ms": 820,
+    "llm_duration_ms": 9240,
+    "execution_duration_ms": 18750,
+    "end_to_end_ms": 29010
+  },
+  "updated_at": "2026-02-18T10:05:01Z"
+}
+```
+
+### `POST /v1/status/chunk-complete`
+
+Marks chunk completion/failure and sends final metrics.
+
+Request:
+```json
+{
+  "chunk_id": "chunk-42",
+  "status": "completed",
+  "summary": "Middleware added with tests and docs updated.",
+  "token_usage": {
+    "prompt_tokens": 1902,
+    "completion_tokens": 702,
+    "total_tokens": 2604
+  },
+  "timing": {
+    "first_token_ms": 820,
+    "llm_duration_ms": 9600,
+    "execution_duration_ms": 20110,
+    "end_to_end_ms": 31280
+  },
+  "completed_at": "2026-02-18T10:05:46Z"
+}
+```
 
 ## 6. Message Envelope
 
@@ -269,6 +352,26 @@ CREATE TABLE events (
   summary TEXT NOT NULL,
   metadata_json TEXT NOT NULL
 );
+
+CREATE TABLE chunk_status (
+  chunk_id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  repo_mode TEXT,
+  status TEXT NOT NULL,               -- queued | running | blocked | completed | failed
+  progress_message TEXT,
+  prompt_tokens INTEGER DEFAULT 0,
+  completion_tokens INTEGER DEFAULT 0,
+  total_tokens INTEGER DEFAULT 0,
+  first_token_ms INTEGER,
+  llm_duration_ms INTEGER,
+  execution_duration_ms INTEGER,
+  end_to_end_ms INTEGER,
+  started_at TEXT,
+  updated_at TEXT,
+  completed_at TEXT
+);
 ```
 
 ## 11. Proposed Project Layout
@@ -285,13 +388,25 @@ crates/ain-mesh/
     ├── worker.rs     # execution loop + repo operations
     ├── repo.rs       # worktree/external repo helpers
     └── llm.rs        # provider adapters (OpenAI/Anthropic/Ollama)
+
+apps/mesh-ui/
+├── package.json
+├── astro.config.mjs
+└── src/
+    ├── pages/index.astro                  # dashboard UI
+    ├── pages/api/status/index.ts          # GET status snapshot
+    ├── pages/api/status/agents.ts         # POST agent status updates
+    ├── pages/api/status/chunk-start.ts    # POST chunk start
+    ├── pages/api/status/chunk-update.ts   # POST chunk updates
+    ├── pages/api/status/chunk-complete.ts # POST chunk completion
+    └── lib/status-store.ts                # in-memory status store (v1)
 ```
 
 ## 12. Non-Goals (v1)
 
 - Full autonomous multi-manager cluster.
 - Complex consensus or p2p transport.
-- Rich UI beyond logs/CLI.
+- Deep historical analytics/BI dashboard beyond live operational monitoring.
 - Automatic merge to main branch.
 
 ## 13. Verification Plan
@@ -301,12 +416,15 @@ crates/ain-mesh/
 3. Confirm manager emits `task.assign` for at least two workers.
 4. Confirm worker-worker handoff message routing works.
 5. Confirm `GET /v1/ws/debug` shows live structured events.
-6. Kill one worker and verify timeout, reassignment, and error event.
-7. Validate sqlite tables contain full audit trail.
+6. Post `chunk-start`, `chunk-update`, and `chunk-complete` events; verify status API aggregates correctly.
+7. Open Astro UI and verify live agent/chunk cards update with token/timing data.
+8. Kill one worker and verify timeout, reassignment, and error event.
+9. Validate sqlite tables contain full audit trail.
 
 ## 14. Success Criteria
 
 - 3 workers can run concurrently under manager direction.
 - Manager can observe and diagnose via debug stream and logs.
 - End-to-end task completes with auditable task/message/event history.
+- Astro UI shows who is working on what with chunk-level token/timing telemetry.
 - Failures are visible and recoverable via reassignment/escalation.

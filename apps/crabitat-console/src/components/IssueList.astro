@@ -1,0 +1,154 @@
+---
+import type { MockIssue, MockRepo } from '../lib/mock-data';
+
+interface Props {
+  issues: MockIssue[];
+  repos: MockRepo[];
+}
+
+const { issues, repos } = Astro.props;
+---
+
+<div class="repo-filter">
+  <label class="form-label" for="repo-select">Repository</label>
+  <select class="form-select" id="repo-select">
+    <option value="all">All repos</option>
+    {repos.map((r) => (
+      <option value={r.repo_id}>{r.full_name} ({r.domain})</option>
+    ))}
+  </select>
+</div>
+
+<div class="data-panel">
+  <div class="data-panel-header">
+    <span class="data-panel-title">Open Issues</span>
+    <span class="content-count" id="issue-count">{issues.length}</span>
+  </div>
+  <div class="data-panel-body">
+    {issues.length === 0 ? (
+      <div class="empty-state">
+        <div class="empty-state-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        </div>
+        <div class="empty-state-title">No open issues</div>
+        <p class="empty-state-desc">All GitHub issues are resolved.</p>
+      </div>
+    ) : (
+      <div class="issue-list" id="issue-list">
+        {issues.map((issue) => {
+          const repo = repos.find((r) => r.repo_id === issue.repo_id);
+          return (
+            <div class="issue-card" data-issue-number={issue.number} data-repo-id={issue.repo_id}>
+              <div class="issue-card-header">
+                <div class="issue-card-title">
+                  <span class="issue-number">#{issue.number}</span>
+                  {issue.title}
+                </div>
+                <button
+                  class="btn btn--primary btn--sm launch-mission-btn"
+                  data-issue-number={issue.number}
+                  data-issue-title={issue.title}
+                  data-repo-id={issue.repo_id}
+                  data-repo-name={repo?.full_name}
+                  data-repo-domain={repo?.domain}
+                >
+                  Create Mission
+                </button>
+              </div>
+              <div class="issue-card-body">
+                <p class="issue-body-text">{issue.body}</p>
+              </div>
+              <div class="issue-card-footer">
+                {repo && (
+                  <span class={`domain-tag domain-tag--${repo.domain}`}>{repo.full_name}</span>
+                )}
+                {issue.labels.map((label) => (
+                  <span class="issue-label">{label}</span>
+                ))}
+                <span class="issue-date">{issue.created_at.split('T')[0]}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    )}
+  </div>
+</div>
+
+<!-- Mission Launch Modal -->
+<dialog class="modal" id="launch-modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <span class="modal-title">Create Mission</span>
+      <button class="modal-close" id="launch-modal-close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="launch-issue-ref" id="launch-issue-ref"></div>
+      <div class="launch-repo-ref" id="launch-repo-ref"></div>
+
+      <div class="form-group">
+        <label class="form-label">Workflow</label>
+        <select class="form-select" id="launch-workflow">
+          <option value="tdd-task" selected>TDD Task (Plan → Test → Implement → Review)</option>
+        </select>
+      </div>
+
+      <p class="form-hint">Agents will be matched automatically by the scheduler based on domain and role capabilities.</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" id="launch-cancel">Cancel</button>
+      <button class="btn btn--primary" id="launch-execute">Execute</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+  const modal = document.getElementById('launch-modal') as HTMLDialogElement;
+  const issueRef = document.getElementById('launch-issue-ref')!;
+  const repoRef = document.getElementById('launch-repo-ref')!;
+  const closeBtn = document.getElementById('launch-modal-close')!;
+  const cancelBtn = document.getElementById('launch-cancel')!;
+  const executeBtn = document.getElementById('launch-execute')!;
+  const repoSelect = document.getElementById('repo-select') as HTMLSelectElement;
+  const issueList = document.getElementById('issue-list')!;
+  const issueCount = document.getElementById('issue-count')!;
+
+  // Repo filter
+  repoSelect.addEventListener('change', () => {
+    const val = repoSelect.value;
+    let visible = 0;
+    issueList.querySelectorAll<HTMLElement>('.issue-card').forEach((card) => {
+      const show = val === 'all' || card.dataset.repoId === val;
+      card.style.display = show ? '' : 'none';
+      if (show) visible++;
+    });
+    issueCount.textContent = String(visible);
+  });
+
+  // Launch modal
+  document.querySelectorAll<HTMLButtonElement>('.launch-mission-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const num = btn.dataset.issueNumber;
+      const title = btn.dataset.issueTitle;
+      const repoName = btn.dataset.repoName;
+      const domain = btn.dataset.repoDomain;
+      issueRef.textContent = `#${num} — ${title}`;
+      repoRef.textContent = `${repoName} (${domain})`;
+      modal.showModal();
+    });
+  });
+
+  closeBtn.addEventListener('click', () => modal.close());
+  cancelBtn.addEventListener('click', () => modal.close());
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) modal.close();
+  });
+
+  executeBtn.addEventListener('click', () => {
+    executeBtn.textContent = 'Launching...';
+    setTimeout(() => {
+      executeBtn.textContent = 'Execute';
+      modal.close();
+    }, 800);
+  });
+</script>

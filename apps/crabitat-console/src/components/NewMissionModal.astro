@@ -1,0 +1,39 @@
+---
+import type { ColonyRecord } from '../lib/types';
+
+interface Props {
+  colonies: ColonyRecord[];
+}
+
+const { colonies } = Astro.props;
+---
+
+<dialog class="modal" id="new-mission-modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2 class="modal-title">New Mission</h2>
+      <button class="modal-close" id="modal-close-btn" type="button">&times;</button>
+    </div>
+    <form id="new-mission-form">
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label" for="mission-colony">Colony</label>
+          <select class="form-select" id="mission-colony" name="colony_id" required>
+            <option value="">Select a colony...</option>
+            {colonies.map((c) => (
+              <option value={c.colony_id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="mission-prompt">Prompt</label>
+          <textarea class="form-textarea" id="mission-prompt" name="prompt" rows="4" required placeholder="Describe the mission..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" type="button" id="modal-cancel-btn">Cancel</button>
+        <button class="btn btn--primary" type="submit">Create Mission</button>
+      </div>
+    </form>
+  </div>
+</dialog>

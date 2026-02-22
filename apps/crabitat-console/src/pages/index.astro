@@ -1,0 +1,47 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Sidebar from '../components/Sidebar.astro';
+import ContentHeader from '../components/ContentHeader.astro';
+import IssueList from '../components/IssueList.astro';
+import MissionPipeline from '../components/MissionPipeline.astro';
+import AgentList from '../components/AgentList.astro';
+import MessageLog from '../components/MessageLog.astro';
+import { mockIssues, mockMissions, mockAgents, mockMessages, mockRepos } from '../lib/mock-data';
+---
+
+<Layout title="Crabitat Console">
+  <Sidebar
+    issueCount={mockIssues.length}
+    missionCount={mockMissions.length}
+    agentCount={mockAgents.length}
+    messageCount={mockMessages.length}
+  />
+
+  <div class="content">
+    <ContentHeader title="Issues" />
+
+    <!-- Issues -->
+    <div class="section" data-section="issues">
+      <IssueList issues={mockIssues} repos={mockRepos} />
+    </div>
+
+    <!-- Missions -->
+    <div class="section" data-section="missions" hidden>
+      <MissionPipeline missions={mockMissions} repos={mockRepos} />
+    </div>
+
+    <!-- Agents -->
+    <div class="section" data-section="agents" hidden>
+      <AgentList agents={mockAgents} />
+    </div>
+
+    <!-- Messages -->
+    <div class="section" data-section="messages" hidden>
+      <MessageLog messages={mockMessages} />
+    </div>
+  </div>
+</Layout>
+
+<script>
+  import '../scripts/nav';
+</script>

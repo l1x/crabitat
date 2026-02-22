@@ -1,0 +1,83 @@
+---
+import type { MockAgent } from '../lib/mock-data';
+
+interface Props {
+  agents: MockAgent[];
+}
+
+const { agents } = Astro.props;
+
+function heartbeatAgo(ms: number): string {
+  const diff = Date.now() - ms;
+  if (diff < 10_000) return 'just now';
+  if (diff < 60_000) return `${Math.floor(diff / 1000)}s ago`;
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  return `${Math.floor(diff / 3_600_000)}h ago`;
+}
+---
+
+<div class="data-panel">
+  <div class="data-panel-header">
+    <span class="data-panel-title">Agents</span>
+    <span class="content-count">{agents.length}</span>
+  </div>
+  <div class="data-panel-body">
+    {agents.length === 0 ? (
+      <div class="empty-state">
+        <div class="empty-state-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        </div>
+        <div class="empty-state-title">No agents registered</div>
+        <p class="empty-state-desc">Start an agent with crabitat-agent register.</p>
+      </div>
+    ) : (
+      <div class="card-grid">
+        {agents.map((agent) => (
+          <div class="agent-card card" data-agent-id={agent.agent_id} data-state={agent.state}>
+            <div class="card-title">
+              <span>{agent.name}</span>
+              <span class={`badge badge--${agent.state}`}>{agent.state}</span>
+            </div>
+            <div class="card-meta">
+              <span class={`agent-type-badge agent-type-badge--${agent.type}`}>{agent.type}</span>
+            </div>
+
+            <div class="agent-capabilities">
+              <div class="agent-cap-row">
+                <span class="agent-cap-label">Domains</span>
+                <div class="agent-cap-tags">
+                  {agent.domains.map((d) => (
+                    <span class={`domain-tag domain-tag--${d}`}>{d}</span>
+                  ))}
+                </div>
+              </div>
+              <div class="agent-cap-row">
+                <span class="agent-cap-label">Roles</span>
+                <div class="agent-cap-tags">
+                  {agent.roles.map((r) => (
+                    <span class={`role-tag role-tag--${r}`}>{r}</span>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {agent.current_mission && (
+              <div class="card-detail">
+                Mission: <code>{agent.current_mission}</code>
+              </div>
+            )}
+
+            <div class="agent-card-footer">
+              <span class="agent-heartbeat">
+                Heartbeat: {heartbeatAgo(agent.last_heartbeat_ms)}
+              </span>
+              {agent.type === 'persistent' && agent.message_count > 0 && (
+                <span class="agent-msg-count">{agent.message_count} messages</span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+</div>

@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 660" role="img" aria-labelledby="wf-title wf-desc">
+  <title id="wf-title">Crabitat Colony Workflow</title>
+  <desc id="wf-desc">Basic workflow: create colony, submit mission, decompose into tasks, crabs execute runs in burrows, metrics flow to control-plane.</desc>
+
+  <defs>
+    <style>
+      .wf-title { font-family: "Helvetica Neue", Arial, sans-serif; fill: #1f2937; font-size: 24px; font-weight: 700; }
+      .wf-label { font-family: "Helvetica Neue", Arial, sans-serif; fill: #1f2937; font-size: 17px; font-weight: 600; }
+      .wf-sub   { font-family: "Helvetica Neue", Arial, sans-serif; fill: #6b7280; font-size: 13px; }
+      .wf-step  { font-family: "Helvetica Neue", Arial, sans-serif; fill: #b45309; font-size: 12px; font-weight: 600; letter-spacing: 0.4px; }
+      .wf-cp    { font-family: "Helvetica Neue", Arial, sans-serif; fill: #ffffff; font-size: 17px; font-weight: 600; }
+      .wf-cpsub { font-family: "Helvetica Neue", Arial, sans-serif; fill: #9ca3af; font-size: 13px; }
+    </style>
+    <marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#9ca3af"/>
+    </marker>
+    <marker id="b" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#f59e0b"/>
+    </marker>
+  </defs>
+
+  <rect width="960" height="660" fill="#fafafa" rx="4"/>
+
+  <!-- Title -->
+  <text x="480" y="34" text-anchor="middle" class="wf-title">Crabitat Colony Workflow</text>
+
+  <!-- ① Human / CLI -->
+  <rect x="355" y="54" width="250" height="46" rx="10" fill="#f5f5f5" stroke="#d4d4d4" stroke-width="1.5"/>
+  <text x="480" y="83" text-anchor="middle" class="wf-label">Human / CLI</text>
+
+  <!-- arrow ① -->
+  <line x1="480" y1="100" x2="480" y2="134" stroke="#a3a3a3" stroke-width="2" marker-end="url(#a)"/>
+  <text x="502" y="122" class="wf-step">① create colony</text>
+
+  <!-- ② Colony — the one orange-accented element -->
+  <rect x="345" y="138" width="270" height="50" rx="12" fill="#fefce8" stroke="#f59e0b" stroke-width="2"/>
+  <text x="480" y="163" text-anchor="middle" class="wf-label" fill="#92400e">Colony</text>
+  <text x="480" y="180" text-anchor="middle" class="wf-sub" fill="#78716c">"my-project" — one Chief, many Crabs</text>
+
+  <!-- arrow ② -->
+  <line x1="480" y1="188" x2="480" y2="222" stroke="#a3a3a3" stroke-width="2" marker-end="url(#a)"/>
+  <text x="502" y="210" class="wf-step">② submit mission</text>
+
+  <!-- ③ Mission -->
+  <rect x="335" y="226" width="290" height="50" rx="12" fill="#f5f5f5" stroke="#d4d4d4" stroke-width="1.5"/>
+  <text x="480" y="252" text-anchor="middle" class="wf-label">Mission</text>
+  <text x="480" y="268" text-anchor="middle" class="wf-sub">"Build feature X"</text>
+
+  <!-- fan-out: T-junction -->
+  <line x1="480" y1="276" x2="480" y2="306" stroke="#a3a3a3" stroke-width="2"/>
+  <line x1="195" y1="306" x2="765" y2="306" stroke="#a3a3a3" stroke-width="2"/>
+  <line x1="195" y1="306" x2="195" y2="332" stroke="#a3a3a3" stroke-width="2" marker-end="url(#a)"/>
+  <line x1="480" y1="306" x2="480" y2="332" stroke="#a3a3a3" stroke-width="2" marker-end="url(#a)"/>
+  <line x1="765" y1="306" x2="765" y2="332" stroke="#a3a3a3" stroke-width="2" marker-end="url(#a)"/>
+  <text x="830" y="310" class="wf-step">③ decompose</text>
+
+  <!-- ④ Tasks -->
+  <rect x="80" y="336" width="230" height="46" rx="10" fill="#f5f5f5" stroke="#d4d4d4" stroke-width="1.5"/>
+  <text x="195" y="359" text-anchor="middle" class="wf-label">Task: UI</text>
+  <text x="195" y="375" text-anchor="middle" class="wf-sub">→ Crab A</text>
+
+  <rect x="365" y="336" width="230" height="46" rx="10" fill="#f5f5f5" stroke="#d4d4d4" stroke-width="1.5"/>
+  <text x="480" y="359" text-anchor="middle" class="wf-label">Task: API</text>
+  <text x="480" y="375" text-anchor="middle" class="wf-sub">→ Crab B</text>
+
+  <rect x="650" y="336" width="230" height="46" rx="10" fill="#f5f5f5" stroke="#d4d4d4" stroke-width="1.5"/>
+  <text x="765" y="359" text-anchor="middle" class="wf-label">Task: Tests</text>
+  <text x="765" y="375" text-anchor="middle" class="wf-sub">→ Crab C</text>
+
+  <!-- arrows ④ -->
+  <line x1="195" y1="382" x2="195" y2="418" stroke="#a3a3a3" stroke-width="2" marker-end="url(#a)"/>
+  <line x1="480" y1="382" x2="480" y2="418" stroke="#a3a3a3" stroke-width="2" marker-end="url(#a)"/>
+  <line x1="765" y1="382" x2="765" y2="418" stroke="#a3a3a3" stroke-width="2" marker-end="url(#a)"/>
+  <text x="830" y="404" class="wf-step">④ execute runs</text>
+
+  <!-- ⑤ Runs (in Burrows) -->
+  <rect x="80" y="422" width="230" height="64" rx="10" fill="#f5f5f5" stroke="#d4d4d4" stroke-width="1.5"/>
+  <text x="195" y="448" text-anchor="middle" class="wf-label">Run (Burrow)</text>
+  <text x="195" y="466" text-anchor="middle" class="wf-sub">420 tokens · 1.2 s</text>
+  <text x="195" y="480" text-anchor="middle" class="wf-sub">worktree</text>
+
+  <rect x="365" y="422" width="230" height="64" rx="10" fill="#f5f5f5" stroke="#d4d4d4" stroke-width="1.5"/>
+  <text x="480" y="448" text-anchor="middle" class="wf-label">Run (Burrow)</text>
+  <text x="480" y="466" text-anchor="middle" class="wf-sub">880 tokens · 3.5 s</text>
+  <text x="480" y="480" text-anchor="middle" class="wf-sub">worktree</text>
+
+  <rect x="650" y="422" width="230" height="64" rx="10" fill="#f5f5f5" stroke="#d4d4d4" stroke-width="1.5"/>
+  <text x="765" y="448" text-anchor="middle" class="wf-label">Run (Burrow)</text>
+  <text x="765" y="466" text-anchor="middle" class="wf-sub">310 tokens · 0.9 s</text>
+  <text x="765" y="480" text-anchor="middle" class="wf-sub">worktree</text>
+
+  <!-- convergence: inverted T-junction — orange accent for metrics flow -->
+  <line x1="195" y1="486" x2="195" y2="510" stroke="#f59e0b" stroke-width="2"/>
+  <line x1="480" y1="486" x2="480" y2="510" stroke="#f59e0b" stroke-width="2"/>
+  <line x1="765" y1="486" x2="765" y2="510" stroke="#f59e0b" stroke-width="2"/>
+  <line x1="195" y1="510" x2="765" y2="510" stroke="#f59e0b" stroke-width="2"/>
+  <line x1="480" y1="510" x2="480" y2="548" stroke="#f59e0b" stroke-width="2" marker-end="url(#b)"/>
+  <text x="830" y="514" class="wf-step">⑤ report metrics</text>
+
+  <!-- Control-Plane -->
+  <rect x="320" y="552" width="320" height="56" rx="14" fill="#262626"/>
+  <text x="480" y="579" text-anchor="middle" class="wf-cp">Control-Plane</text>
+  <text x="480" y="598" text-anchor="middle" class="wf-cpsub">SQLite · HTTP API · :8800</text>
+
+  <!-- API badge -->
+  <rect x="330" y="620" width="300" height="26" rx="8" fill="#f5f5f5" stroke="#d4d4d4" stroke-width="1"/>
+  <text x="480" y="638" text-anchor="middle" class="wf-sub">GET /v1/status — full snapshot for console</text>
+</svg>

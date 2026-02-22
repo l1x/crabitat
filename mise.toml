@@ -1,70 +1,66 @@
 # tools
 [tools]
 rust = "1.90.0"
+node = "lts"
+bun = "latest"
 python = "3.13.10"
 
 # env
 [env]
 _.python.venv = { path = ".venv", create = true }
-MISE_EXPERIMENTAL = true
 
 [settings]
 experimental = true
 
-
 # tasks
-[tasks.lint]
-description = "Lint with Clippy, failing on warnings"
-run = "cargo clippy -- -D warnings"
+[tasks.fmt]
+description = "Format all Rust code in the workspace"
+run = "cargo fmt --all"
+
+[tasks.check]
+description = "Typecheck the full Rust workspace"
+run = "cargo check --workspace"
+
+[tasks.clippy]
+description = "Lint the Rust workspace"
+run = "cargo clippy --workspace --all-targets -- -D warnings"
+
+[tasks.test]
+description = "Run workspace tests"
+run = "cargo test --workspace -- --nocapture"
+
+[tasks.build]
+description = "Build all workspace members"
+run = "cargo build --workspace"
 
 [tasks.verify]
-description = "Full verification (lint + tests) before commit"
-run = "cargo clippy -- -D warnings && cargo test"
+description = "Run fmt + clippy + tests"
+run = "mise run fmt && mise run clippy && mise run test"
 
-[tasks.tests]
-description = "Running tests"
-run = "cargo test -- --nocapture"
+[tasks.run-control-plane]
+description = "Run the SQLite-backed control-plane"
+run = "cargo run -p crabitat-control-plane -- serve --port 8800 --db-path ./var/crabitat-control-plane.db"
 
-[tasks.coverage]
-description = "Run tests with coverage report (requires cargo-tarpaulin)"
-run = "cargo tarpaulin --out Html --output-dir coverage"
+[tasks.run-chief]
+description = "Run chief watch mode"
+run = "cargo run -p crabitat-chief -- --chief-id chief-1 watch"
 
-[tasks.build-dev]
-description = "Building the development version"
-run = "cargo build"
+[tasks.run-crab]
+description = "Run a crab agent (set COLONY_ID env var)"
+run = "cargo run -p crabitat-crab -- connect --control-plane http://127.0.0.1:8800 --colony-id ${COLONY_ID:-missing} --name crab-1 --role coder --repo ."
 
-[tasks.build-prod]
-description = "Building the development version"
-run = "cargo build --release"
+[tasks.console-install]
+description = "Install Astro console dependencies"
+run = "cd apps/crabitat-console && bun install"
 
-[tasks.build-prod-with-timings]
-description = "Building the development version"
-run = "cargo build --release --timings"
+[tasks.console-dev]
+description = "Run Astro Colony Console in dev mode"
+run = "cd apps/crabitat-console && bunx --bun astro dev"
 
-[tasks.show-issues]
-description = "List all open issues"
-run = "bd list"
+[tasks.console-build]
+description = "Build Astro Colony Console"
+run = "cd apps/crabitat-console && bunx --bun astro build"
 
-[tasks.show-ready]
-description = "Show ready work (no blockers)"
-run = "bd ready"
-
-[tasks.show-blocked]
-description = "Show blocked issues"
-run = "bd blocked"
-
-[tasks.show-issue-stats]
-description = "Show issue statistics"
-run = "bd stats"
-
-[tasks.show-issue-tree]
-description = "Show dependency tree for an issue (use: mise run issue-tree -- bd-1)"
-run = "bd dep tree"
-
-[tasks.unit-tests]
-description = "Run unit tests only"
-run = "cargo test --bin marie-ssg -- --nocapture"
-
-[tasks.integration-tests]
-description = "Run integration tests only"
-run = "cargo test --test integration_test -- --nocapture"
+[tasks.console-start]
+description = "Build and start the console in production mode (port 4321)"
+run = "cd apps/crabitat-console && bunx --bun astro build && HOST=0.0.0.0 PORT=4321 bun dist/server/entry.mjs"

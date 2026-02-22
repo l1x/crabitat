@@ -1,0 +1,63 @@
+---
+import type { ColonyRecord } from '../lib/types';
+import EmptyState from './EmptyState.astro';
+
+interface Props {
+  colonies: ColonyRecord[];
+}
+
+const { colonies } = Astro.props;
+const coloniesWithRepo = colonies.filter((c) => c.repo);
+---
+
+<div class="data-panel">
+  <div class="data-panel-header">
+    <span class="data-panel-title">Issue Queue</span>
+  </div>
+  <div class="data-panel-body">
+    {coloniesWithRepo.length === 0 ? (
+      <EmptyState
+        title="No colonies with a repo"
+        description="Bind a colony to a GitHub repo (PATCH /v1/colonies/{id}) to start queuing issues."
+      />
+    ) : (
+      <div id="queue-panel">
+        <div style="margin-bottom:16px">
+          <label for="queue-colony-select" style="font-weight:500;margin-right:8px">Colony:</label>
+          <select id="queue-colony-select" class="input" style="display:inline-block;width:auto">
+            {coloniesWithRepo.map((c) => (
+              <option value={c.colony_id}>{c.name} ({c.repo})</option>
+            ))}
+          </select>
+          <button class="btn btn--primary" id="queue-refresh-btn" style="margin-left:8px">Refresh</button>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <!-- Left: GitHub Issues -->
+          <div class="data-panel">
+            <div class="data-panel-header">
+              <span class="data-panel-title">Open Issues</span>
+            </div>
+            <div class="data-panel-body" id="issues-list">
+              <div class="empty-state">
+                <div class="empty-state-title">Select a colony and click Refresh</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Execution Queue -->
+          <div class="data-panel">
+            <div class="data-panel-header">
+              <span class="data-panel-title">Execution Queue</span>
+            </div>
+            <div class="data-panel-body" id="queue-list">
+              <div class="empty-state">
+                <div class="empty-state-title">No missions queued</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+  </div>
+</div>

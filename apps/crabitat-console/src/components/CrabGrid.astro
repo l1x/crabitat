@@ -1,0 +1,45 @@
+---
+import type { CrabRecord } from '../lib/types';
+import { timeAgo } from '../lib/format';
+import EmptyState from './EmptyState.astro';
+import SearchToolbar from './SearchToolbar.astro';
+
+interface Props {
+  crabs: CrabRecord[];
+}
+
+const { crabs } = Astro.props;
+---
+
+<SearchToolbar
+  placeholder="Search crabs..."
+  searchId="search-crabs"
+  filters={['All', 'Idle', 'Busy', 'Offline']}
+  filterGroup="crabs"
+/>
+
+{crabs.length === 0 ? (
+  <EmptyState
+    title="No crabs registered yet"
+    description="Use scripts/spawn-crab.sh to launch a crab agent."
+  />
+) : (
+  <div class="card-grid" id="crab-container" style="margin-top:16px">
+    {crabs.map((crab) => (
+      <div class="card" data-id={crab.crab_id} data-searchable={`${crab.name} ${crab.crab_id} ${crab.role}`} data-state={crab.state} data-updated-at-ms={crab.updated_at_ms}>
+        <div class="card-title">
+          {crab.name}
+          <span class={`badge badge--${crab.state}`}>{crab.state}</span>
+        </div>
+        <div class="card-meta">{crab.role} &middot; {crab.crab_id}</div>
+        <div class="card-meta">Colony: {crab.colony_id.slice(0, 8)} &middot; Updated {timeAgo(crab.updated_at_ms)}</div>
+        {crab.current_task_id && (
+          <div class="card-detail">Task: <code>{crab.current_task_id.slice(0, 8)}</code></div>
+        )}
+        {crab.current_run_id && (
+          <div class="card-detail">Run: <code>{crab.current_run_id.slice(0, 8)}</code></div>
+        )}
+      </div>
+    ))}
+  </div>
+)}

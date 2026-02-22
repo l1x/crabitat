@@ -1,0 +1,55 @@
+---
+import type { MissionRecord } from '../lib/types';
+import { timeAgo } from '../lib/format';
+import EmptyState from './EmptyState.astro';
+import SearchToolbar from './SearchToolbar.astro';
+
+interface Props {
+  missions: MissionRecord[];
+}
+
+const { missions } = Astro.props;
+---
+
+<SearchToolbar
+  placeholder="Search missions..."
+  searchId="search-missions"
+  showSort={true}
+  sortId="sort-missions"
+/>
+
+{missions.length === 0 ? (
+  <EmptyState
+    title="No missions yet"
+    description="Create a mission with POST /v1/missions to get started."
+  />
+) : (
+  <div class="data-panel" style="margin-top:16px">
+    <div class="data-table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Mission</th>
+            <th>Colony</th>
+            <th>Prompt</th>
+            <th>Status</th>
+            <th>Queue</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody id="mission-container">
+          {missions.map((m) => (
+            <tr data-id={m.mission_id} data-searchable={`${m.mission_id} ${m.colony_id} ${m.prompt}`} data-created-at-ms={m.created_at_ms} data-status={m.status || 'pending'}>
+              <td><code>{m.mission_id.slice(0, 8)}</code></td>
+              <td><code>{m.colony_id.slice(0, 8)}</code></td>
+              <td>{m.prompt.length > 80 ? m.prompt.slice(0, 80) + '...' : m.prompt}</td>
+              <td><span class={`badge badge--${m.status || 'pending'}`}>{m.status || 'pending'}</span></td>
+              <td>{m.queue_position != null ? '#' + m.queue_position : '\u2014'}</td>
+              <td>{timeAgo(m.created_at_ms)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+)}

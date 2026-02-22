@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700" role="img" aria-labelledby="title desc">
+  <title id="title">Manager-Worker Agent Mesh Architecture</title>
+  <desc id="desc">Human prompts manager agent, manager and workers communicate through an agent mesh server, and a debug stream flows from server to manager.</desc>
+
+  <defs>
+    <style>
+      .label { font-family: "Helvetica Neue", Arial, sans-serif; fill: #1f2937; font-size: 22px; font-weight: 600; }
+      .sub { font-family: "Helvetica Neue", Arial, sans-serif; fill: #4b5563; font-size: 17px; }
+      .line-label { font-family: "Helvetica Neue", Arial, sans-serif; fill: #6b7280; font-size: 16px; font-weight: 600; }
+      .box { stroke: #6b7280; stroke-width: 2; rx: 16; ry: 16; }
+    </style>
+    <marker id="arrowGrey" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6b7280"/>
+    </marker>
+    <marker id="arrowOrange" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#f59e0b"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="700" fill="#f9fafb"/>
+  <text x="600" y="40" text-anchor="middle" class="label" font-size="30">Manager-Worker Agent Mesh</text>
+
+  <rect x="500" y="80" width="200" height="72" class="box" fill="#f3f4f6"/>
+  <text x="600" y="126" text-anchor="middle" class="label">Human</text>
+
+  <rect x="420" y="185" width="360" height="95" class="box" fill="#fff5eb"/>
+  <text x="600" y="232" text-anchor="middle" class="label">Manager Agent</text>
+
+  <rect x="350" y="335" width="500" height="120" class="box" fill="#eef2f7"/>
+  <text x="600" y="384" text-anchor="middle" class="label">Agent Mesh Server</text>
+  <text x="600" y="413" text-anchor="middle" class="sub">(Axum + SQLite)</text>
+
+  <rect x="90" y="525" width="260" height="105" class="box" fill="#f3f4f6"/>
+  <text x="220" y="574" text-anchor="middle" class="label">Worker A</text>
+  <text x="220" y="602" text-anchor="middle" class="sub">(ws client)</text>
+
+  <rect x="470" y="525" width="260" height="105" class="box" fill="#f3f4f6"/>
+  <text x="600" y="574" text-anchor="middle" class="label">Worker B</text>
+  <text x="600" y="602" text-anchor="middle" class="sub">(ws client)</text>
+
+  <rect x="850" y="525" width="260" height="105" class="box" fill="#f3f4f6"/>
+  <text x="980" y="574" text-anchor="middle" class="label">Worker C</text>
+  <text x="980" y="602" text-anchor="middle" class="sub">(ws client)</text>
+
+  <line x1="600" y1="152" x2="600" y2="185" stroke="#6b7280" stroke-width="3" marker-end="url(#arrowGrey)"/>
+  <line x1="600" y1="280" x2="600" y2="335" stroke="#6b7280" stroke-width="3" marker-end="url(#arrowGrey)"/>
+  <text x="628" y="314" class="line-label">HTTP + WS</text>
+
+  <line x1="445" y1="455" x2="220" y2="525" stroke="#6b7280" stroke-width="3" marker-end="url(#arrowGrey)"/>
+  <line x1="600" y1="455" x2="600" y2="525" stroke="#6b7280" stroke-width="3" marker-end="url(#arrowGrey)"/>
+  <line x1="755" y1="455" x2="980" y2="525" stroke="#6b7280" stroke-width="3" marker-end="url(#arrowGrey)"/>
+  <text x="600" y="490" text-anchor="middle" class="line-label">WS clients</text>
+
+  <polyline points="850,395 1040,395 1040,228 780,228" fill="none" stroke="#f59e0b" stroke-width="4" marker-end="url(#arrowOrange)"/>
+  <text x="930" y="380" text-anchor="middle" class="line-label" fill="#b45309">debug stream</text>
+</svg>

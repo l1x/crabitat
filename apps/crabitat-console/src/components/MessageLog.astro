@@ -1,0 +1,54 @@
+---
+import type { MockMessage } from '../lib/mock-data';
+
+interface Props {
+  messages: MockMessage[];
+}
+
+const { messages } = Astro.props;
+
+// Sort newest first
+const sorted = [...messages].sort((a, b) => b.created_at_ms - a.created_at_ms);
+
+function formatTimestamp(ms: number): string {
+  const d = new Date(ms);
+  const date = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return `${date} ${time}`;
+}
+---
+
+<div class="data-panel">
+  <div class="data-panel-header">
+    <span class="data-panel-title">Messages</span>
+    <span class="content-count">{messages.length}</span>
+  </div>
+  <div class="data-panel-body">
+    {sorted.length === 0 ? (
+      <div class="empty-state">
+        <div class="empty-state-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+        </div>
+        <div class="empty-state-title">No messages yet</div>
+        <p class="empty-state-desc">Agent-to-agent messages will appear here.</p>
+      </div>
+    ) : (
+      <div class="message-log">
+        {sorted.map((msg) => (
+          <div class="message-entry" data-mission-id={msg.mission_id}>
+            <div class="message-header">
+              <span class="message-from">{msg.from}</span>
+              <svg class="message-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+              <span class="message-to">{msg.to}</span>
+              {msg.mission_id && (
+                <span class="message-mission-tag">{msg.mission_id}</span>
+              )}
+              <span class="message-time">{formatTimestamp(msg.created_at_ms)}</span>
+            </div>
+            <div class="message-body">{msg.body}</div>
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+</div>

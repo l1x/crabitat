@@ -1,0 +1,109 @@
+---
+import type { MockMission, MockRepo } from '../lib/mock-data';
+import { formatMs, formatTokens } from '../lib/format';
+
+interface Props {
+  missions: MockMission[];
+  repos: MockRepo[];
+}
+
+const { missions, repos } = Astro.props;
+
+function stepIcon(status: string): string {
+  switch (status) {
+    case 'completed': return '&#10003;';
+    case 'running': return '&#9654;';
+    case 'failed': return '&#10007;';
+    default: return '&#8226;';
+  }
+}
+---
+
+<div class="data-panel">
+  <div class="data-panel-header">
+    <span class="data-panel-title">Missions</span>
+    <span class="content-count">{missions.length}</span>
+  </div>
+  <div class="data-panel-body">
+    {missions.length === 0 ? (
+      <div class="empty-state">
+        <div class="empty-state-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        </div>
+        <div class="empty-state-title">No missions yet</div>
+        <p class="empty-state-desc">Create a mission from the Issues view.</p>
+      </div>
+    ) : (
+      <div class="mission-list">
+        {missions.map((mission) => {
+          const repo = repos.find((r) => r.repo_id === mission.repo_id);
+          return (
+            <div class="mission-card" data-mission-id={mission.mission_id}>
+              <div class="mission-card-header">
+                <div class="mission-card-title">
+                  <span class={`badge badge--${mission.status}`}>{mission.status}</span>
+                  <span class="mission-title-text">{mission.title}</span>
+                </div>
+                <div class="mission-card-meta">
+                  {repo && (
+                    <span class={`domain-tag domain-tag--${repo.domain}`}>{repo.full_name}</span>
+                  )}
+                  <span class="issue-number">#{mission.github_issue_number}</span>
+                  {mission.pr_number && (
+                    <span class="pr-ref">PR #{mission.pr_number}</span>
+                  )}
+                  {mission.branch && (
+                    <code class="branch-name">{mission.branch}</code>
+                  )}
+                </div>
+              </div>
+
+              <div class="pipeline">
+                {mission.pipeline.map((step, i) => (
+                  <>
+                    <div class={`pipeline-step pipeline-step--${step.status}`}>
+                      <div class="pipeline-step-icon" set:html={stepIcon(step.status)} />
+                      <div class="pipeline-step-info">
+                        <div class="pipeline-step-name">{step.step}</div>
+                        {step.agent && (
+                          <div class="pipeline-step-agent">{step.agent}</div>
+                        )}
+                      </div>
+                      {(step.tokens > 0 || step.wall_clock_ms > 0) && (
+                        <div class="pipeline-step-metrics">
+                          {step.tokens > 0 && (
+                            <span class="pipeline-metric">{formatTokens(step.tokens)} tokens</span>
+                          )}
+                          {step.wall_clock_ms > 0 && (
+                            <span class="pipeline-metric">{formatMs(step.wall_clock_ms)}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    {i < mission.pipeline.length - 1 && (
+                      <div class={`pipeline-connector ${step.status === 'completed' ? 'pipeline-connector--done' : ''}`} />
+                    )}
+                  </>
+                ))}
+              </div>
+
+              {mission.pipeline.some((s) => s.summary) && (
+                <details class="mission-details">
+                  <summary>Run details</summary>
+                  <div class="mission-details-body">
+                    {mission.pipeline.filter((s) => s.summary).map((s) => (
+                      <div class="run-detail">
+                        <span class="run-detail-step">{s.step}</span>
+                        <span class="run-detail-summary">{s.summary}</span>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    )}
+  </div>
+</div>

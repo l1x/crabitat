@@ -1,0 +1,34 @@
+---
+interface Props {
+  placeholder: string;
+  searchId: string;
+  filters?: string[];
+  filterGroup?: string;
+  showSort?: boolean;
+  sortId?: string;
+}
+
+const { placeholder, searchId, filters, filterGroup, showSort, sortId } = Astro.props;
+---
+
+<div class="toolbar" style="padding-left:0;padding-right:0">
+  <div class="search-box">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    <input type="text" placeholder={placeholder} id={searchId} />
+  </div>
+  {filters && filterGroup && (
+    <div class="filter-pills" data-filter-group={filterGroup}>
+      {filters.map((f) => (
+        <span class={`filter-pill ${f === 'All' ? 'active' : ''}`} data-filter={f === 'All' ? 'all' : f.toLowerCase()}>
+          {f}
+        </span>
+      ))}
+    </div>
+  )}
+  {showSort && sortId && (
+    <select class="sort-select" id={sortId}>
+      <option value="newest">Date (newest first)</option>
+      <option value="oldest">Date (oldest first)</option>
+    </select>
+  )}
+</div>
