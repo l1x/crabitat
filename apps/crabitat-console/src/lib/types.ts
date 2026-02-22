@@ -2,6 +2,7 @@ export interface ColonyRecord {
   colony_id: string;
   name: string;
   description: string;
+  repo: string | null;
   created_at_ms: number;
 }
 
@@ -20,7 +21,22 @@ export interface MissionRecord {
   mission_id: string;
   colony_id: string;
   prompt: string;
+  workflow_name: string | null;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  worktree_path: string | null;
+  queue_position: number | null;
+  github_issue_number: number | null;
+  github_pr_number: number | null;
   created_at_ms: number;
+}
+
+export interface GitHubIssueRecord {
+  number: number;
+  title: string;
+  body: string;
+  labels: string[];
+  state: string;
+  already_queued: boolean;
 }
 
 export interface TaskRecord {
@@ -85,6 +101,7 @@ export type ConsoleEvent =
   | { type: 'crab_updated'; crab: CrabRecord }
   | { type: 'colony_created'; colony: ColonyRecord }
   | { type: 'mission_created'; mission: MissionRecord }
+  | { type: 'mission_updated'; mission: MissionRecord }
   | { type: 'task_created'; task: TaskRecord }
   | { type: 'task_updated'; task: TaskRecord }
   | { type: 'run_created'; run: RunRecord }

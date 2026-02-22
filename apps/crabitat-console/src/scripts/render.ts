@@ -155,25 +155,43 @@ function crabCardInnerHtml(crab: CrabRecord, compact: boolean): string {
 export function renderMissionCreated(mission: MissionRecord) {
   updateMetrics();
   updateCounts();
+  renderMissionRow(mission);
+}
 
+export function renderMissionUpdated(mission: MissionRecord) {
+  updateMetrics();
+  updateCounts();
+  renderMissionRow(mission);
+}
+
+function renderMissionRow(mission: MissionRecord) {
   const container = document.getElementById('mission-container');
   if (!container) return;
 
-  const existing = container.querySelector<HTMLElement>(`[data-id="${mission.mission_id}"]`);
-  if (existing) return;
-
-  const tr = document.createElement('tr');
-  tr.dataset.id = mission.mission_id;
-  tr.dataset.searchable = `${mission.mission_id} ${mission.colony_id} ${mission.prompt}`;
-  tr.dataset.createdAtMs = String(mission.created_at_ms);
   const prompt = mission.prompt.length > 80 ? mission.prompt.slice(0, 80) + '...' : mission.prompt;
-  tr.innerHTML = `
+  const status = mission.status || 'pending';
+  const html = `
     <td><code>${esc(mission.mission_id.slice(0, 8))}</code></td>
     <td><code>${esc(mission.colony_id.slice(0, 8))}</code></td>
     <td>${esc(prompt)}</td>
+    <td><span class="badge badge--${status}">${status}</span></td>
+    <td>${mission.queue_position != null ? '#' + mission.queue_position : '\u2014'}</td>
     <td>${timeAgo(mission.created_at_ms)}</td>
   `;
-  container.prepend(tr);
+
+  const existing = container.querySelector<HTMLElement>(`[data-id="${mission.mission_id}"]`);
+  if (existing) {
+    existing.dataset.status = status;
+    existing.innerHTML = html;
+  } else {
+    const tr = document.createElement('tr');
+    tr.dataset.id = mission.mission_id;
+    tr.dataset.searchable = `${mission.mission_id} ${mission.colony_id} ${mission.prompt}`;
+    tr.dataset.createdAtMs = String(mission.created_at_ms);
+    tr.dataset.status = status;
+    tr.innerHTML = html;
+    container.prepend(tr);
+  }
 }
 
 // ---- Task ----

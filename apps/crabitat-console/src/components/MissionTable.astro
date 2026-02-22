@@ -32,15 +32,19 @@ const { missions } = Astro.props;
             <th>Mission</th>
             <th>Colony</th>
             <th>Prompt</th>
+            <th>Status</th>
+            <th>Queue</th>
             <th>Created</th>
           </tr>
         </thead>
         <tbody id="mission-container">
           {missions.map((m) => (
-            <tr data-id={m.mission_id} data-searchable={`${m.mission_id} ${m.colony_id} ${m.prompt}`} data-created-at-ms={m.created_at_ms}>
+            <tr data-id={m.mission_id} data-searchable={`${m.mission_id} ${m.colony_id} ${m.prompt}`} data-created-at-ms={m.created_at_ms} data-status={m.status || 'pending'}>
               <td><code>{m.mission_id.slice(0, 8)}</code></td>
               <td><code>{m.colony_id.slice(0, 8)}</code></td>
               <td>{m.prompt.length > 80 ? m.prompt.slice(0, 80) + '...' : m.prompt}</td>
+              <td><span class={`badge badge--${m.status || 'pending'}`}>{m.status || 'pending'}</span></td>
+              <td>{m.queue_position != null ? '#' + m.queue_position : '\u2014'}</td>
               <td>{timeAgo(m.created_at_ms)}</td>
             </tr>
           ))}

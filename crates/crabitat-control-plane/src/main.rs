@@ -7,7 +7,7 @@ use axum::{
     },
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{delete, get, patch, post},
 };
 use clap::{Parser, Subcommand};
 use crabitat_core::{
@@ -23,6 +23,7 @@ use std::{
     net::SocketAddr,
     path::{Path as StdPath, PathBuf},
     sync::Arc,
+    time::Duration,
 };
 use tokio::sync::{Mutex, broadcast, mpsc};
 use tracing::info;
@@ -121,12 +122,369 @@ impl WorkflowRegistry {
     }
 }
 
+// ---------------------------------------------------------------------------
+// GitHub Client (GraphQL API with gh CLI fallback)
+// ---------------------------------------------------------------------------
+
+#[derive(Clone)]
+struct GitHubClient {
+    http: reqwest::Client,
+    token: Option<String>,
+}
+
+/// Unified issue type returned by both backends.
+#[derive(Debug, Clone)]
+struct GhIssue {
+    number: i64,
+    title: String,
+    body: String,
+    labels: Vec<String>,
+    state: String,
+}
+
+/// Unified issue-detail type (title + body only).
+#[derive(Debug, Clone)]
+struct GhIssueDetail {
+    title: String,
+    body: String,
+}
+
+/// Unified PR-status type.
+#[derive(Debug, Clone)]
+struct GhPrStatus {
+    state: String,
+    merged_at: Option<String>,
+}
+
+// -- GraphQL response deserialization helpers --------------------------------
+
+#[derive(Debug, Deserialize)]
+struct GqlIssue {
+    number: i64,
+    title: String,
+    body: String,
+    labels: GqlLabels,
+    state: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GqlLabels {
+    nodes: Vec<GqlLabel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GqlLabel {
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GqlIssueDetail {
+    title: String,
+    body: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GqlPrStatus {
+    state: String,
+    merged_at: Option<String>,
+}
+
+// -- gh CLI response deserialization helpers ---------------------------------
+
+#[derive(Debug, Deserialize)]
+struct CliLabel {
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CliIssue {
+    number: i64,
+    title: String,
+    body: String,
+    labels: Vec<CliLabel>,
+    state: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CliIssueDetail {
+    title: String,
+    body: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CliPrStatus {
+    state: String,
+    merged_at: Option<String>,
+}
+
+impl GitHubClient {
+    fn new() -> Self {
+        Self { http: reqwest::Client::new(), token: std::env::var("GITHUB_TOKEN").ok() }
+    }
+
+    fn has_token(&self) -> bool {
+        self.token.is_some()
+    }
+
+    // -- Public API (dispatches to GraphQL or gh CLI) -----------------------
+
+    async fn list_issues(&self, repo: &str) -> Result<Vec<GhIssue>, ApiError> {
+        if self.has_token() {
+            let (owner, name) = parse_repo(repo)?;
+            self.list_issues_graphql(owner, name).await
+        } else {
+            self.list_issues_cli(repo).await
+        }
+    }
+
+    async fn get_issue(&self, repo: &str, number: i64) -> Result<GhIssueDetail, ApiError> {
+        if self.has_token() {
+            let (owner, name) = parse_repo(repo)?;
+            self.get_issue_graphql(owner, name, number).await
+        } else {
+            self.get_issue_cli(repo, number).await
+        }
+    }
+
+    async fn get_pr_status(&self, repo: &str, number: i64) -> Result<GhPrStatus, ApiError> {
+        if self.has_token() {
+            let (owner, name) = parse_repo(repo)?;
+            self.get_pr_status_graphql(owner, name, number).await
+        } else {
+            self.get_pr_status_cli(repo, number).await
+        }
+    }
+
+    // -- GraphQL backend ----------------------------------------------------
+
+    async fn graphql(
+        &self,
+        query: &str,
+        variables: serde_json::Value,
+    ) -> Result<serde_json::Value, ApiError> {
+        let token = self
+            .token
+            .as_deref()
+            .ok_or_else(|| ApiError::internal("graphql called without GITHUB_TOKEN"))?;
+
+        let resp = self
+            .http
+            .post("https://api.github.com/graphql")
+            .bearer_auth(token)
+            .header("User-Agent", "crabitat-control-plane")
+            .json(&serde_json::json!({ "query": query, "variables": variables }))
+            .send()
+            .await
+            .map_err(|e| ApiError::internal(format!("GitHub API request failed: {e}")))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(ApiError::internal(format!("GitHub API returned {status}: {body}")));
+        }
+
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| ApiError::internal(format!("failed to parse GitHub response: {e}")))?;
+
+        if let Some(errors) = body.get("errors") {
+            return Err(ApiError::internal(format!("GitHub GraphQL errors: {errors}")));
+        }
+
+        Ok(body)
+    }
+
+    async fn list_issues_graphql(&self, owner: &str, repo: &str) -> Result<Vec<GhIssue>, ApiError> {
+        let query = r#"
+            query($owner: String!, $repo: String!) {
+                repository(owner: $owner, name: $repo) {
+                    issues(first: 50, states: OPEN, orderBy: {field: CREATED_AT, direction: DESC}) {
+                        nodes {
+                            number
+                            title
+                            body
+                            labels(first: 10) { nodes { name } }
+                            state
+                        }
+                    }
+                }
+            }
+        "#;
+
+        let body = self.graphql(query, serde_json::json!({ "owner": owner, "repo": repo })).await?;
+
+        let nodes = body
+            .pointer("/data/repository/issues/nodes")
+            .ok_or_else(|| ApiError::internal("unexpected GitHub response structure"))?;
+
+        let gql_issues: Vec<GqlIssue> = serde_json::from_value(nodes.clone())
+            .map_err(|e| ApiError::internal(format!("failed to parse issues: {e}")))?;
+
+        Ok(gql_issues
+            .into_iter()
+            .map(|i| GhIssue {
+                number: i.number,
+                title: i.title,
+                body: i.body,
+                labels: i.labels.nodes.into_iter().map(|l| l.name).collect(),
+                state: i.state,
+            })
+            .collect())
+    }
+
+    async fn get_issue_graphql(
+        &self,
+        owner: &str,
+        repo: &str,
+        number: i64,
+    ) -> Result<GhIssueDetail, ApiError> {
+        let query = r#"
+            query($owner: String!, $repo: String!, $number: Int!) {
+                repository(owner: $owner, name: $repo) {
+                    issue(number: $number) {
+                        title
+                        body
+                    }
+                }
+            }
+        "#;
+
+        let body = self
+            .graphql(query, serde_json::json!({ "owner": owner, "repo": repo, "number": number }))
+            .await?;
+
+        let issue = body
+            .pointer("/data/repository/issue")
+            .ok_or_else(|| ApiError::internal("issue not found in GitHub response"))?;
+
+        let d: GqlIssueDetail = serde_json::from_value(issue.clone())
+            .map_err(|e| ApiError::internal(format!("failed to parse issue: {e}")))?;
+
+        Ok(GhIssueDetail { title: d.title, body: d.body })
+    }
+
+    async fn get_pr_status_graphql(
+        &self,
+        owner: &str,
+        repo: &str,
+        number: i64,
+    ) -> Result<GhPrStatus, ApiError> {
+        let query = r#"
+            query($owner: String!, $repo: String!, $number: Int!) {
+                repository(owner: $owner, name: $repo) {
+                    pullRequest(number: $number) {
+                        state
+                        mergedAt
+                    }
+                }
+            }
+        "#;
+
+        let body = self
+            .graphql(query, serde_json::json!({ "owner": owner, "repo": repo, "number": number }))
+            .await?;
+
+        let pr = body
+            .pointer("/data/repository/pullRequest")
+            .ok_or_else(|| ApiError::internal("PR not found in GitHub response"))?;
+
+        let s: GqlPrStatus = serde_json::from_value(pr.clone())
+            .map_err(|e| ApiError::internal(format!("failed to parse PR status: {e}")))?;
+
+        Ok(GhPrStatus { state: s.state, merged_at: s.merged_at })
+    }
+
+    // -- gh CLI backend -----------------------------------------------------
+
+    async fn list_issues_cli(&self, repo: &str) -> Result<Vec<GhIssue>, ApiError> {
+        let output = tokio::process::Command::new("gh")
+            .args([
+                "issue",
+                "list",
+                "--repo",
+                repo,
+                "--json",
+                "number,title,body,labels,state",
+                "--state",
+                "open",
+                "--limit",
+                "50",
+            ])
+            .output()
+            .await
+            .map_err(|e| ApiError::internal(format!("failed to run gh: {e}")))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(ApiError::internal(format!("gh issue list failed: {stderr}")));
+        }
+
+        let issues: Vec<CliIssue> = serde_json::from_slice(&output.stdout)
+            .map_err(|e| ApiError::internal(format!("failed to parse gh output: {e}")))?;
+
+        Ok(issues
+            .into_iter()
+            .map(|i| GhIssue {
+                number: i.number,
+                title: i.title,
+                body: i.body,
+                labels: i.labels.into_iter().map(|l| l.name).collect(),
+                state: i.state,
+            })
+            .collect())
+    }
+
+    async fn get_issue_cli(&self, repo: &str, number: i64) -> Result<GhIssueDetail, ApiError> {
+        let output = tokio::process::Command::new("gh")
+            .args(["issue", "view", &number.to_string(), "--repo", repo, "--json", "title,body"])
+            .output()
+            .await
+            .map_err(|e| ApiError::internal(format!("failed to run gh: {e}")))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(ApiError::internal(format!("gh issue view failed: {stderr}")));
+        }
+
+        let d: CliIssueDetail = serde_json::from_slice(&output.stdout)
+            .map_err(|e| ApiError::internal(format!("failed to parse gh output: {e}")))?;
+
+        Ok(GhIssueDetail { title: d.title, body: d.body })
+    }
+
+    async fn get_pr_status_cli(&self, repo: &str, number: i64) -> Result<GhPrStatus, ApiError> {
+        let output = tokio::process::Command::new("gh")
+            .args(["pr", "view", &number.to_string(), "--repo", repo, "--json", "state,mergedAt"])
+            .output()
+            .await
+            .map_err(|e| ApiError::internal(format!("failed to run gh: {e}")))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(ApiError::internal(format!("gh pr view failed: {stderr}")));
+        }
+
+        let s: CliPrStatus = serde_json::from_slice(&output.stdout)
+            .map_err(|e| ApiError::internal(format!("failed to parse gh output: {e}")))?;
+
+        Ok(GhPrStatus { state: s.state, merged_at: s.merged_at })
+    }
+}
+
+fn parse_repo(repo: &str) -> Result<(&str, &str), ApiError> {
+    repo.split_once('/').ok_or_else(|| ApiError::bad_request("repo must be in 'owner/repo' format"))
+}
+
 #[derive(Clone)]
 struct AppState {
     db: Arc<Mutex<Connection>>,
     crab_channels: CrabChannels,
     console_tx: broadcast::Sender<String>,
     workflows: Arc<WorkflowRegistry>,
+    github: GitHubClient,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -136,6 +494,7 @@ enum ConsoleEvent {
     CrabUpdated { crab: CrabRecord },
     ColonyCreated { colony: ColonyRecord },
     MissionCreated { mission: MissionRecord },
+    MissionUpdated { mission: MissionRecord },
     TaskCreated { task: TaskRecord },
     TaskUpdated { task: TaskRecord },
     RunCreated { run: RunRecord },
@@ -216,6 +575,7 @@ struct ColonyRecord {
     colony_id: String,
     name: String,
     description: String,
+    repo: Option<String>,
     created_at_ms: u64,
 }
 
@@ -239,6 +599,9 @@ struct MissionRecord {
     workflow_name: Option<String>,
     status: MissionStatus,
     worktree_path: Option<String>,
+    queue_position: Option<i64>,
+    github_issue_number: Option<i64>,
+    github_pr_number: Option<i64>,
     created_at_ms: u64,
 }
 
@@ -305,6 +668,7 @@ struct StatusSnapshot {
 struct CreateColonyRequest {
     name: String,
     description: Option<String>,
+    repo: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -376,6 +740,29 @@ struct CompleteRunRequest {
     timing: Option<TimingPatch>,
 }
 
+#[derive(Debug, Deserialize)]
+struct UpdateColonyRequest {
+    repo: Option<String>,
+    name: Option<String>,
+    description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct GitHubIssueRecord {
+    number: i64,
+    title: String,
+    body: String,
+    labels: Vec<String>,
+    state: String,
+    already_queued: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct QueueIssueRequest {
+    issue_number: i64,
+    workflow: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Entrypoint
 // ---------------------------------------------------------------------------
@@ -402,14 +789,24 @@ async fn serve(port: u16, db_path: &StdPath, prompts_path: &StdPath) -> Result<(
     let (console_tx, _) = broadcast::channel::<String>(256);
     let workflows = WorkflowRegistry::load(prompts_path);
     info!(count = workflows.manifests.len(), "workflow registry loaded");
+    let github = GitHubClient::new();
+    if github.has_token() {
+        info!("GitHub: using GraphQL API (GITHUB_TOKEN set)");
+    } else {
+        info!("GitHub: using gh CLI fallback (set GITHUB_TOKEN for API mode)");
+    }
     let state = AppState {
         db: Arc::new(Mutex::new(connection)),
         crab_channels: Arc::new(Mutex::new(HashMap::new())),
         console_tx,
         workflows: Arc::new(workflows),
+        github,
     };
 
-    let app = build_router(state);
+    let app = build_router(state.clone());
+
+    // Spawn background merge-wait poller
+    tokio::spawn(spawn_merge_wait_poller(state));
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -428,6 +825,10 @@ fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/v1/colonies", post(create_colony).get(list_colonies))
+        .route("/v1/colonies/{colony_id}", patch(update_colony))
+        .route("/v1/colonies/{colony_id}/issues", get(list_colony_issues))
+        .route("/v1/colonies/{colony_id}/queue", get(list_queue).post(queue_issue))
+        .route("/v1/colonies/{colony_id}/queue/{mission_id}", delete(remove_from_queue))
         .route("/v1/crabs", get(list_crabs))
         .route("/v1/crabs/register", post(register_crab))
         .route("/v1/missions", post(create_mission).get(list_missions))
@@ -437,7 +838,6 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/runs/update", post(update_run))
         .route("/v1/runs/complete", post(complete_run))
         .route("/v1/workflows", get(list_workflows))
-        .route("/v1/scheduler/tick", post(scheduler_tick))
         .route("/v1/status", get(get_status))
         .route("/v1/ws/crab/{crab_id}", get(ws_crab_handler))
         .route("/v1/ws/console", get(ws_console_handler))
@@ -458,6 +858,7 @@ fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
           colony_id TEXT PRIMARY KEY,
           name TEXT NOT NULL,
           description TEXT NOT NULL DEFAULT '',
+          repo TEXT,
           created_at_ms INTEGER NOT NULL
         );
 
@@ -480,6 +881,9 @@ fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
           workflow_name TEXT,
           status TEXT NOT NULL DEFAULT 'pending',
           worktree_path TEXT,
+          queue_position INTEGER,
+          github_issue_number INTEGER,
+          github_pr_number INTEGER,
           created_at_ms INTEGER NOT NULL,
           FOREIGN KEY(colony_id) REFERENCES colonies(colony_id)
         );
@@ -695,6 +1099,20 @@ fn emit_console_event(tx: &broadcast::Sender<String>, event: ConsoleEvent) {
     }
 }
 
+async fn dispatch_assignments(state: &AppState, assignments: Vec<SchedulerAssignment>) {
+    if assignments.is_empty() {
+        return;
+    }
+    let channels = state.crab_channels.lock().await;
+    for assignment in assignments {
+        if let Some(tx) = channels.get(&assignment.crab_id)
+            && let Ok(json) = serde_json::to_string(&assignment.envelope)
+        {
+            let _ = tx.send(json);
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
@@ -715,18 +1133,20 @@ async fn create_colony(
         return Err(ApiError::bad_request("name is required"));
     }
 
-    let colony = Colony::new(request.name, request.description.unwrap_or_default());
+    let mut colony = Colony::new(request.name, request.description.unwrap_or_default());
+    colony.repo = request.repo.clone();
     let row = ColonyRecord {
         colony_id: colony.id.to_string(),
         name: colony.name,
         description: colony.description,
+        repo: colony.repo,
         created_at_ms: colony.created_at_ms,
     };
 
     let db = state.db.lock().await;
     db.execute(
-        "INSERT INTO colonies (colony_id, name, description, created_at_ms) VALUES (?1, ?2, ?3, ?4)",
-        params![row.colony_id, row.name, row.description, row.created_at_ms],
+        "INSERT INTO colonies (colony_id, name, description, repo, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![row.colony_id, row.name, row.description, row.repo, row.created_at_ms],
     )?;
 
     emit_console_event(&state.console_tx, ConsoleEvent::ColonyCreated { colony: row.clone() });
@@ -750,62 +1170,72 @@ async fn register_crab(
         return Err(ApiError::bad_request("crab_id, colony_id, name, and role are required"));
     }
 
-    let db = state.db.lock().await;
+    let (crab, assignments) = {
+        let mut db = state.db.lock().await;
+        let tx = db.transaction().map_err(ApiError::from)?;
 
-    let colony_exists: i64 = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM colonies WHERE colony_id = ?1)",
-        params![request.colony_id],
-        |row| row.get(0),
-    )?;
-    if colony_exists == 0 {
-        return Err(ApiError::not_found("colony_id not found"));
-    }
-
-    let updated_at_ms = now_ms();
-    let crab_state = request.state.unwrap_or(CrabState::Idle);
-
-    // Enforce one crab per role per colony (except "any" which allows multiple)
-    if request.role != "any" {
-        let existing: Option<String> = db
-            .query_row(
-                "SELECT crab_id FROM crabs WHERE colony_id = ?1 AND role = ?2 AND crab_id != ?3",
-                params![request.colony_id, request.role, request.crab_id],
-                |row| row.get(0),
-            )
-            .ok();
-
-        if let Some(existing_crab_id) = existing {
-            return Err(ApiError::bad_request(format!(
-                "role '{}' is already taken in this colony by crab '{}'",
-                request.role, existing_crab_id
-            )));
+        let colony_exists: i64 = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM colonies WHERE colony_id = ?1)",
+            params![request.colony_id],
+            |row| row.get(0),
+        )?;
+        if colony_exists == 0 {
+            return Err(ApiError::not_found("colony_id not found"));
         }
-    }
 
-    db.execute(
-        "
-        INSERT INTO crabs (crab_id, colony_id, name, role, state, current_task_id, current_run_id, updated_at_ms)
-        VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, ?6)
-        ON CONFLICT(crab_id) DO UPDATE SET
-          colony_id=excluded.colony_id,
-          name=excluded.name,
-          role=excluded.role,
-          state=excluded.state,
-          updated_at_ms=excluded.updated_at_ms
-        ",
-        params![
-            request.crab_id,
-            request.colony_id,
-            request.name,
-            request.role,
-            crab_state.as_str(),
-            updated_at_ms
-        ],
-    )?;
+        let updated_at_ms = now_ms();
+        let crab_state = request.state.unwrap_or(CrabState::Idle);
 
-    let crab = fetch_crab(&db, &request.crab_id)?
-        .ok_or_else(|| ApiError::internal("failed to reload crab after registration"))?;
-    emit_console_event(&state.console_tx, ConsoleEvent::CrabUpdated { crab: crab.clone() });
+        // Enforce one crab per role per colony (except "any" which allows multiple)
+        if request.role != "any" {
+            let existing: Option<String> = tx
+                .query_row(
+                    "SELECT crab_id FROM crabs WHERE colony_id = ?1 AND role = ?2 AND crab_id != ?3",
+                    params![request.colony_id, request.role, request.crab_id],
+                    |row| row.get(0),
+                )
+                .ok();
+
+            if let Some(existing_crab_id) = existing {
+                return Err(ApiError::bad_request(format!(
+                    "role '{}' is already taken in this colony by crab '{}'",
+                    request.role, existing_crab_id
+                )));
+            }
+        }
+
+        tx.execute(
+            "
+            INSERT INTO crabs (crab_id, colony_id, name, role, state, current_task_id, current_run_id, updated_at_ms)
+            VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, ?6)
+            ON CONFLICT(crab_id) DO UPDATE SET
+              colony_id=excluded.colony_id,
+              name=excluded.name,
+              role=excluded.role,
+              state=excluded.state,
+              updated_at_ms=excluded.updated_at_ms
+            ",
+            params![
+                request.crab_id,
+                request.colony_id,
+                request.name,
+                request.role,
+                crab_state.as_str(),
+                updated_at_ms
+            ],
+        )?;
+
+        let crab = fetch_crab(&tx, &request.crab_id)?
+            .ok_or_else(|| ApiError::internal("failed to reload crab after registration"))?;
+        emit_console_event(&state.console_tx, ConsoleEvent::CrabUpdated { crab: crab.clone() });
+
+        // New idle crab available — run scheduler to assign queued tasks
+        let assignments = run_scheduler_tick_db(&tx, &state.console_tx)?;
+        tx.commit().map_err(ApiError::from)?;
+        (crab, assignments)
+    };
+
+    dispatch_assignments(&state, assignments).await;
     Ok(Json(crab))
 }
 
@@ -825,68 +1255,90 @@ async fn create_mission(
         return Err(ApiError::bad_request("colony_id is required"));
     }
 
-    let db = state.db.lock().await;
+    let (row, assignments) = {
+        let mut db = state.db.lock().await;
+        let tx = db.transaction().map_err(ApiError::from)?;
 
-    let colony_exists: i64 = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM colonies WHERE colony_id = ?1)",
-        params![request.colony_id],
-        |row| row.get(0),
-    )?;
-    if colony_exists == 0 {
-        return Err(ApiError::not_found("colony_id not found"));
-    }
+        let colony_exists: i64 = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM colonies WHERE colony_id = ?1)",
+            params![request.colony_id],
+            |row| row.get(0),
+        )?;
+        if colony_exists == 0 {
+            return Err(ApiError::not_found("colony_id not found"));
+        }
 
-    let mission = Mission::new(&request.prompt);
-    let row = MissionRecord {
-        mission_id: mission.id.to_string(),
-        colony_id: request.colony_id,
-        prompt: mission.prompt,
-        workflow_name: request.workflow.clone(),
-        status: MissionStatus::Pending,
-        worktree_path: None,
-        created_at_ms: mission.created_at_ms,
+        let mission = Mission::new(&request.prompt);
+        let row = MissionRecord {
+            mission_id: mission.id.to_string(),
+            colony_id: request.colony_id,
+            prompt: mission.prompt,
+            workflow_name: request.workflow.clone(),
+            status: MissionStatus::Pending,
+            worktree_path: None,
+            queue_position: None,
+            github_issue_number: None,
+            github_pr_number: None,
+            created_at_ms: mission.created_at_ms,
+        };
+
+        tx.execute(
+            "INSERT INTO missions (mission_id, colony_id, prompt, workflow_name, status, worktree_path, queue_position, github_issue_number, github_pr_number, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                row.mission_id,
+                row.colony_id,
+                row.prompt,
+                row.workflow_name,
+                mission_status_to_db(row.status),
+                row.worktree_path,
+                row.queue_position,
+                row.github_issue_number,
+                row.github_pr_number,
+                row.created_at_ms
+            ],
+        )?;
+
+        emit_console_event(
+            &state.console_tx,
+            ConsoleEvent::MissionCreated { mission: row.clone() },
+        );
+
+        // If a workflow is specified, expand it into tasks
+        if let Some(ref workflow_name) = request.workflow {
+            let manifest = state
+                .workflows
+                .get(workflow_name)
+                .ok_or_else(|| {
+                    ApiError::not_found(format!("workflow '{workflow_name}' not found"))
+                })?
+                .clone();
+
+            let worktree_path = format!("burrows/mission-{}", row.mission_id);
+            tx.execute(
+                "UPDATE missions SET status = ?2, worktree_path = ?3 WHERE mission_id = ?1",
+                params![
+                    row.mission_id,
+                    mission_status_to_db(MissionStatus::Running),
+                    worktree_path
+                ],
+            )?;
+
+            expand_workflow_into_tasks(
+                &tx,
+                &state.workflows,
+                &manifest,
+                &row.mission_id,
+                &request.prompt,
+                &state.console_tx,
+            )?;
+        }
+
+        let assignments = run_scheduler_tick_db(&tx, &state.console_tx)?;
+        tx.commit().map_err(ApiError::from)?;
+        (row, assignments)
     };
 
-    let db_ref = &*db;
-    db_ref.execute(
-        "INSERT INTO missions (mission_id, colony_id, prompt, workflow_name, status, worktree_path, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![
-            row.mission_id,
-            row.colony_id,
-            row.prompt,
-            row.workflow_name,
-            mission_status_to_db(row.status),
-            row.worktree_path,
-            row.created_at_ms
-        ],
-    )?;
-
-    emit_console_event(&state.console_tx, ConsoleEvent::MissionCreated { mission: row.clone() });
-
-    // If a workflow is specified, expand it into tasks
-    if let Some(ref workflow_name) = request.workflow {
-        let manifest = state
-            .workflows
-            .get(workflow_name)
-            .ok_or_else(|| ApiError::not_found(format!("workflow '{workflow_name}' not found")))?
-            .clone();
-
-        let worktree_path = format!("burrows/mission-{}", row.mission_id);
-        db.execute(
-            "UPDATE missions SET status = ?2, worktree_path = ?3 WHERE mission_id = ?1",
-            params![row.mission_id, mission_status_to_db(MissionStatus::Running), worktree_path],
-        )?;
-
-        expand_workflow_into_tasks(
-            &db,
-            &state.workflows,
-            &manifest,
-            &row.mission_id,
-            &request.prompt,
-            &state.console_tx,
-        )?;
-    }
-
+    dispatch_assignments(&state, assignments).await;
     Ok(Json(row))
 }
 
@@ -1006,9 +1458,10 @@ async fn create_task(
     let notify_crab_id = request.assigned_crab_id.clone();
 
     let (task, mission_prompt) = {
-        let db = state.db.lock().await;
+        let mut db = state.db.lock().await;
+        let tx = db.transaction().map_err(ApiError::from)?;
 
-        let mission_exists: i64 = db.query_row(
+        let mission_exists: i64 = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM missions WHERE mission_id = ?1)",
             params![request.mission_id],
             |row| row.get(0),
@@ -1021,7 +1474,7 @@ async fn create_task(
         let status = request.status.unwrap_or(TaskStatus::Queued);
         let task_id = TaskId::new().to_string();
 
-        db.execute(
+        tx.execute(
             "
             INSERT INTO tasks (task_id, mission_id, title, assigned_crab_id, status,
                                step_id, role, prompt, context,
@@ -1044,18 +1497,18 @@ async fn create_task(
         )?;
 
         if let Some(ref crab_id) = request.assigned_crab_id {
-            db.execute(
+            tx.execute(
                 "UPDATE crabs SET state = 'busy', current_task_id = ?2, updated_at_ms = ?3 WHERE crab_id = ?1",
                 params![crab_id, task_id, created_at_ms],
             )?;
         }
 
-        let task = fetch_task(&db, &task_id)?
+        let task = fetch_task(&tx, &task_id)?
             .ok_or_else(|| ApiError::internal("failed to reload task after creation"))?;
 
         // Fetch mission prompt for WebSocket notification
         let mission_prompt = if notify_crab_id.is_some() {
-            db.query_row(
+            tx.query_row(
                 "SELECT prompt FROM missions WHERE mission_id = ?1",
                 params![request.mission_id],
                 |row| row.get::<_, String>(0),
@@ -1065,6 +1518,7 @@ async fn create_task(
             String::new()
         };
 
+        tx.commit().map_err(ApiError::from)?;
         (task, mission_prompt)
     };
 
@@ -1124,9 +1578,10 @@ async fn start_run(
     let now = now_ms();
     let progress = request.progress_message.unwrap_or_else(|| "run started".to_string());
 
-    let db = state.db.lock().await;
+    let mut db = state.db.lock().await;
+    let tx = db.transaction().map_err(ApiError::from)?;
 
-    let mission_exists: i64 = db.query_row(
+    let mission_exists: i64 = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM missions WHERE mission_id = ?1)",
         params![request.mission_id],
         |row| row.get(0),
@@ -1135,7 +1590,7 @@ async fn start_run(
         return Err(ApiError::not_found("mission_id not found"));
     }
 
-    let task_exists: i64 = db.query_row(
+    let task_exists: i64 = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM tasks WHERE task_id = ?1)",
         params![request.task_id],
         |row| row.get(0),
@@ -1144,7 +1599,7 @@ async fn start_run(
         return Err(ApiError::not_found("task_id not found"));
     }
 
-    db.execute(
+    tx.execute(
         "
         INSERT INTO runs (
           run_id, mission_id, task_id, crab_id, status, burrow_path, burrow_mode,
@@ -1168,19 +1623,20 @@ async fn start_run(
     )
     .map_err(|err| ApiError::bad_request(format!("failed to start run: {err}")))?;
 
-    db.execute(
+    tx.execute(
         "UPDATE tasks SET assigned_crab_id = ?1, status = ?2, updated_at_ms = ?3 WHERE task_id = ?4",
         params![request.crab_id, task_status_to_db(TaskStatus::Running), now, request.task_id],
     )?;
 
-    db.execute(
+    tx.execute(
         "UPDATE crabs SET state = 'busy', current_task_id = ?1, current_run_id = ?2, updated_at_ms = ?3 WHERE crab_id = ?4",
         params![request.task_id, run_id, now, request.crab_id],
     )?;
 
-    let run = fetch_run(&db, &run_id)?
+    let run = fetch_run(&tx, &run_id)?
         .ok_or_else(|| ApiError::internal("failed to reload run after start"))?;
     emit_console_event(&state.console_tx, ConsoleEvent::RunCreated { run: run.clone() });
+    tx.commit().map_err(ApiError::from)?;
     Ok(Json(run))
 }
 
@@ -1188,16 +1644,18 @@ async fn update_run(
     State(state): State<AppState>,
     Json(request): Json<UpdateRunRequest>,
 ) -> Result<Json<RunRecord>, ApiError> {
-    let db = state.db.lock().await;
+    let mut db = state.db.lock().await;
+    let tx = db.transaction().map_err(ApiError::from)?;
+
     let existing =
-        fetch_run(&db, &request.run_id)?.ok_or_else(|| ApiError::not_found("run_id not found"))?;
+        fetch_run(&tx, &request.run_id)?.ok_or_else(|| ApiError::not_found("run_id not found"))?;
 
     let now = now_ms();
     let status = request.status.unwrap_or(existing.status);
     let progress_message = request.progress_message.unwrap_or(existing.progress_message.clone());
     let metrics = merge_metrics(existing.metrics.clone(), request.token_usage, request.timing);
 
-    db.execute(
+    tx.execute(
         "
         UPDATE runs
         SET status = ?2,
@@ -1229,29 +1687,29 @@ async fn update_run(
 
     match status {
         RunStatus::Running => {
-            db.execute(
+            tx.execute(
                 "UPDATE tasks SET status = ?2, updated_at_ms = ?3 WHERE task_id = ?1",
                 params![existing.task_id, task_status_to_db(TaskStatus::Running), now],
             )?;
-            db.execute(
+            tx.execute(
                 "UPDATE crabs SET state = 'busy', current_task_id = ?2, current_run_id = ?3, updated_at_ms = ?4 WHERE crab_id = ?1",
                 params![existing.crab_id, existing.task_id, existing.run_id, now],
             )?;
         }
         RunStatus::Blocked => {
-            db.execute(
+            tx.execute(
                 "UPDATE tasks SET status = ?2, updated_at_ms = ?3 WHERE task_id = ?1",
                 params![existing.task_id, task_status_to_db(TaskStatus::Blocked), now],
             )?;
         }
         RunStatus::Completed => {
-            db.execute(
+            tx.execute(
                 "UPDATE tasks SET status = ?2, updated_at_ms = ?3 WHERE task_id = ?1",
                 params![existing.task_id, task_status_to_db(TaskStatus::Completed), now],
             )?;
         }
         RunStatus::Failed => {
-            db.execute(
+            tx.execute(
                 "UPDATE tasks SET status = ?2, updated_at_ms = ?3 WHERE task_id = ?1",
                 params![existing.task_id, task_status_to_db(TaskStatus::Failed), now],
             )?;
@@ -1259,13 +1717,14 @@ async fn update_run(
         RunStatus::Queued => {}
     }
 
-    if let Ok(Some(task)) = fetch_task(&db, &existing.task_id) {
+    if let Ok(Some(task)) = fetch_task(&tx, &existing.task_id) {
         emit_console_event(&state.console_tx, ConsoleEvent::TaskUpdated { task });
     }
 
-    let updated = fetch_run(&db, &request.run_id)?
+    let updated = fetch_run(&tx, &request.run_id)?
         .ok_or_else(|| ApiError::internal("failed to reload run after update"))?;
     emit_console_event(&state.console_tx, ConsoleEvent::RunUpdated { run: updated.clone() });
+    tx.commit().map_err(ApiError::from)?;
     Ok(Json(updated))
 }
 
@@ -1279,66 +1738,80 @@ async fn complete_run(
         ));
     }
 
-    let db = state.db.lock().await;
-    let existing =
-        fetch_run(&db, &request.run_id)?.ok_or_else(|| ApiError::not_found("run_id not found"))?;
+    let (run, assignments) = {
+        let mut db = state.db.lock().await;
+        let tx = db.transaction().map_err(ApiError::from)?;
 
-    let completed_at = now_ms();
-    let metrics = merge_metrics(existing.metrics.clone(), request.token_usage, request.timing);
+        let existing = fetch_run(&tx, &request.run_id)?
+            .ok_or_else(|| ApiError::not_found("run_id not found"))?;
 
-    db.execute(
-        "
-        UPDATE runs
-        SET status = ?2,
-            summary = ?3,
-            prompt_tokens = ?4,
-            completion_tokens = ?5,
-            total_tokens = ?6,
-            first_token_ms = ?7,
-            llm_duration_ms = ?8,
-            execution_duration_ms = ?9,
-            end_to_end_ms = ?10,
-            completed_at_ms = ?11,
-            updated_at_ms = ?11
-        WHERE run_id = ?1
-        ",
-        params![
-            request.run_id,
-            run_status_to_db(request.status),
-            request.summary,
-            metrics.prompt_tokens,
-            metrics.completion_tokens,
-            metrics.total_tokens,
-            metrics.first_token_ms.map(|v| v as i64),
-            metrics.llm_duration_ms.map(|v| v as i64),
-            metrics.execution_duration_ms.map(|v| v as i64),
-            metrics.end_to_end_ms.map(|v| v as i64),
-            completed_at
-        ],
-    )?;
+        let completed_at = now_ms();
+        let metrics = merge_metrics(existing.metrics.clone(), request.token_usage, request.timing);
 
-    let task_status = match request.status {
-        RunStatus::Completed => TaskStatus::Completed,
-        RunStatus::Failed => TaskStatus::Failed,
-        _ => TaskStatus::Running,
+        tx.execute(
+            "
+            UPDATE runs
+            SET status = ?2,
+                summary = ?3,
+                prompt_tokens = ?4,
+                completion_tokens = ?5,
+                total_tokens = ?6,
+                first_token_ms = ?7,
+                llm_duration_ms = ?8,
+                execution_duration_ms = ?9,
+                end_to_end_ms = ?10,
+                completed_at_ms = ?11,
+                updated_at_ms = ?11
+            WHERE run_id = ?1
+            ",
+            params![
+                request.run_id,
+                run_status_to_db(request.status),
+                request.summary,
+                metrics.prompt_tokens,
+                metrics.completion_tokens,
+                metrics.total_tokens,
+                metrics.first_token_ms.map(|v| v as i64),
+                metrics.llm_duration_ms.map(|v| v as i64),
+                metrics.execution_duration_ms.map(|v| v as i64),
+                metrics.end_to_end_ms.map(|v| v as i64),
+                completed_at
+            ],
+        )?;
+
+        let task_status = match request.status {
+            RunStatus::Completed => TaskStatus::Completed,
+            RunStatus::Failed => TaskStatus::Failed,
+            _ => TaskStatus::Running,
+        };
+        tx.execute(
+            "UPDATE tasks SET status = ?2, updated_at_ms = ?3 WHERE task_id = ?1",
+            params![existing.task_id, task_status_to_db(task_status), completed_at],
+        )?;
+
+        tx.execute(
+            "UPDATE crabs SET state = 'idle', current_task_id = NULL, current_run_id = NULL, updated_at_ms = ?2 WHERE crab_id = ?1",
+            params![existing.crab_id, completed_at],
+        )?;
+
+        let run = fetch_run(&tx, &request.run_id)?
+            .ok_or_else(|| ApiError::internal("failed to reload run after completion"))?;
+        emit_console_event(&state.console_tx, ConsoleEvent::RunCompleted { run: run.clone() });
+
+        cascade_workflow(
+            &tx,
+            &existing.mission_id,
+            &existing.task_id,
+            &state.console_tx,
+            &state.workflows,
+        )?;
+
+        let assignments = run_scheduler_tick_db(&tx, &state.console_tx)?;
+        tx.commit().map_err(ApiError::from)?;
+        (run, assignments)
     };
-    db.execute(
-        "UPDATE tasks SET status = ?2, updated_at_ms = ?3 WHERE task_id = ?1",
-        params![existing.task_id, task_status_to_db(task_status), completed_at],
-    )?;
 
-    db.execute(
-        "UPDATE crabs SET state = 'idle', current_task_id = NULL, current_run_id = NULL, updated_at_ms = ?2 WHERE crab_id = ?1",
-        params![existing.crab_id, completed_at],
-    )?;
-
-    let run = fetch_run(&db, &request.run_id)?
-        .ok_or_else(|| ApiError::internal("failed to reload run after completion"))?;
-    emit_console_event(&state.console_tx, ConsoleEvent::RunCompleted { run: run.clone() });
-
-    // Cascade workflow dependencies
-    cascade_workflow(&db, &existing.mission_id, &existing.task_id, &state.console_tx)?;
-
+    dispatch_assignments(&state, assignments).await;
     Ok(Json(run))
 }
 
@@ -1348,6 +1821,7 @@ fn cascade_workflow(
     mission_id: &str,
     completed_task_id: &str,
     console_tx: &broadcast::Sender<String>,
+    workflows: &WorkflowRegistry,
 ) -> Result<(), ApiError> {
     let now = now_ms();
 
@@ -1367,7 +1841,7 @@ fn cascade_workflow(
     // If the task failed, cascade failure to all dependents
     if matches!(completed_task.status, TaskStatus::Failed) {
         cascade_failure(conn, completed_task_id, now, console_tx)?;
-        update_mission_status(conn, mission_id, now)?;
+        update_mission_status(conn, mission_id, now, workflows, console_tx)?;
         return Ok(());
     }
 
@@ -1446,7 +1920,7 @@ fn cascade_workflow(
 
         // If we just skipped a task, recurse to cascade further
         if !should_queue {
-            cascade_workflow(conn, mission_id, dep_task_id, console_tx)?;
+            cascade_workflow(conn, mission_id, dep_task_id, console_tx, workflows)?;
         }
     }
 
@@ -1456,7 +1930,20 @@ fn cascade_workflow(
         requeue_review_after_fix(conn, mission_id, now, console_tx)?;
     }
 
-    update_mission_status(conn, mission_id, now)?;
+    // Capture PR number from the "pr" step result
+    if completed_step_id == "pr" {
+        let context_map = build_context_map(conn, mission_id)?;
+        if let Some(pr_num_str) = context_map.get("pr.result")
+            && let Ok(pr_num) = pr_num_str.parse::<i64>()
+        {
+            conn.execute(
+                "UPDATE missions SET github_pr_number = ?2 WHERE mission_id = ?1",
+                params![mission_id, pr_num],
+            )?;
+        }
+    }
+
+    update_mission_status(conn, mission_id, now, workflows, console_tx)?;
     Ok(())
 }
 
@@ -1606,7 +2093,13 @@ fn get_task_condition(conn: &Connection, task_id: &str) -> Result<Option<String>
     Ok(None)
 }
 
-fn update_mission_status(conn: &Connection, mission_id: &str, _now: u64) -> Result<(), ApiError> {
+fn update_mission_status(
+    conn: &Connection,
+    mission_id: &str,
+    _now: u64,
+    workflows: &WorkflowRegistry,
+    console_tx: &broadcast::Sender<String>,
+) -> Result<(), ApiError> {
     // Check if all tasks in the mission are terminal
     let non_terminal_count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM tasks WHERE mission_id = ?1 AND status NOT IN ('completed', 'failed', 'skipped')",
@@ -1629,31 +2122,313 @@ fn update_mission_status(conn: &Connection, mission_id: &str, _now: u64) -> Resu
             "UPDATE missions SET status = ?2 WHERE mission_id = ?1",
             params![mission_id, mission_status_to_db(new_status)],
         )?;
+
+        // Emit mission updated
+        if let Ok(Some(mission)) = fetch_mission(conn, mission_id) {
+            emit_console_event(
+                console_tx,
+                ConsoleEvent::MissionUpdated { mission: mission.clone() },
+            );
+
+            // Try to activate next mission in this colony's queue
+            activate_next_mission_in_colony(conn, &mission.colony_id, workflows, console_tx)?;
+        }
     }
     Ok(())
 }
 
-async fn scheduler_tick(
+// ---------------------------------------------------------------------------
+// Colony-GitHub binding
+// ---------------------------------------------------------------------------
+
+async fn update_colony(
     State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    // Phase 1: DB work (synchronous — no await while holding Connection)
-    let assignments = {
+    Path(colony_id): Path<String>,
+    Json(request): Json<UpdateColonyRequest>,
+) -> Result<Json<ColonyRecord>, ApiError> {
+    let db = state.db.lock().await;
+
+    // Verify colony exists
+    let existing = query_colonies(&db)?
+        .into_iter()
+        .find(|c| c.colony_id == colony_id)
+        .ok_or_else(|| ApiError::not_found("colony not found"))?;
+
+    // Validate repo format if provided
+    if let Some(ref repo) = request.repo
+        && !repo.is_empty()
+        && repo.matches('/').count() != 1
+    {
+        return Err(ApiError::bad_request("repo must be in 'owner/repo' format"));
+    }
+
+    let name = request.name.unwrap_or(existing.name);
+    let description = request.description.unwrap_or(existing.description);
+    let repo = if request.repo.is_some() { request.repo } else { existing.repo };
+
+    db.execute(
+        "UPDATE colonies SET name = ?2, description = ?3, repo = ?4 WHERE colony_id = ?1",
+        params![colony_id, name, description, repo],
+    )?;
+
+    let updated =
+        ColonyRecord { colony_id, name, description, repo, created_at_ms: existing.created_at_ms };
+    Ok(Json(updated))
+}
+
+async fn list_colony_issues(
+    State(state): State<AppState>,
+    Path(colony_id): Path<String>,
+) -> Result<Json<Vec<GitHubIssueRecord>>, ApiError> {
+    let (repo, queued_issues) = {
         let db = state.db.lock().await;
-        run_scheduler_tick_db(&db, &state.console_tx)?
+
+        let repo: Option<String> = db
+            .query_row(
+                "SELECT repo FROM colonies WHERE colony_id = ?1",
+                params![colony_id],
+                |row| row.get(0),
+            )
+            .map_err(|_| ApiError::not_found("colony not found"))?;
+
+        let repo = repo.ok_or_else(|| ApiError::bad_request("colony has no repo configured"))?;
+
+        let mut stmt = db.prepare(
+            "SELECT github_issue_number FROM missions WHERE colony_id = ?1 AND github_issue_number IS NOT NULL",
+        )?;
+        let queued_issues: Vec<i64> =
+            stmt.query_map(params![colony_id], |row| row.get(0))?.filter_map(Result::ok).collect();
+
+        (repo, queued_issues)
     };
 
-    // Phase 2: Send WebSocket messages (async — no Connection held)
-    let assigned_count = assignments.len() as u32;
-    let channels = state.crab_channels.lock().await;
-    for assignment in assignments {
-        if let Some(tx) = channels.get(&assignment.crab_id)
-            && let Ok(json) = serde_json::to_string(&assignment.envelope)
+    let issues = state.github.list_issues(&repo).await?;
+
+    let records: Vec<GitHubIssueRecord> = issues
+        .into_iter()
+        .map(|issue| GitHubIssueRecord {
+            already_queued: queued_issues.contains(&issue.number),
+            number: issue.number,
+            title: issue.title,
+            body: issue.body,
+            labels: issue.labels,
+            state: issue.state,
+        })
+        .collect();
+
+    Ok(Json(records))
+}
+
+// ---------------------------------------------------------------------------
+// Mission Queue
+// ---------------------------------------------------------------------------
+
+async fn queue_issue(
+    State(state): State<AppState>,
+    Path(colony_id): Path<String>,
+    Json(request): Json<QueueIssueRequest>,
+) -> Result<Json<MissionRecord>, ApiError> {
+    // Phase 1: Validate colony and get repo (brief lock)
+    let repo = {
+        let db = state.db.lock().await;
+        let repo: Option<String> = db
+            .query_row(
+                "SELECT repo FROM colonies WHERE colony_id = ?1",
+                params![colony_id],
+                |row| row.get(0),
+            )
+            .map_err(|_| ApiError::not_found("colony not found"))?;
+        repo.ok_or_else(|| ApiError::bad_request("colony has no repo configured"))?
+    };
+
+    // Phase 2: Fetch issue details from GitHub (no lock held)
+    let detail = state.github.get_issue(&repo, request.issue_number).await?;
+
+    // Phase 3: All DB work in a single transaction
+    let (row, assignments) = {
+        let mut db = state.db.lock().await;
+        let tx = db.transaction().map_err(ApiError::from)?;
+
+        // Check if issue is already queued
+        let already_queued: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM missions WHERE colony_id = ?1 AND github_issue_number = ?2",
+            params![colony_id, request.issue_number],
+            |row| row.get(0),
+        )?;
+        if already_queued > 0 {
+            return Err(ApiError::bad_request("issue is already queued in this colony"));
+        }
+
+        // Compute queue position
+        let max_pos: Option<i64> = tx
+            .query_row(
+                "SELECT MAX(queue_position) FROM missions WHERE colony_id = ?1",
+                params![colony_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(None);
+        let queue_position = max_pos.unwrap_or(0) + 1;
+
+        let workflow_name = request.workflow.unwrap_or_else(|| "dev-task".to_string());
+        let prompt =
+            format!("{}#{}: {}\n\n{}", repo, request.issue_number, detail.title, detail.body);
+        let mission = Mission::new(&prompt);
+        let row = MissionRecord {
+            mission_id: mission.id.to_string(),
+            colony_id: colony_id.clone(),
+            prompt,
+            workflow_name: Some(workflow_name),
+            status: MissionStatus::Pending,
+            worktree_path: None,
+            queue_position: Some(queue_position),
+            github_issue_number: Some(request.issue_number),
+            github_pr_number: None,
+            created_at_ms: mission.created_at_ms,
+        };
+
+        tx.execute(
+            "INSERT INTO missions (mission_id, colony_id, prompt, workflow_name, status, worktree_path, queue_position, github_issue_number, github_pr_number, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                row.mission_id,
+                row.colony_id,
+                row.prompt,
+                row.workflow_name,
+                mission_status_to_db(row.status),
+                row.worktree_path,
+                row.queue_position,
+                row.github_issue_number,
+                row.github_pr_number,
+                row.created_at_ms
+            ],
+        )?;
+
+        emit_console_event(
+            &state.console_tx,
+            ConsoleEvent::MissionCreated { mission: row.clone() },
+        );
+
+        activate_next_mission_in_colony(&tx, &colony_id, &state.workflows, &state.console_tx)?;
+
+        let assignments = run_scheduler_tick_db(&tx, &state.console_tx)?;
+        tx.commit().map_err(ApiError::from)?;
+        (row, assignments)
+    };
+
+    dispatch_assignments(&state, assignments).await;
+    Ok(Json(row))
+}
+
+async fn list_queue(
+    State(state): State<AppState>,
+    Path(colony_id): Path<String>,
+) -> Result<Json<Vec<MissionRecord>>, ApiError> {
+    let db = state.db.lock().await;
+
+    let mut stmt = db.prepare(
+        "SELECT mission_id, colony_id, prompt, workflow_name, status, worktree_path, queue_position, github_issue_number, github_pr_number, created_at_ms FROM missions WHERE colony_id = ?1 AND queue_position IS NOT NULL ORDER BY queue_position ASC",
+    )?;
+    let rows = stmt.query_map(params![colony_id], |row| {
+        Ok(MissionRecord {
+            mission_id: row.get(0)?,
+            colony_id: row.get(1)?,
+            prompt: row.get(2)?,
+            workflow_name: row.get(3)?,
+            status: mission_status_from_db(&row.get::<_, String>(4)?),
+            worktree_path: row.get(5)?,
+            queue_position: row.get(6)?,
+            github_issue_number: row.get(7)?,
+            github_pr_number: row.get(8)?,
+            created_at_ms: row.get::<_, i64>(9)? as u64,
+        })
+    })?;
+
+    Ok(Json(rows.filter_map(Result::ok).collect()))
+}
+
+async fn remove_from_queue(
+    State(state): State<AppState>,
+    Path((colony_id, mission_id)): Path<(String, String)>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let mut db = state.db.lock().await;
+    let tx = db.transaction().map_err(ApiError::from)?;
+
+    // Only allow removing pending missions
+    let status: String = tx
+        .query_row(
+            "SELECT status FROM missions WHERE mission_id = ?1 AND colony_id = ?2 AND queue_position IS NOT NULL",
+            params![mission_id, colony_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| ApiError::not_found("mission not found in queue"))?;
+
+    if status != "pending" {
+        return Err(ApiError::bad_request("can only remove pending missions from queue"));
+    }
+
+    tx.execute("DELETE FROM missions WHERE mission_id = ?1", params![mission_id])?;
+    tx.commit().map_err(ApiError::from)?;
+
+    Ok(Json(serde_json::json!({ "ok": true, "deleted": mission_id })))
+}
+
+// ---------------------------------------------------------------------------
+// Sequential Mission Activation
+// ---------------------------------------------------------------------------
+
+fn activate_next_mission_in_colony(
+    conn: &Connection,
+    colony_id: &str,
+    workflows: &WorkflowRegistry,
+    console_tx: &broadcast::Sender<String>,
+) -> Result<(), ApiError> {
+    // Check: any mission in this colony with status = 'running'?
+    let running_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM missions WHERE colony_id = ?1 AND status = 'running' AND queue_position IS NOT NULL",
+        params![colony_id],
+        |row| row.get(0),
+    )?;
+
+    if running_count > 0 {
+        return Ok(()); // One at a time
+    }
+
+    // Find next pending queued mission
+    let next: Option<(String, Option<String>, String)> = conn
+        .query_row(
+            "SELECT mission_id, workflow_name, prompt FROM missions WHERE colony_id = ?1 AND status = 'pending' AND queue_position IS NOT NULL ORDER BY queue_position ASC LIMIT 1",
+            params![colony_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .ok();
+
+    if let Some((mission_id, workflow_name, mission_prompt)) = next {
+        let worktree_path = format!("burrows/mission-{mission_id}");
+        conn.execute(
+            "UPDATE missions SET status = ?2, worktree_path = ?3 WHERE mission_id = ?1",
+            params![mission_id, mission_status_to_db(MissionStatus::Running), worktree_path],
+        )?;
+
+        // Expand workflow into tasks if workflow is specified
+        if let Some(ref wf_name) = workflow_name
+            && let Some(manifest) = workflows.get(wf_name)
         {
-            let _ = tx.send(json);
+            expand_workflow_into_tasks(
+                conn,
+                workflows,
+                &manifest.clone(),
+                &mission_id,
+                &mission_prompt,
+                console_tx,
+            )?;
+        }
+
+        // Emit mission updated
+        if let Ok(Some(mission)) = fetch_mission(conn, &mission_id) {
+            emit_console_event(console_tx, ConsoleEvent::MissionUpdated { mission });
         }
     }
 
-    Ok(Json(serde_json::json!({ "ok": true, "assigned": assigned_count })))
+    Ok(())
 }
 
 struct SchedulerAssignment {
@@ -1716,6 +2491,11 @@ fn run_scheduler_tick_db(
             break;
         }
 
+        // Skip merge-wait tasks — handled by background poller
+        if task.step_id.as_deref() == Some("merge-wait") {
+            continue;
+        }
+
         // Check that no other task in the same mission is currently Running
         // (worktree conflict prevention for workflow tasks)
         if task.step_id.is_some() {
@@ -1732,10 +2512,8 @@ fn run_scheduler_tick_db(
         let task_role = task.role.as_deref().unwrap_or("any");
 
         // Find a matching crab — prefer exact role match, fall back to "any"
-        let crab_idx = idle_crabs
-            .iter()
-            .position(|(_, crab_role)| crab_role == task_role)
-            .or_else(|| {
+        let crab_idx =
+            idle_crabs.iter().position(|(_, crab_role)| crab_role == task_role).or_else(|| {
                 idle_crabs
                     .iter()
                     .position(|(_, crab_role)| task_role == "any" || crab_role == "any")
@@ -1867,14 +2645,15 @@ fn build_status_snapshot(conn: &Connection) -> Result<StatusSnapshot, ApiError> 
 
 fn query_colonies(conn: &Connection) -> Result<Vec<ColonyRecord>, ApiError> {
     let mut stmt = conn.prepare(
-        "SELECT colony_id, name, description, created_at_ms FROM colonies ORDER BY created_at_ms DESC",
+        "SELECT colony_id, name, description, repo, created_at_ms FROM colonies ORDER BY created_at_ms DESC",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(ColonyRecord {
             colony_id: row.get(0)?,
             name: row.get(1)?,
             description: row.get(2)?,
-            created_at_ms: row.get::<_, i64>(3)? as u64,
+            repo: row.get(3)?,
+            created_at_ms: row.get::<_, i64>(4)? as u64,
         })
     })?;
     Ok(rows.filter_map(Result::ok).collect())
@@ -1901,7 +2680,7 @@ fn query_crabs(conn: &Connection) -> Result<Vec<CrabRecord>, ApiError> {
 
 fn query_missions(conn: &Connection) -> Result<Vec<MissionRecord>, ApiError> {
     let mut stmt = conn.prepare(
-        "SELECT mission_id, colony_id, prompt, workflow_name, status, worktree_path, created_at_ms FROM missions ORDER BY created_at_ms DESC",
+        "SELECT mission_id, colony_id, prompt, workflow_name, status, worktree_path, queue_position, github_issue_number, github_pr_number, created_at_ms FROM missions ORDER BY created_at_ms DESC",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(MissionRecord {
@@ -1911,7 +2690,10 @@ fn query_missions(conn: &Connection) -> Result<Vec<MissionRecord>, ApiError> {
             workflow_name: row.get(3)?,
             status: mission_status_from_db(&row.get::<_, String>(4)?),
             worktree_path: row.get(5)?,
-            created_at_ms: row.get::<_, i64>(6)? as u64,
+            queue_position: row.get(6)?,
+            github_issue_number: row.get(7)?,
+            github_pr_number: row.get(8)?,
+            created_at_ms: row.get::<_, i64>(9)? as u64,
         })
     })?;
     Ok(rows.filter_map(Result::ok).collect())
@@ -1919,7 +2701,7 @@ fn query_missions(conn: &Connection) -> Result<Vec<MissionRecord>, ApiError> {
 
 fn fetch_mission(conn: &Connection, mission_id: &str) -> Result<Option<MissionRecord>, ApiError> {
     let mut stmt = conn.prepare(
-        "SELECT mission_id, colony_id, prompt, workflow_name, status, worktree_path, created_at_ms FROM missions WHERE mission_id = ?1",
+        "SELECT mission_id, colony_id, prompt, workflow_name, status, worktree_path, queue_position, github_issue_number, github_pr_number, created_at_ms FROM missions WHERE mission_id = ?1",
     )?;
     let mut rows = stmt.query(params![mission_id])?;
     if let Some(row) = rows.next()? {
@@ -1930,7 +2712,10 @@ fn fetch_mission(conn: &Connection, mission_id: &str) -> Result<Option<MissionRe
             workflow_name: row.get(3)?,
             status: mission_status_from_db(&row.get::<_, String>(4)?),
             worktree_path: row.get(5)?,
-            created_at_ms: row.get::<_, i64>(6)? as u64,
+            queue_position: row.get(6)?,
+            github_issue_number: row.get(7)?,
+            github_pr_number: row.get(8)?,
+            created_at_ms: row.get::<_, i64>(9)? as u64,
         }));
     }
     Ok(None)
@@ -2191,6 +2976,135 @@ fn burrow_mode_from_db(raw: &str) -> BurrowMode {
 }
 
 // ---------------------------------------------------------------------------
+// Merge-wait background poller
+// ---------------------------------------------------------------------------
+
+async fn spawn_merge_wait_poller(state: AppState) {
+    let mut interval = tokio::time::interval(Duration::from_secs(60));
+    loop {
+        interval.tick().await;
+        if let Err(e) = poll_merge_wait_tasks(&state).await {
+            tracing::warn!(err = ?e, "merge-wait poll error");
+        }
+    }
+}
+
+struct MergeWaitPollItem {
+    task_id: String,
+    mission_id: String,
+    pr_number: Option<i64>,
+    repo: Option<String>,
+}
+
+async fn poll_merge_wait_tasks(state: &AppState) -> Result<(), ApiError> {
+    // Find merge-wait tasks that are queued
+    let tasks_to_poll: Vec<MergeWaitPollItem> = {
+        let db = state.db.lock().await;
+        let mut stmt = db.prepare(
+            "
+            SELECT t.task_id, t.mission_id, m.github_pr_number, c.repo
+            FROM tasks t
+            JOIN missions m ON t.mission_id = m.mission_id
+            JOIN colonies c ON m.colony_id = c.colony_id
+            WHERE t.step_id = 'merge-wait' AND t.status = 'queued'
+            ",
+        )?;
+        let rows: Vec<_> = stmt
+            .query_map([], |row| {
+                Ok(MergeWaitPollItem {
+                    task_id: row.get(0)?,
+                    mission_id: row.get(1)?,
+                    pr_number: row.get(2)?,
+                    repo: row.get(3)?,
+                })
+            })?
+            .filter_map(Result::ok)
+            .collect();
+        rows
+    };
+
+    for item in tasks_to_poll {
+        let (Some(pr_num), Some(ref repo)) = (item.pr_number, item.repo) else {
+            continue;
+        };
+
+        let pr_status = match state.github.get_pr_status(repo, pr_num).await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(pr = pr_num, err = ?e, "failed to check PR status");
+                continue;
+            }
+        };
+
+        let assignments = {
+            let mut db = state.db.lock().await;
+            let tx = db.transaction().map_err(ApiError::from)?;
+            let now = now_ms();
+
+            if pr_status.state == "MERGED" || pr_status.merged_at.is_some() {
+                let run_id = crabitat_core::RunId::new().to_string();
+                tx.execute(
+                    "INSERT INTO runs (run_id, mission_id, task_id, crab_id, status, burrow_path, burrow_mode, progress_message, summary, prompt_tokens, completion_tokens, total_tokens, started_at_ms, updated_at_ms, completed_at_ms) VALUES (?1, ?2, ?3, 'system', 'completed', '', 'worktree', 'PR merged', ?4, 0, 0, 0, ?5, ?5, ?5)",
+                    params![run_id, item.mission_id, item.task_id, format!("PR #{pr_num} merged"), now],
+                )?;
+
+                tx.execute(
+                    "UPDATE tasks SET status = 'completed', updated_at_ms = ?2 WHERE task_id = ?1",
+                    params![item.task_id, now],
+                )?;
+
+                if let Ok(Some(task)) = fetch_task(&tx, &item.task_id) {
+                    emit_console_event(&state.console_tx, ConsoleEvent::TaskUpdated { task });
+                }
+
+                cascade_workflow(
+                    &tx,
+                    &item.mission_id,
+                    &item.task_id,
+                    &state.console_tx,
+                    &state.workflows,
+                )?;
+
+                let assignments = run_scheduler_tick_db(&tx, &state.console_tx)?;
+                tx.commit().map_err(ApiError::from)?;
+
+                info!(pr = pr_num, mission_id = %item.mission_id, "merge-wait completed: PR merged");
+                assignments
+            } else if pr_status.state == "CLOSED" {
+                tx.execute(
+                    "UPDATE tasks SET status = 'failed', updated_at_ms = ?2 WHERE task_id = ?1",
+                    params![item.task_id, now],
+                )?;
+
+                if let Ok(Some(task)) = fetch_task(&tx, &item.task_id) {
+                    emit_console_event(&state.console_tx, ConsoleEvent::TaskUpdated { task });
+                }
+
+                cascade_workflow(
+                    &tx,
+                    &item.mission_id,
+                    &item.task_id,
+                    &state.console_tx,
+                    &state.workflows,
+                )?;
+
+                let assignments = run_scheduler_tick_db(&tx, &state.console_tx)?;
+                tx.commit().map_err(ApiError::from)?;
+
+                info!(pr = pr_num, mission_id = %item.mission_id, "merge-wait failed: PR closed without merge");
+                assignments
+            } else {
+                continue;
+            }
+        };
+
+        dispatch_assignments(state, assignments).await;
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -2212,13 +3126,14 @@ mod tests {
             crab_channels: Arc::new(Mutex::new(HashMap::new())),
             console_tx,
             workflows: Arc::new(workflows),
+            github: GitHubClient { http: reqwest::Client::new(), token: None },
         }
     }
 
     async fn setup_colony(state: &AppState) -> ColonyRecord {
         create_colony(
             State(state.clone()),
-            Json(CreateColonyRequest { name: "test-colony".into(), description: None }),
+            Json(CreateColonyRequest { name: "test-colony".into(), description: None, repo: None }),
         )
         .await
         .unwrap()

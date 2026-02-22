@@ -285,6 +285,7 @@ dependencies = [
  "clap",
  "crabitat-core",
  "crabitat-protocol",
+ "reqwest",
  "rusqlite",
  "serde",
  "serde_json",

@@ -61,6 +61,9 @@ const { colonyCount, crabCount, missionCount, taskCount, runCount, hasActiveTask
         Missions
         <span class="count-badge" data-count="missions">{missionCount}</span>
       </a>
+      <a class="nav-item" data-section="queue">
+        Queue
+      </a>
       <a class="nav-item" data-section="tasks">
         Tasks
         {hasActiveTasks && <span class="nav-dot nav-dot--warn"></span>}

@@ -9,6 +9,7 @@ import MissionTable from '../components/MissionTable.astro';
 import TaskTable from '../components/TaskTable.astro';
 import RunTable from '../components/RunTable.astro';
 import NewMissionModal from '../components/NewMissionModal.astro';
+import IssueQueue from '../components/IssueQueue.astro';
 import type { StatusSnapshot } from '../lib/types';
 
 const CONTROL_PLANE_URL = import.meta.env.CONTROL_PLANE_URL || 'http://127.0.0.1:8800';
@@ -150,6 +151,11 @@ const activeTasks = snapshot?.tasks.filter(
           <RunTable runs={snapshot.runs} />
         </div>
 
+        <!-- Queue -->
+        <div class="section" data-section="queue" hidden>
+          <IssueQueue colonies={snapshot.colonies} />
+        </div>
+
         <NewMissionModal colonies={snapshot.colonies} />
       </>
     ) : null}
@@ -161,4 +167,5 @@ const activeTasks = snapshot?.tasks.filter(
   import '../scripts/search';
   import '../scripts/modal';
   import '../scripts/ws-client';
+  import '../scripts/queue';
 </script>

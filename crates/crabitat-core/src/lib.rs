@@ -146,6 +146,7 @@ pub struct Colony {
     pub id: ColonyId,
     pub name: String,
     pub description: String,
+    pub repo: Option<String>,
     pub created_at_ms: u64,
 }
 
@@ -156,6 +157,7 @@ impl Colony {
             id: ColonyId::new(),
             name: name.into(),
             description: description.into(),
+            repo: None,
             created_at_ms: now_ms(),
         }
     }
@@ -168,6 +170,9 @@ pub struct Mission {
     pub workflow_name: Option<String>,
     pub status: MissionStatus,
     pub worktree_path: Option<String>,
+    pub queue_position: Option<i64>,
+    pub github_issue_number: Option<i64>,
+    pub github_pr_number: Option<i64>,
     pub created_at_ms: u64,
 }
 
@@ -180,6 +185,9 @@ impl Mission {
             workflow_name: None,
             status: MissionStatus::Pending,
             worktree_path: None,
+            queue_position: None,
+            github_issue_number: None,
+            github_pr_number: None,
             created_at_ms: now_ms(),
         }
     }

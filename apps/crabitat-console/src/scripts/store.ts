@@ -51,6 +51,14 @@ class ConsoleStore extends EventTarget {
     this.dispatch('mission_created');
   }
 
+  updateMission(mission: MissionRecord) {
+    const idx = this.missions.findIndex((m) => m.mission_id === mission.mission_id);
+    if (idx >= 0) this.missions[idx] = mission;
+    else this.missions.unshift(mission);
+    this.recompute();
+    this.dispatch('mission_updated');
+  }
+
   addTask(task: TaskRecord) {
     const idx = this.tasks.findIndex((t) => t.task_id === task.task_id);
     if (idx >= 0) this.tasks[idx] = task;

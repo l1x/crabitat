@@ -1,5 +1,5 @@
 import { store } from './store';
-import { renderSnapshot, renderCrabUpdated, renderColonyCreated, renderMissionCreated, renderTaskCreated, renderTaskUpdated, renderRunUpdated } from './render';
+import { renderSnapshot, renderCrabUpdated, renderColonyCreated, renderMissionCreated, renderMissionUpdated, renderTaskCreated, renderTaskUpdated, renderRunUpdated } from './render';
 import type { ConsoleEvent } from '../lib/types';
 
 const WS_PORT = 8800;
@@ -46,6 +46,10 @@ function handleEvent(event: ConsoleEvent) {
     case 'mission_created':
       store.addMission(event.mission);
       renderMissionCreated(event.mission);
+      break;
+    case 'mission_updated':
+      store.updateMission(event.mission);
+      renderMissionUpdated(event.mission);
       break;
     case 'task_created':
       store.addTask(event.task);

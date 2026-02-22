@@ -26,6 +26,7 @@ const { colonies, crabs, missions } = Astro.props;
       <div class="card" data-id={colony.colony_id} data-searchable={`${colony.name} ${colony.colony_id} ${colony.description}`} data-created-at-ms={colony.created_at_ms}>
         <div class="card-title">{colony.name}</div>
         <div class="card-meta">{colony.colony_id.slice(0, 8)} &middot; {colony.description || 'No description'}</div>
+        {colony.repo && <div class="card-meta">Repo: <code>{colony.repo}</code></div>}
         <div class="card-meta">{crabs.filter((c) => c.colony_id === colony.colony_id).length} crabs &middot; {missions.filter((m) => m.colony_id === colony.colony_id).length} missions</div>
         <div class="card-meta">Created {timeAgo(colony.created_at_ms)}</div>
       </div>
