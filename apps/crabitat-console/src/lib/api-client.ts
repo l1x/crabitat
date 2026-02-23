@@ -1,6 +1,35 @@
-import type { StatusSnapshot, CrabRecord, ColonyRecord, GitHubIssueRecord, MissionRecord } from './types';
+import type { StatusSnapshot, CrabRecord, ColonyRecord, GitHubIssueRecord, MissionRecord, RepoRecord } from './types';
 
 const CONTROL_PLANE_URL = import.meta.env.CONTROL_PLANE_URL || 'http://127.0.0.1:8800';
+
+export async function fetchRepos(): Promise<RepoRecord[]> {
+  const res = await fetch(`${CONTROL_PLANE_URL}/v1/repos`);
+  if (!res.ok) throw new Error(`GET /v1/repos failed: ${res.status}`);
+  return res.json();
+}
+
+export async function createRepo(body: {
+  owner: string;
+  name: string;
+  default_branch?: string;
+  domain?: string;
+  local_path: string;
+}): Promise<RepoRecord> {
+  const res = await fetch(`${CONTROL_PLANE_URL}/v1/repos`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`POST /v1/repos failed: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteRepo(repoId: string): Promise<void> {
+  const res = await fetch(`${CONTROL_PLANE_URL}/v1/repos/${repoId}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error(`DELETE /v1/repos/${repoId} failed: ${res.status}`);
+}
 
 export async function fetchStatus(): Promise<StatusSnapshot> {
   const res = await fetch(`${CONTROL_PLANE_URL}/v1/status`);
@@ -59,6 +88,12 @@ export async function updateColony(
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`PATCH /v1/colonies/${colonyId} failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchRepoIssues(repoId: string): Promise<GitHubIssueRecord[]> {
+  const res = await fetch(`${CONTROL_PLANE_URL}/v1/repos/${repoId}/issues`);
+  if (!res.ok) throw new Error(`GET /v1/repos/${repoId}/issues failed: ${res.status}`);
   return res.json();
 }
 

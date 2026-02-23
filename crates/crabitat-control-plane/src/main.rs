@@ -15,6 +15,7 @@ use crabitat_core::{
     TaskStatus, WorkflowManifest, evaluate_condition, now_ms,
 };
 use crabitat_protocol::{Envelope, MessageKind};
+use kiters::eid::ExternalId;
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -501,6 +502,9 @@ enum ConsoleEvent {
     RunCreated { run: RunRecord },
     RunUpdated { run: RunRecord },
     RunCompleted { run: RunRecord },
+    RepoCreated { repo: RepoRecord },
+    RepoUpdated { repo: RepoRecord },
+    RepoDeleted { repo_id: String },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -581,6 +585,18 @@ struct ColonyRecord {
 }
 
 #[derive(Debug, Clone, Serialize)]
+struct RepoRecord {
+    repo_id: String,
+    owner: String,
+    name: String,
+    full_name: String,
+    default_branch: String,
+    domain: String,
+    local_path: String,
+    created_at_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct CrabRecord {
     crab_id: String,
     colony_id: String,
@@ -654,6 +670,7 @@ struct StatusSummary {
 struct StatusSnapshot {
     generated_at_ms: u64,
     summary: StatusSummary,
+    repos: Vec<RepoRecord>,
     colonies: Vec<ColonyRecord>,
     crabs: Vec<CrabRecord>,
     missions: Vec<MissionRecord>,
@@ -748,6 +765,22 @@ struct UpdateColonyRequest {
     description: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct CreateRepoRequest {
+    owner: String,
+    name: String,
+    default_branch: Option<String>,
+    domain: Option<String>,
+    local_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateRepoRequest {
+    default_branch: Option<String>,
+    domain: Option<String>,
+    local_path: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 struct GitHubIssueRecord {
     number: i64,
@@ -830,6 +863,9 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/colonies/{colony_id}/issues", get(list_colony_issues))
         .route("/v1/colonies/{colony_id}/queue", get(list_queue).post(queue_issue))
         .route("/v1/colonies/{colony_id}/queue/{mission_id}", delete(remove_from_queue))
+        .route("/v1/repos", post(create_repo).get(list_repos))
+        .route("/v1/repos/{repo_id}", get(get_repo).patch(update_repo).delete(delete_repo))
+        .route("/v1/repos/{repo_id}/issues", get(list_repo_issues))
         .route("/v1/crabs", get(list_crabs))
         .route("/v1/crabs/register", post(register_crab))
         .route("/v1/missions", post(create_mission).get(list_missions))
@@ -909,6 +945,17 @@ fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
           task_id TEXT NOT NULL,
           depends_on_task_id TEXT NOT NULL,
           PRIMARY KEY (task_id, depends_on_task_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS repos (
+          repo_id TEXT PRIMARY KEY,
+          owner TEXT NOT NULL,
+          name TEXT NOT NULL,
+          default_branch TEXT NOT NULL DEFAULT 'main',
+          domain TEXT NOT NULL DEFAULT 'any',
+          local_path TEXT NOT NULL,
+          created_at_ms INTEGER NOT NULL,
+          UNIQUE(owner, name)
         );
 
         CREATE TABLE IF NOT EXISTS runs (
@@ -2157,6 +2204,138 @@ fn update_mission_status(
 }
 
 // ---------------------------------------------------------------------------
+// Repo handlers
+// ---------------------------------------------------------------------------
+
+async fn create_repo(
+    State(state): State<AppState>,
+    Json(request): Json<CreateRepoRequest>,
+) -> Result<Json<RepoRecord>, ApiError> {
+    if request.owner.trim().is_empty() || request.name.trim().is_empty() {
+        return Err(ApiError::bad_request("owner and name are required"));
+    }
+    if request.local_path.trim().is_empty() {
+        return Err(ApiError::bad_request("local_path is required"));
+    }
+
+    let repo_id = ExternalId::new("repo").to_string();
+    let default_branch = request.default_branch.unwrap_or_else(|| "main".to_string());
+    let domain = request.domain.unwrap_or_else(|| "any".to_string());
+    let created_at_ms = now_ms();
+    let full_name = format!("{}/{}", request.owner, request.name);
+
+    let row = RepoRecord {
+        repo_id: repo_id.clone(),
+        owner: request.owner,
+        name: request.name,
+        full_name,
+        default_branch,
+        domain,
+        local_path: request.local_path,
+        created_at_ms,
+    };
+
+    let db = state.db.lock().await;
+    db.execute(
+        "INSERT INTO repos (repo_id, owner, name, default_branch, domain, local_path, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![row.repo_id, row.owner, row.name, row.default_branch, row.domain, row.local_path, row.created_at_ms as i64],
+    )?;
+
+    emit_console_event(&state.console_tx, ConsoleEvent::RepoCreated { repo: row.clone() });
+    Ok(Json(row))
+}
+
+async fn list_repos(State(state): State<AppState>) -> Result<Json<Vec<RepoRecord>>, ApiError> {
+    let db = state.db.lock().await;
+    Ok(Json(query_repos(&db)?))
+}
+
+async fn get_repo(
+    State(state): State<AppState>,
+    Path(repo_id): Path<String>,
+) -> Result<Json<RepoRecord>, ApiError> {
+    let db = state.db.lock().await;
+    let repo = fetch_repo(&db, &repo_id)?.ok_or_else(|| ApiError::not_found("repo not found"))?;
+    Ok(Json(repo))
+}
+
+async fn update_repo(
+    State(state): State<AppState>,
+    Path(repo_id): Path<String>,
+    Json(request): Json<UpdateRepoRequest>,
+) -> Result<Json<RepoRecord>, ApiError> {
+    let db = state.db.lock().await;
+
+    let existing =
+        fetch_repo(&db, &repo_id)?.ok_or_else(|| ApiError::not_found("repo not found"))?;
+
+    let default_branch = request.default_branch.unwrap_or(existing.default_branch);
+    let domain = request.domain.unwrap_or(existing.domain);
+    let local_path = request.local_path.unwrap_or(existing.local_path);
+
+    db.execute(
+        "UPDATE repos SET default_branch = ?2, domain = ?3, local_path = ?4 WHERE repo_id = ?1",
+        params![repo_id, default_branch, domain, local_path],
+    )?;
+
+    let updated = RepoRecord {
+        repo_id,
+        owner: existing.owner,
+        name: existing.name,
+        full_name: existing.full_name,
+        default_branch,
+        domain,
+        local_path,
+        created_at_ms: existing.created_at_ms,
+    };
+
+    emit_console_event(&state.console_tx, ConsoleEvent::RepoUpdated { repo: updated.clone() });
+    Ok(Json(updated))
+}
+
+async fn delete_repo(
+    State(state): State<AppState>,
+    Path(repo_id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let db = state.db.lock().await;
+
+    let _existing =
+        fetch_repo(&db, &repo_id)?.ok_or_else(|| ApiError::not_found("repo not found"))?;
+
+    db.execute("DELETE FROM repos WHERE repo_id = ?1", params![repo_id])?;
+
+    emit_console_event(&state.console_tx, ConsoleEvent::RepoDeleted { repo_id });
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn list_repo_issues(
+    State(state): State<AppState>,
+    Path(repo_id): Path<String>,
+) -> Result<Json<Vec<GitHubIssueRecord>>, ApiError> {
+    let repo = {
+        let db = state.db.lock().await;
+        fetch_repo(&db, &repo_id)?.ok_or_else(|| ApiError::not_found("repo not found"))?
+    };
+
+    let full_name = format!("{}/{}", repo.owner, repo.name);
+    let issues = state.github.list_issues(&full_name).await?;
+
+    let records: Vec<GitHubIssueRecord> = issues
+        .into_iter()
+        .map(|issue| GitHubIssueRecord {
+            already_queued: false,
+            number: issue.number,
+            title: issue.title,
+            body: issue.body,
+            labels: issue.labels,
+            state: issue.state,
+        })
+        .collect();
+
+    Ok(Json(records))
+}
+
+// ---------------------------------------------------------------------------
 // Colony-GitHub binding
 // ---------------------------------------------------------------------------
 
@@ -2613,6 +2792,7 @@ async fn get_status(State(state): State<AppState>) -> Result<Json<StatusSnapshot
 }
 
 fn build_status_snapshot(conn: &Connection) -> Result<StatusSnapshot, ApiError> {
+    let repos = query_repos(conn)?;
     let colonies = query_colonies(conn)?;
     let crabs = query_crabs(conn)?;
     let missions = query_missions(conn)?;
@@ -2650,6 +2830,7 @@ fn build_status_snapshot(conn: &Connection) -> Result<StatusSnapshot, ApiError> 
     Ok(StatusSnapshot {
         generated_at_ms: now_ms(),
         summary,
+        repos,
         colonies,
         crabs,
         missions,
@@ -2661,6 +2842,51 @@ fn build_status_snapshot(conn: &Connection) -> Result<StatusSnapshot, ApiError> 
 // ---------------------------------------------------------------------------
 // Query helpers
 // ---------------------------------------------------------------------------
+
+fn query_repos(conn: &Connection) -> Result<Vec<RepoRecord>, ApiError> {
+    let mut stmt = conn.prepare(
+        "SELECT repo_id, owner, name, default_branch, domain, local_path, created_at_ms FROM repos ORDER BY created_at_ms DESC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        let owner: String = row.get(1)?;
+        let name: String = row.get(2)?;
+        let full_name = format!("{owner}/{name}");
+        Ok(RepoRecord {
+            repo_id: row.get(0)?,
+            owner,
+            name,
+            full_name,
+            default_branch: row.get(3)?,
+            domain: row.get(4)?,
+            local_path: row.get(5)?,
+            created_at_ms: row.get::<_, i64>(6)? as u64,
+        })
+    })?;
+    Ok(rows.filter_map(Result::ok).collect())
+}
+
+fn fetch_repo(conn: &Connection, repo_id: &str) -> Result<Option<RepoRecord>, ApiError> {
+    let mut stmt = conn.prepare(
+        "SELECT repo_id, owner, name, default_branch, domain, local_path, created_at_ms FROM repos WHERE repo_id = ?1",
+    )?;
+    let mut rows = stmt.query(params![repo_id])?;
+    if let Some(row) = rows.next()? {
+        let owner: String = row.get(1)?;
+        let name: String = row.get(2)?;
+        let full_name = format!("{owner}/{name}");
+        return Ok(Some(RepoRecord {
+            repo_id: row.get(0)?,
+            owner,
+            name,
+            full_name,
+            default_branch: row.get(3)?,
+            domain: row.get(4)?,
+            local_path: row.get(5)?,
+            created_at_ms: row.get::<_, i64>(6)? as u64,
+        }));
+    }
+    Ok(None)
+}
 
 fn query_colonies(conn: &Connection) -> Result<Vec<ColonyRecord>, ApiError> {
     let mut stmt = conn.prepare(

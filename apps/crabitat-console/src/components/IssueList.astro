@@ -1,28 +1,38 @@
 ---
-import type { MockIssue, MockRepo } from '../lib/mock-data';
+import { marked } from 'marked';
+import type { GitHubIssueRecord, RepoRecord } from '../lib/types';
+
+marked.setOptions({ breaks: true });
 
 interface Props {
-  issues: MockIssue[];
-  repos: MockRepo[];
+  issues: GitHubIssueRecord[];
+  repos: RepoRecord[];
+  showRepoFilter?: boolean;
+  repoId?: string;
 }
 
-const { issues, repos } = Astro.props;
+const { issues, repos, showRepoFilter = true, repoId } = Astro.props;
 ---
 
-<div class="repo-filter">
-  <label class="form-label" for="repo-select">Repository</label>
-  <select class="form-select" id="repo-select">
-    <option value="all">All repos</option>
-    {repos.map((r) => (
-      <option value={r.repo_id}>{r.full_name} ({r.domain})</option>
-    ))}
-  </select>
-</div>
+{showRepoFilter && (
+  <div class="repo-filter">
+    <label class="form-label" for="repo-select">Repository</label>
+    <select class="form-select" id="repo-select">
+      <option value="all">All repos</option>
+      {repos.map((r) => (
+        <option value={r.repo_id}>{r.full_name} ({r.domain})</option>
+      ))}
+    </select>
+  </div>
+)}
 
-<div class="data-panel">
+<div class="data-panel" data-repo-id={repoId}>
   <div class="data-panel-header">
     <span class="data-panel-title">Open Issues</span>
     <span class="content-count" id="issue-count">{issues.length}</span>
+    {repoId && (
+      <button class="btn btn--sm" id="refresh-issues-btn" style="margin-left: auto;">Refresh</button>
+    )}
   </div>
   <div class="data-panel-body">
     {issues.length === 0 ? (
@@ -36,28 +46,29 @@ const { issues, repos } = Astro.props;
     ) : (
       <div class="issue-list" id="issue-list">
         {issues.map((issue) => {
-          const repo = repos.find((r) => r.repo_id === issue.repo_id);
+          const repo = repos.length === 1 ? repos[0] : undefined;
           return (
-            <div class="issue-card" data-issue-number={issue.number} data-repo-id={issue.repo_id}>
+            <div class="issue-card" data-issue-number={issue.number}>
               <div class="issue-card-header">
                 <div class="issue-card-title">
                   <span class="issue-number">#{issue.number}</span>
                   {issue.title}
                 </div>
-                <button
-                  class="btn btn--primary btn--sm launch-mission-btn"
-                  data-issue-number={issue.number}
-                  data-issue-title={issue.title}
-                  data-repo-id={issue.repo_id}
-                  data-repo-name={repo?.full_name}
-                  data-repo-domain={repo?.domain}
-                >
-                  Create Mission
-                </button>
+                {issue.already_queued ? (
+                  <span class="badge badge--muted">Queued</span>
+                ) : (
+                  <button
+                    class="btn btn--primary btn--sm launch-mission-btn"
+                    data-issue-number={issue.number}
+                    data-issue-title={issue.title}
+                    data-repo-name={repo?.full_name}
+                    data-repo-domain={repo?.domain}
+                  >
+                    Create Mission
+                  </button>
+                )}
               </div>
-              <div class="issue-card-body">
-                <p class="issue-body-text">{issue.body}</p>
-              </div>
+              <div class="issue-card-body issue-prose" set:html={marked.parse(issue.body || '')} />
               <div class="issue-card-footer">
                 {repo && (
                   <span class={`domain-tag domain-tag--${repo.domain}`}>{repo.full_name}</span>
@@ -65,7 +76,7 @@ const { issues, repos } = Astro.props;
                 {issue.labels.map((label) => (
                   <span class="issue-label">{label}</span>
                 ))}
-                <span class="issue-date">{issue.created_at.split('T')[0]}</span>
+                <span class={`issue-state issue-state--${issue.state}`}>{issue.state}</span>
               </div>
             </div>
           );
@@ -103,18 +114,23 @@ const { issues, repos } = Astro.props;
 </dialog>
 
 <script>
+  import { marked } from 'marked';
+  marked.setOptions({ breaks: true });
+
   const modal = document.getElementById('launch-modal') as HTMLDialogElement;
   const issueRef = document.getElementById('launch-issue-ref')!;
   const repoRef = document.getElementById('launch-repo-ref')!;
   const closeBtn = document.getElementById('launch-modal-close')!;
   const cancelBtn = document.getElementById('launch-cancel')!;
   const executeBtn = document.getElementById('launch-execute')!;
-  const repoSelect = document.getElementById('repo-select') as HTMLSelectElement;
+  const repoSelect = document.getElementById('repo-select') as HTMLSelectElement | null;
   const issueList = document.getElementById('issue-list')!;
   const issueCount = document.getElementById('issue-count')!;
+  const refreshBtn = document.getElementById('refresh-issues-btn') as HTMLButtonElement | null;
+  const dataPanel = document.querySelector<HTMLElement>('.data-panel[data-repo-id]');
 
   // Repo filter
-  repoSelect.addEventListener('change', () => {
+  repoSelect?.addEventListener('change', () => {
     const val = repoSelect.value;
     let visible = 0;
     issueList.querySelectorAll<HTMLElement>('.issue-card').forEach((card) => {
@@ -125,18 +141,73 @@ const { issues, repos } = Astro.props;
     issueCount.textContent = String(visible);
   });
 
-  // Launch modal
-  document.querySelectorAll<HTMLButtonElement>('.launch-mission-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const num = btn.dataset.issueNumber;
-      const title = btn.dataset.issueTitle;
-      const repoName = btn.dataset.repoName;
-      const domain = btn.dataset.repoDomain;
-      issueRef.textContent = `#${num} — ${title}`;
-      repoRef.textContent = `${repoName} (${domain})`;
-      modal.showModal();
-    });
+  // Refresh issues
+  refreshBtn?.addEventListener('click', async () => {
+    const repoId = dataPanel?.dataset.repoId;
+    if (!repoId) return;
+
+    refreshBtn.textContent = 'Refreshing...';
+    refreshBtn.disabled = true;
+
+    try {
+      const res = await fetch(`/api/repos/${repoId}/issues`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const issues: Array<{
+        number: number;
+        title: string;
+        body: string;
+        labels: string[];
+        state: string;
+        already_queued: boolean;
+      }> = await res.json();
+
+      issueList.innerHTML = issues.map((issue) => `
+        <div class="issue-card" data-issue-number="${issue.number}">
+          <div class="issue-card-header">
+            <div class="issue-card-title">
+              <span class="issue-number">#${issue.number}</span>
+              ${issue.title}
+            </div>
+            ${issue.already_queued
+              ? '<span class="badge badge--muted">Queued</span>'
+              : `<button class="btn btn--primary btn--sm launch-mission-btn"
+                  data-issue-number="${issue.number}"
+                  data-issue-title="${issue.title.replace(/"/g, '&quot;')}"
+                >Create Mission</button>`}
+          </div>
+          <div class="issue-card-body issue-prose">${marked.parse(issue.body || '')}</div>
+          <div class="issue-card-footer">
+            ${issue.labels.map((l) => `<span class="issue-label">${l}</span>`).join('')}
+            <span class="issue-state issue-state--${issue.state}">${issue.state}</span>
+          </div>
+        </div>
+      `).join('');
+
+      issueCount.textContent = String(issues.length);
+      bindLaunchButtons();
+    } catch (e) {
+      console.error('Failed to refresh issues:', e);
+    } finally {
+      refreshBtn.textContent = 'Refresh';
+      refreshBtn.disabled = false;
+    }
   });
+
+  // Launch modal
+  function bindLaunchButtons() {
+    document.querySelectorAll<HTMLButtonElement>('.launch-mission-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const num = btn.dataset.issueNumber;
+        const title = btn.dataset.issueTitle;
+        const repoName = btn.dataset.repoName;
+        const domain = btn.dataset.repoDomain;
+        issueRef.textContent = `#${num} — ${title}`;
+        repoRef.textContent = repoName ? `${repoName} (${domain})` : '';
+        modal.showModal();
+      });
+    });
+  }
+  bindLaunchButtons();
 
   closeBtn.addEventListener('click', () => modal.close());
   cancelBtn.addEventListener('click', () => modal.close());

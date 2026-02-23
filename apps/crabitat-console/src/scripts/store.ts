@@ -1,6 +1,7 @@
-import type { StatusSnapshot, StatusSummary, ColonyRecord, CrabRecord, MissionRecord, TaskRecord, RunRecord } from '../lib/types';
+import type { StatusSnapshot, StatusSummary, RepoRecord, ColonyRecord, CrabRecord, MissionRecord, TaskRecord, RunRecord } from '../lib/types';
 
 class ConsoleStore extends EventTarget {
+  repos: RepoRecord[] = [];
   colonies: ColonyRecord[] = [];
   crabs: CrabRecord[] = [];
   missions: MissionRecord[] = [];
@@ -18,6 +19,7 @@ class ConsoleStore extends EventTarget {
   };
 
   init(snapshot: StatusSnapshot) {
+    this.repos = snapshot.repos ?? [];
     this.colonies = snapshot.colonies;
     this.crabs = snapshot.crabs;
     this.missions = snapshot.missions;
@@ -25,6 +27,28 @@ class ConsoleStore extends EventTarget {
     this.runs = snapshot.runs;
     this.summary = snapshot.summary;
     this.dispatch('snapshot');
+  }
+
+  addRepo(repo: RepoRecord) {
+    const idx = this.repos.findIndex((r) => r.repo_id === repo.repo_id);
+    if (idx >= 0) this.repos[idx] = repo;
+    else this.repos.unshift(repo);
+    this.recompute();
+    this.dispatch('repo_created');
+  }
+
+  updateRepo(repo: RepoRecord) {
+    const idx = this.repos.findIndex((r) => r.repo_id === repo.repo_id);
+    if (idx >= 0) this.repos[idx] = repo;
+    else this.repos.unshift(repo);
+    this.recompute();
+    this.dispatch('repo_updated');
+  }
+
+  removeRepo(repoId: string) {
+    this.repos = this.repos.filter((r) => r.repo_id !== repoId);
+    this.recompute();
+    this.dispatch('repo_deleted');
   }
 
   addColony(colony: ColonyRecord) {

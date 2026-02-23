@@ -1,5 +1,5 @@
 import { store } from './store';
-import { renderSnapshot, renderCrabUpdated, renderColonyCreated, renderMissionCreated, renderMissionUpdated, renderTaskCreated, renderTaskUpdated, renderRunUpdated } from './render';
+import { renderSnapshot, renderRepoCreated, renderRepoUpdated, renderRepoDeleted, renderCrabUpdated, renderColonyCreated, renderMissionCreated, renderMissionUpdated, renderTaskCreated, renderTaskUpdated, renderRunUpdated } from './render';
 import type { ConsoleEvent } from '../lib/types';
 
 const WS_PORT = 8800;
@@ -70,6 +70,18 @@ function handleEvent(event: ConsoleEvent) {
     case 'run_completed':
       store.updateRun(event.run);
       renderRunUpdated(event.run);
+      break;
+    case 'repo_created':
+      store.addRepo(event.repo);
+      renderRepoCreated(event.repo);
+      break;
+    case 'repo_updated':
+      store.updateRepo(event.repo);
+      renderRepoUpdated(event.repo);
+      break;
+    case 'repo_deleted':
+      store.removeRepo(event.repo_id);
+      renderRepoDeleted(event.repo_id);
       break;
   }
 }

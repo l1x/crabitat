@@ -1,0 +1,33 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Sidebar from '../components/Sidebar.astro';
+import ContentHeader from '../components/ContentHeader.astro';
+import MessageLog from '../components/MessageLog.astro';
+import { fetchRepos } from '../lib/api-client';
+import { mockIssues, mockMissions, mockAgents, mockMessages } from '../lib/mock-data';
+
+let repos = [];
+try {
+  repos = await fetchRepos();
+} catch {
+  // Control-plane not available
+}
+---
+
+<Layout title="Messages — Crabitat Console">
+  <Sidebar
+    activePage="/messages"
+    repoCount={repos.length}
+    issueCount={mockIssues.length}
+    missionCount={mockMissions.length}
+    agentCount={mockAgents.length}
+    messageCount={mockMessages.length}
+  />
+
+  <div class="content">
+    <ContentHeader title="Messages" />
+    <div class="section">
+      <MessageLog messages={mockMessages} />
+    </div>
+  </div>
+</Layout>

@@ -1,10 +1,11 @@
 ---
-import type { MockMission, MockRepo } from '../lib/mock-data';
+import type { MockMission } from '../lib/mock-data';
+import type { RepoRecord } from '../lib/types';
 import { formatMs, formatTokens } from '../lib/format';
 
 interface Props {
   missions: MockMission[];
-  repos: MockRepo[];
+  repos: RepoRecord[];
 }
 
 const { missions, repos } = Astro.props;

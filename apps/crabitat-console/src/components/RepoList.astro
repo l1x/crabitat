@@ -1,0 +1,57 @@
+---
+import type { RepoRecord } from '../lib/types';
+import AddRepoModal from './AddRepoModal.astro';
+
+interface Props {
+  repos: RepoRecord[];
+}
+
+const { repos } = Astro.props;
+---
+
+<div class="repo-list-header">
+  <button class="btn btn--primary btn--sm" id="repo-list-add-btn">+ Add Repo</button>
+</div>
+
+<AddRepoModal />
+
+{repos.length === 0 ? (
+  <div class="data-panel">
+    <div class="data-panel-body">
+      <div class="empty-state">
+        <div class="empty-state-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+        </div>
+        <div class="empty-state-title">No repos onboarded</div>
+        <p class="empty-state-desc">Add a GitHub repository to get started.</p>
+      </div>
+    </div>
+  </div>
+) : (
+  <div class="card-grid">
+    {repos.map((repo) => (
+      <a href={`/repos/${repo.owner}/${repo.name}`} class="card repo-card-link" data-repo-id={repo.repo_id}>
+        <div class="card-title">
+          <span>{repo.full_name}</span>
+          <span class={`domain-tag domain-tag--${repo.domain}`}>{repo.domain}</span>
+        </div>
+        <div class="card-meta">
+          <code>{repo.default_branch}</code>
+        </div>
+        <div class="repo-card-stats">
+          <span class="repo-card-stat">0 issues</span>
+          <span class="repo-card-stat">0 missions</span>
+        </div>
+      </a>
+    ))}
+  </div>
+)}
+
+<script>
+  const addBtn = document.getElementById('repo-list-add-btn')!;
+  addBtn.addEventListener('click', () => {
+    if (typeof window.openAddRepoModal === 'function') {
+      window.openAddRepoModal();
+    }
+  });
+</script>

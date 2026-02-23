@@ -1,3 +1,14 @@
+export interface RepoRecord {
+  repo_id: string;
+  owner: string;
+  name: string;
+  full_name: string;
+  default_branch: string;
+  domain: string;
+  local_path: string;
+  created_at_ms: number;
+}
+
 export interface ColonyRecord {
   colony_id: string;
   name: string;
@@ -89,6 +100,7 @@ export interface StatusSummary {
 export interface StatusSnapshot {
   generated_at_ms: number;
   summary: StatusSummary;
+  repos: RepoRecord[];
   colonies: ColonyRecord[];
   crabs: CrabRecord[];
   missions: MissionRecord[];
@@ -106,4 +118,7 @@ export type ConsoleEvent =
   | { type: 'task_updated'; task: TaskRecord }
   | { type: 'run_created'; run: RunRecord }
   | { type: 'run_updated'; run: RunRecord }
-  | { type: 'run_completed'; run: RunRecord };
+  | { type: 'run_completed'; run: RunRecord }
+  | { type: 'repo_created'; repo: RepoRecord }
+  | { type: 'repo_updated'; repo: RepoRecord }
+  | { type: 'repo_deleted'; repo_id: string };

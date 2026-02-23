@@ -1,0 +1,33 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import Sidebar from '../../components/Sidebar.astro';
+import ContentHeader from '../../components/ContentHeader.astro';
+import RepoList from '../../components/RepoList.astro';
+import { fetchRepos } from '../../lib/api-client';
+import { mockIssues, mockMissions, mockAgents, mockMessages } from '../../lib/mock-data';
+
+let repos = [];
+try {
+  repos = await fetchRepos();
+} catch {
+  // Control-plane not available — show empty state
+}
+---
+
+<Layout title="Repos — Crabitat Console">
+  <Sidebar
+    activePage="/repos"
+    repoCount={repos.length}
+    issueCount={mockIssues.length}
+    missionCount={mockMissions.length}
+    agentCount={mockAgents.length}
+    messageCount={mockMessages.length}
+  />
+
+  <div class="content">
+    <ContentHeader title="Repos" />
+    <div class="section">
+      <RepoList repos={repos} />
+    </div>
+  </div>
+</Layout>

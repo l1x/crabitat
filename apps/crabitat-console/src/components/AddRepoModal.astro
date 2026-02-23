@@ -1,0 +1,237 @@
+---
+---
+
+<dialog class="modal modal--wide" id="add-repo-modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <span class="modal-title">Add Repository</span>
+      <button class="modal-close" id="add-repo-modal-close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label" for="repo-search-input">Search GitHub repos</label>
+        <input
+          type="text"
+          class="form-input"
+          id="repo-search-input"
+          placeholder="Type owner/name to filter, e.g. l1x/"
+          autocomplete="off"
+        />
+      </div>
+
+      <div class="repo-search-results" id="repo-search-results">
+        <div class="repo-search-hint">Loading repos...</div>
+      </div>
+
+      <div class="repo-config-form" id="repo-config-form" hidden>
+        <div class="repo-config-selected" id="repo-config-selected"></div>
+
+        <div class="form-group">
+          <label class="form-label" for="repo-domain-select">Domain</label>
+          <select class="form-select" id="repo-domain-select">
+            <option value="any">any</option>
+            <option value="web-dev">web-dev</option>
+            <option value="backend">backend</option>
+            <option value="infra">infra</option>
+            <option value="docs">docs</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="repo-local-path">Local path</label>
+          <input
+            type="text"
+            class="form-input"
+            id="repo-local-path"
+            placeholder="/Users/l1x/code/home/projectz/..."
+          />
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" id="add-repo-cancel">Cancel</button>
+      <button class="btn btn--primary" id="add-repo-submit" disabled>Add Repo</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+  const modal = document.getElementById('add-repo-modal') as HTMLDialogElement;
+  const closeBtn = document.getElementById('add-repo-modal-close')!;
+  const cancelBtn = document.getElementById('add-repo-cancel')!;
+  const submitBtn = document.getElementById('add-repo-submit') as HTMLButtonElement;
+  const searchInput = document.getElementById('repo-search-input') as HTMLInputElement;
+  const resultsDiv = document.getElementById('repo-search-results')!;
+  const configForm = document.getElementById('repo-config-form')!;
+  const configSelected = document.getElementById('repo-config-selected')!;
+  const domainSelect = document.getElementById('repo-domain-select') as HTMLSelectElement;
+  const localPathInput = document.getElementById('repo-local-path') as HTMLInputElement;
+
+  interface GhRepo {
+    full_name: string;
+    default_branch: string;
+    description: string;
+    language: string;
+  }
+
+  let ghRepos: GhRepo[] = [];
+  let loaded = false;
+  let selectedRepo: GhRepo | null = null;
+
+  const languageToDomain: Record<string, string> = {
+    'Rust': 'backend',
+    'Go': 'backend',
+    'Python': 'backend',
+    'Java': 'backend',
+    'TypeScript': 'web-dev',
+    'JavaScript': 'web-dev',
+    'HTML': 'web-dev',
+    'CSS': 'web-dev',
+    'HCL': 'infra',
+    'Terraform': 'infra',
+    'Dockerfile': 'infra',
+    'Shell': 'infra',
+    'Markdown': 'docs',
+  };
+
+  async function loadRepos() {
+    if (loaded) return;
+    resultsDiv.innerHTML = '<div class="repo-search-hint">Loading repos from GitHub...</div>';
+    try {
+      const res = await fetch('/api/github/repos');
+      if (!res.ok) throw new Error(`${res.status}`);
+      ghRepos = await res.json();
+      loaded = true;
+      resultsDiv.innerHTML = '<div class="repo-search-hint">Start typing to search repos...</div>';
+    } catch {
+      resultsDiv.innerHTML = '<div class="repo-search-hint">Failed to load repos. Is gh CLI authenticated?</div>';
+    }
+  }
+
+  function renderResults(query: string) {
+    if (!loaded) return;
+    if (!query) {
+      resultsDiv.innerHTML = '<div class="repo-search-hint">Start typing to search repos...</div>';
+      return;
+    }
+    const q = query.toLowerCase();
+    const matches = ghRepos.filter((r) => r.full_name.toLowerCase().includes(q));
+
+    if (matches.length === 0) {
+      resultsDiv.innerHTML = '<div class="repo-search-hint">No matching repos found.</div>';
+      return;
+    }
+
+    resultsDiv.innerHTML = matches
+      .map(
+        (r) => `
+      <button class="repo-search-item${selectedRepo && selectedRepo.full_name === r.full_name ? ' repo-search-item--selected' : ''}"
+              data-full-name="${r.full_name}"
+              data-language="${r.language}"
+              data-default-branch="${r.default_branch}"
+              data-description="${r.description}">
+        <div class="repo-search-item-name">${r.full_name}</div>
+        <div class="repo-search-item-desc">${r.description}</div>
+        <span class="repo-search-item-lang">${r.language}</span>
+      </button>
+    `
+      )
+      .join('');
+
+    resultsDiv.querySelectorAll('.repo-search-item').forEach((btn) => {
+      btn.addEventListener('click', () => selectRepo(btn as HTMLElement));
+    });
+  }
+
+  function selectRepo(btn: HTMLElement) {
+    const fullName = btn.dataset.fullName!;
+    const language = btn.dataset.language!;
+    const description = btn.dataset.description!;
+    const defaultBranch = btn.dataset.defaultBranch!;
+
+    selectedRepo = { full_name: fullName, language, description, default_branch: defaultBranch };
+
+    // Highlight selected
+    resultsDiv.querySelectorAll('.repo-search-item').forEach((el) => {
+      el.classList.toggle('repo-search-item--selected', (el as HTMLElement).dataset.fullName === fullName);
+    });
+
+    // Show config form
+    configForm.hidden = false;
+    configSelected.textContent = `${fullName} — ${description}`;
+
+    // Pre-fill domain
+    const domain = languageToDomain[language] || 'any';
+    domainSelect.value = domain;
+
+    // Pre-fill local path
+    const name = fullName.split('/')[1];
+    localPathInput.value = `/Users/l1x/code/home/projectz/${name}`;
+
+    // Enable submit
+    submitBtn.disabled = false;
+  }
+
+  function resetModal() {
+    selectedRepo = null;
+    searchInput.value = '';
+    if (loaded) {
+      resultsDiv.innerHTML = '<div class="repo-search-hint">Start typing to search repos...</div>';
+    }
+    configForm.hidden = true;
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Add Repo';
+  }
+
+  searchInput.addEventListener('input', () => {
+    renderResults(searchInput.value.trim());
+  });
+
+  closeBtn.addEventListener('click', () => { modal.close(); resetModal(); });
+  cancelBtn.addEventListener('click', () => { modal.close(); resetModal(); });
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) { modal.close(); resetModal(); }
+  });
+
+  submitBtn.addEventListener('click', async () => {
+    if (!selectedRepo) return;
+    submitBtn.textContent = 'Adding...';
+    submitBtn.disabled = true;
+
+    const [owner, name] = selectedRepo.full_name.split('/');
+    try {
+      const res = await fetch('/api/repos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          owner,
+          name,
+          default_branch: selectedRepo.default_branch,
+          domain: domainSelect.value,
+          local_path: localPathInput.value,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(err.error || `Failed: ${res.status}`);
+      }
+      const repo = await res.json();
+      window.dispatchEvent(new CustomEvent('repo-added', { detail: repo }));
+      modal.close();
+      resetModal();
+      window.location.reload();
+    } catch (e: unknown) {
+      submitBtn.textContent = 'Add Repo';
+      submitBtn.disabled = false;
+      alert(`Failed to add repo: ${e instanceof Error ? e.message : e}`);
+    }
+  });
+
+  // Allow external code to open the modal
+  (window as any).openAddRepoModal = () => {
+    resetModal();
+    modal.showModal();
+    loadRepos();
+    searchInput.focus();
+  };
+</script>

@@ -1,6 +1,6 @@
 import { store } from './store';
 import { formatMs, formatTokens, timeAgo } from '../lib/format';
-import type { ColonyRecord, CrabRecord, MissionRecord, TaskRecord, RunRecord } from '../lib/types';
+import type { RepoRecord, ColonyRecord, CrabRecord, MissionRecord, TaskRecord, RunRecord } from '../lib/types';
 
 // ---- Metric updates ----
 
@@ -26,6 +26,7 @@ function setMetric(name: string, value: string) {
 // ---- Count badge updates ----
 
 function updateCounts() {
+  setCount('repos', store.repos.length);
   setCount('colonies', store.colonies.length);
   setCount('crabs', store.crabs.length);
   setCount('missions', store.missions.length);
@@ -44,6 +45,69 @@ function setCount(name: string, value: number) {
 export function renderSnapshot() {
   updateMetrics();
   updateCounts();
+}
+
+// ---- Repo ----
+
+export function renderRepoCreated(repo: RepoRecord) {
+  updateMetrics();
+  updateCounts();
+
+  const container = document.querySelector<HTMLElement>('.card-grid');
+  if (!container) return;
+
+  // Remove empty state if present
+  const emptyState = container.parentElement?.querySelector('.empty-state');
+  if (emptyState) {
+    const panel = emptyState.closest('.data-panel');
+    if (panel) panel.remove();
+  }
+
+  const card = createRepoCard(repo);
+  container.prepend(card);
+}
+
+export function renderRepoUpdated(repo: RepoRecord) {
+  updateMetrics();
+  updateCounts();
+
+  const existing = document.querySelector<HTMLElement>(`[data-repo-id="${repo.repo_id}"]`);
+  if (existing) {
+    existing.innerHTML = repoCardInnerHtml(repo);
+  }
+}
+
+export function renderRepoDeleted(repoId: string) {
+  updateMetrics();
+  updateCounts();
+
+  const existing = document.querySelector<HTMLElement>(`[data-repo-id="${repoId}"]`);
+  if (existing) existing.remove();
+}
+
+function createRepoCard(repo: RepoRecord): HTMLAnchorElement {
+  const card = document.createElement('a');
+  card.href = `/repos/${repo.owner}/${repo.name}`;
+  card.className = 'card repo-card-link';
+  card.dataset.repoId = repo.repo_id;
+  card.innerHTML = repoCardInnerHtml(repo);
+  return card;
+}
+
+function repoCardInnerHtml(repo: RepoRecord): string {
+  return `
+    <div class="card-title">
+      <span>${esc(repo.full_name)}</span>
+      <span class="domain-tag domain-tag--${repo.domain}">${esc(repo.domain)}</span>
+    </div>
+    <div class="card-meta">
+      <code>${esc(repo.default_branch)}</code>
+    </div>
+    <div class="repo-card-stats">
+      <span class="repo-card-stat">0 issues</span>
+      <span class="repo-card-stat">0 missions</span>
+    </div>
+  `;
 }
 
 // ---- Colony ----

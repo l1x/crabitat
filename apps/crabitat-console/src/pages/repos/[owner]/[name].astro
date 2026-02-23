@@ -1,0 +1,65 @@
+---
+import Layout from '../../../layouts/Layout.astro';
+import Sidebar from '../../../components/Sidebar.astro';
+import ContentHeader from '../../../components/ContentHeader.astro';
+import IssueList from '../../../components/IssueList.astro';
+import MissionPipeline from '../../../components/MissionPipeline.astro';
+import { fetchRepos, fetchRepoIssues } from '../../../lib/api-client';
+import { mockIssues, mockMissions, mockAgents, mockMessages, getMissionsForRepo } from '../../../lib/mock-data';
+import type { RepoRecord, GitHubIssueRecord } from '../../../lib/types';
+
+let repos: RepoRecord[] = [];
+try {
+  repos = await fetchRepos();
+} catch {
+  // Control-plane not available
+}
+
+const { owner, name } = Astro.params;
+const repo = repos.find((r) => r.owner === owner && r.name === name);
+
+if (!repo) {
+  return Astro.redirect('/repos');
+}
+
+let repoIssues: GitHubIssueRecord[] = [];
+try {
+  repoIssues = await fetchRepoIssues(repo.repo_id);
+} catch {
+  // Control-plane or GitHub API not available
+}
+const repoMissions = getMissionsForRepo(repo.repo_id);
+---
+
+<Layout title={`${repo.full_name} — Crabitat Console`}>
+  <Sidebar
+    activePage="/repos"
+    repoCount={repos.length}
+    issueCount={mockIssues.length}
+    missionCount={mockMissions.length}
+    agentCount={mockAgents.length}
+    messageCount={mockMessages.length}
+  />
+
+  <div class="content">
+    <ContentHeader title={repo.full_name} />
+
+    <div class="section">
+      <a href="/repos" class="repo-detail-back">&larr; All repos</a>
+
+      <div class="repo-detail-header">
+        <div class="repo-detail-info">
+          <span class={`domain-tag domain-tag--${repo.domain}`}>{repo.domain}</span>
+          <code class="branch-name">{repo.default_branch}</code>
+        </div>
+        <div class="repo-detail-path">
+          <code>{repo.local_path}</code>
+        </div>
+      </div>
+
+      <IssueList issues={repoIssues} repos={[repo]} showRepoFilter={false} repoId={repo.repo_id} />
+
+      <MissionPipeline missions={repoMissions} repos={[repo]} />
+    </div>
+  </div>
+</Layout>

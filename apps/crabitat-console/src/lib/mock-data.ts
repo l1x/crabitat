@@ -67,6 +67,23 @@ export interface MockMessage {
   created_at_ms: number;
 }
 
+// --- GitHub Repo Search (simulates `gh repo list`) ---
+
+export interface MockGitHubRepo {
+  full_name: string;
+  default_branch: string;
+  description: string;
+  language: string;
+}
+
+export const mockGitHubRepos: MockGitHubRepo[] = [
+  { full_name: 'l1x/crabitat', default_branch: 'main', description: 'Autonomous agent orchestration', language: 'Rust' },
+  { full_name: 'l1x/homepage', default_branch: 'main', description: 'Personal website', language: 'TypeScript' },
+  { full_name: 'l1x/infra', default_branch: 'main', description: 'Infrastructure as code', language: 'HCL' },
+  { full_name: 'l1x/dotfiles', default_branch: 'main', description: 'System configuration', language: 'Shell' },
+  { full_name: 'l1x/blog', default_branch: 'main', description: 'Blog posts', language: 'Markdown' },
+];
+
 // --- Repos ---
 
 export const mockRepos: MockRepo[] = [
