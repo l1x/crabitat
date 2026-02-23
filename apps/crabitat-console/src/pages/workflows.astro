@@ -2,26 +2,27 @@
 import Layout from '../layouts/Layout.astro';
 import Sidebar from '../components/Sidebar.astro';
 import ContentHeader from '../components/ContentHeader.astro';
-import MessageLog from '../components/MessageLog.astro';
-import { fetchRepos, fetchWorkflows, fetchRoles, fetchPromptFiles } from '../lib/api-client';
+import WorkflowList from '../components/WorkflowList.astro';
+import { fetchRepos, fetchRoles, fetchWorkflows, fetchPromptFiles } from '../lib/api-client';
 import { mockIssues, mockMissions, mockAgents, mockMessages } from '../lib/mock-data';
+import type { WorkflowRecord } from '../lib/types';
 
 let repos = [];
 try { repos = await fetchRepos(); } catch {}
 
-let workflows = [];
-try { workflows = await fetchWorkflows(); } catch {}
-
 let roles = [];
 try { roles = await fetchRoles(); } catch {}
+
+let workflows: WorkflowRecord[] = [];
+try { workflows = await fetchWorkflows(); } catch {}
 
 let promptFiles: string[] = [];
 try { promptFiles = await fetchPromptFiles(); } catch {}
 ---
 
-<Layout title="Messages — Crabitat Console">
+<Layout title="Workflows — Crabitat Console">
   <Sidebar
-    activePage="/messages"
+    activePage="/workflows"
     repoCount={repos.length}
     issueCount={mockIssues.length}
     missionCount={mockMissions.length}
@@ -33,9 +34,9 @@ try { promptFiles = await fetchPromptFiles(); } catch {}
   />
 
   <div class="content">
-    <ContentHeader title="Messages" />
+    <ContentHeader title="Workflows" />
     <div class="section">
-      <MessageLog messages={mockMessages} />
+      <WorkflowList workflows={workflows} />
     </div>
   </div>
 </Layout>

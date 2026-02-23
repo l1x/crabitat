@@ -95,13 +95,13 @@ function createRepoCard(repo: RepoRecord): HTMLAnchorElement {
 }
 
 function repoCardInnerHtml(repo: RepoRecord): string {
+  const langHtml = repo.language ? ` &middot; ${esc(repo.language)}` : '';
   return `
     <div class="card-title">
       <span>${esc(repo.full_name)}</span>
-      <span class="domain-tag domain-tag--${repo.domain}">${esc(repo.domain)}</span>
     </div>
     <div class="card-meta">
-      <code>${esc(repo.default_branch)}</code>
+      <code>${esc(repo.default_branch)}</code>${langHtml}
     </div>
     <div class="repo-card-stats">
       <span class="repo-card-stat">0 issues</span>

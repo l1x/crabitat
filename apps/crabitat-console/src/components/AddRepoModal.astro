@@ -27,17 +27,6 @@
         <div class="repo-config-selected" id="repo-config-selected"></div>
 
         <div class="form-group">
-          <label class="form-label" for="repo-domain-select">Domain</label>
-          <select class="form-select" id="repo-domain-select">
-            <option value="any">any</option>
-            <option value="web-dev">web-dev</option>
-            <option value="backend">backend</option>
-            <option value="infra">infra</option>
-            <option value="docs">docs</option>
-          </select>
-        </div>
-
-        <div class="form-group">
           <label class="form-label" for="repo-local-path">Local path</label>
           <input
             type="text"
@@ -64,7 +53,6 @@
   const resultsDiv = document.getElementById('repo-search-results')!;
   const configForm = document.getElementById('repo-config-form')!;
   const configSelected = document.getElementById('repo-config-selected')!;
-  const domainSelect = document.getElementById('repo-domain-select') as HTMLSelectElement;
   const localPathInput = document.getElementById('repo-local-path') as HTMLInputElement;
 
   interface GhRepo {
@@ -77,22 +65,6 @@
   let ghRepos: GhRepo[] = [];
   let loaded = false;
   let selectedRepo: GhRepo | null = null;
-
-  const languageToDomain: Record<string, string> = {
-    'Rust': 'backend',
-    'Go': 'backend',
-    'Python': 'backend',
-    'Java': 'backend',
-    'TypeScript': 'web-dev',
-    'JavaScript': 'web-dev',
-    'HTML': 'web-dev',
-    'CSS': 'web-dev',
-    'HCL': 'infra',
-    'Terraform': 'infra',
-    'Dockerfile': 'infra',
-    'Shell': 'infra',
-    'Markdown': 'docs',
-  };
 
   async function loadRepos() {
     if (loaded) return;
@@ -160,10 +132,6 @@
     configForm.hidden = false;
     configSelected.textContent = `${fullName} — ${description}`;
 
-    // Pre-fill domain
-    const domain = languageToDomain[language] || 'any';
-    domainSelect.value = domain;
-
     // Pre-fill local path
     const name = fullName.split('/')[1];
     localPathInput.value = `/Users/l1x/code/home/projectz/${name}`;
@@ -207,7 +175,7 @@
           owner,
           name,
           default_branch: selectedRepo.default_branch,
-          domain: domainSelect.value,
+          language: selectedRepo.language,
           local_path: localPathInput.value,
         }),
       });

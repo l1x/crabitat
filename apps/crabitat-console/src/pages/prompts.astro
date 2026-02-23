@@ -1,0 +1,167 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Sidebar from '../components/Sidebar.astro';
+import ContentHeader from '../components/ContentHeader.astro';
+import PromptBrowser from '../components/PromptBrowser.astro';
+import SkillList from '../components/SkillList.astro';
+import { fetchRepos, fetchRoles, fetchWorkflows, fetchPromptFiles, fetchSettings, fetchSkills } from '../lib/api-client';
+import { mockIssues, mockMissions, mockAgents, mockMessages } from '../lib/mock-data';
+import type { SettingsRecord, SkillRecord } from '../lib/types';
+
+let repos = [];
+try { repos = await fetchRepos(); } catch {}
+
+let roles = [];
+try { roles = await fetchRoles(); } catch {}
+
+let workflows = [];
+try { workflows = await fetchWorkflows(); } catch {}
+
+let promptFiles: string[] = [];
+try { promptFiles = await fetchPromptFiles(); } catch {}
+
+let settings: SettingsRecord = { prompts_path: '' };
+try { settings = await fetchSettings(); } catch {}
+
+let skills: SkillRecord[] = [];
+try { skills = await fetchSkills(); } catch {}
+---
+
+<Layout title="Prompts — Crabitat Console">
+  <Sidebar
+    activePage="/prompts"
+    repoCount={repos.length}
+    issueCount={mockIssues.length}
+    missionCount={mockMissions.length}
+    agentCount={mockAgents.length}
+    messageCount={mockMessages.length}
+    workflowCount={workflows.length}
+    promptCount={promptFiles.length}
+    roleCount={roles.length}
+  />
+
+  <div class="content">
+    <ContentHeader title="Prompts" />
+
+    <div class="section">
+      <div class="data-panel">
+        <div class="data-panel-header">
+          <span class="data-panel-title">Settings</span>
+        </div>
+        <div class="data-panel-body">
+          <div class="settings-row">
+            <label class="settings-label">Prompts Path</label>
+            <div class="settings-value" id="prompts-path-display">
+              <code id="prompts-path-value">{settings.prompts_path || 'Not configured'}</code>
+              <button class="btn btn--sm" id="edit-prompts-path-btn">Edit</button>
+            </div>
+            <div class="settings-edit" id="prompts-path-edit" hidden>
+              <input type="text" class="form-input" id="prompts-path-input" value={settings.prompts_path} />
+              <button class="btn btn--primary btn--sm" id="save-prompts-path-btn">Save</button>
+              <button class="btn btn--sm" id="cancel-prompts-path-btn">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <PromptBrowser files={promptFiles} />
+    </div>
+
+    <div class="section">
+      <SkillList skills={skills} />
+    </div>
+  </div>
+</Layout>
+
+<script>
+  const editBtn = document.getElementById('edit-prompts-path-btn')!;
+  const saveBtn = document.getElementById('save-prompts-path-btn')!;
+  const cancelBtn = document.getElementById('cancel-prompts-path-btn')!;
+  const display = document.getElementById('prompts-path-display')!;
+  const editRow = document.getElementById('prompts-path-edit')!;
+  const input = document.getElementById('prompts-path-input') as HTMLInputElement;
+  const valueEl = document.getElementById('prompts-path-value')!;
+
+  editBtn.addEventListener('click', () => {
+    display.hidden = true;
+    editRow.hidden = false;
+    input.focus();
+  });
+
+  cancelBtn.addEventListener('click', () => {
+    editRow.hidden = true;
+    display.hidden = false;
+    input.value = valueEl.textContent || '';
+  });
+
+  saveBtn.addEventListener('click', async () => {
+    const newPath = input.value.trim();
+    if (!newPath) return;
+
+    saveBtn.textContent = 'Saving\u2026';
+    saveBtn.setAttribute('disabled', '');
+
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompts_path: newPath }),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      window.location.reload();
+    } catch {
+      saveBtn.textContent = 'Save';
+      saveBtn.removeAttribute('disabled');
+      alert('Failed to update settings');
+    }
+  });
+</script>
+
+<style>
+  .settings-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .settings-label {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+
+  .settings-value {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .settings-value code {
+    font-size: 13px;
+    font-family: var(--font-mono, monospace);
+    background: var(--neutral-bg);
+    padding: 6px 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--line-light);
+  }
+
+  .settings-edit {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .settings-edit .form-input {
+    flex: 1;
+    max-width: 500px;
+  }
+
+  .btn--sm {
+    padding: 4px 12px;
+    font-size: 12px;
+  }
+</style>

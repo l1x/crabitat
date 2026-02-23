@@ -1,0 +1,193 @@
+---
+interface Props {
+  files: string[];
+}
+
+const { files } = Astro.props;
+
+// Group files by directory
+const grouped: Record<string, string[]> = {};
+for (const file of files) {
+  const parts = file.split('/');
+  const dir = parts.length > 1 ? parts.slice(0, -1).join('/') : '.';
+  if (!grouped[dir]) grouped[dir] = [];
+  grouped[dir].push(file);
+}
+const sortedDirs = Object.keys(grouped).sort();
+---
+
+<div class="data-panel">
+  <div class="data-panel-header">
+    <span class="data-panel-title">Prompt Files</span>
+    <span class="content-count">{files.length}</span>
+  </div>
+  <div class="data-panel-body">
+    {files.length === 0 ? (
+      <div class="empty-state">
+        <div class="empty-state-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+          </svg>
+        </div>
+        <div class="empty-state-title">No prompt files found</div>
+        <p class="empty-state-desc">Check that the prompts path is configured correctly and contains .md files.</p>
+      </div>
+    ) : (
+      <div class="prompt-browser">
+        <div class="prompt-file-list" id="prompt-file-list">
+          {sortedDirs.map((dir) => (
+            <div class="prompt-dir-group">
+              <div class="prompt-dir-label">{dir}/</div>
+              {grouped[dir].map((file) => (
+                <button class="prompt-file-item" data-path={file}>
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                  </svg>
+                  <span>{file.split('/').pop()}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+        <div class="prompt-preview-pane" id="prompt-preview-pane">
+          <div class="prompt-preview-empty">Select a file to preview</div>
+        </div>
+      </div>
+    )}
+  </div>
+</div>
+
+<script>
+  const fileList = document.getElementById('prompt-file-list');
+  const previewPane = document.getElementById('prompt-preview-pane');
+
+  fileList?.querySelectorAll('.prompt-file-item').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      // Mark active
+      fileList.querySelectorAll('.prompt-file-item').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      const path = (btn as HTMLElement).dataset.path!;
+      if (!previewPane) return;
+      previewPane.innerHTML = '<div class="prompt-preview-loading">Loading\u2026</div>';
+
+      try {
+        const res = await fetch(`/api/prompt-files/preview?path=${encodeURIComponent(path)}`);
+        if (!res.ok) throw new Error(`${res.status}`);
+        const data = await res.json();
+        previewPane.innerHTML = `<div class="prompt-preview-header"><code>${data.path}</code></div><pre class="prompt-preview-content">${escapeHtml(data.content)}</pre>`;
+      } catch {
+        previewPane.innerHTML = '<div class="prompt-preview-error">Failed to load preview</div>';
+      }
+    });
+  });
+
+  function escapeHtml(text: string): string {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+</script>
+
+<style>
+  .prompt-browser {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+    min-height: 400px;
+  }
+
+  .prompt-file-list {
+    background: var(--panel);
+    overflow-y: auto;
+    max-height: 600px;
+    padding: 8px 0;
+  }
+
+  .prompt-dir-group {
+    margin-bottom: 4px;
+  }
+
+  .prompt-dir-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    padding: 8px 16px 4px;
+  }
+
+  .prompt-file-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 16px 6px 24px;
+    border: none;
+    background: none;
+    font: inherit;
+    font-size: 13px;
+    color: var(--ink);
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .prompt-file-item:hover {
+    background: var(--neutral-bg);
+  }
+
+  .prompt-file-item.active {
+    background: var(--primary-soft);
+    color: var(--primary);
+  }
+
+  .prompt-file-item svg {
+    flex-shrink: 0;
+    opacity: 0.5;
+  }
+
+  .prompt-preview-pane {
+    background: var(--panel);
+    padding: 16px;
+    overflow-y: auto;
+    max-height: 600px;
+  }
+
+  .prompt-preview-empty,
+  .prompt-preview-loading,
+  .prompt-preview-error {
+    font-size: 13px;
+    color: var(--muted);
+    padding: 40px 0;
+    text-align: center;
+  }
+
+  .prompt-preview-error {
+    color: var(--bad);
+  }
+
+  .prompt-preview-header {
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line-light);
+  }
+
+  .prompt-preview-header code {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .prompt-preview-content {
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--ink);
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
+    font-family: var(--font-mono, monospace);
+  }
+</style>

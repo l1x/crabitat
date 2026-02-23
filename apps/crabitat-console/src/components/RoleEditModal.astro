@@ -1,0 +1,433 @@
+---
+---
+
+<dialog class="modal modal--wide" id="role-edit-modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <span class="modal-title" id="role-modal-title">Create Role</span>
+      <button class="modal-close" id="role-edit-close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="role-edit-section">
+        <label class="form-label" for="role-edit-name-input">Name</label>
+        <input type="text" class="form-input" id="role-edit-name-input" placeholder="e.g. rust-developer" autocomplete="off" />
+      </div>
+
+      <div class="role-edit-section">
+        <label class="form-label" for="role-edit-desc-input">Description</label>
+        <textarea class="form-input form-textarea" id="role-edit-desc-input" placeholder="What does this role do?" rows="2"></textarea>
+      </div>
+
+      <div class="role-edit-section">
+        <label class="form-label">Assigned prompt files</label>
+        <div class="role-edit-assigned" id="role-edit-assigned">
+          <span class="role-edit-empty">No prompt files assigned</span>
+        </div>
+      </div>
+
+      <div class="role-edit-section">
+        <label class="form-label" for="role-edit-search">Add prompt files</label>
+        <input
+          type="text"
+          class="form-input"
+          id="role-edit-search"
+          placeholder="Search .md files\u2026"
+          autocomplete="off"
+        />
+        <div class="role-edit-results" id="role-edit-results"></div>
+      </div>
+
+      <div class="role-edit-section">
+        <label class="form-label" for="role-edit-skills-input">Skills <span class="form-hint">(comma-separated)</span></label>
+        <input type="text" class="form-input" id="role-edit-skills-input" placeholder="e.g. code-review, testing" autocomplete="off" />
+      </div>
+
+      <div class="role-edit-section" id="role-edit-preview-section" hidden>
+        <label class="form-label">Preview</label>
+        <pre class="role-edit-preview" id="role-edit-preview"></pre>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" id="role-edit-cancel">Cancel</button>
+      <button class="btn btn--primary" id="role-edit-save">Create</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+  const modal = document.getElementById('role-edit-modal') as HTMLDialogElement;
+  const closeBtn = document.getElementById('role-edit-close')!;
+  const cancelBtn = document.getElementById('role-edit-cancel')!;
+  const saveBtn = document.getElementById('role-edit-save') as HTMLButtonElement;
+  const titleEl = document.getElementById('role-modal-title')!;
+  const nameInput = document.getElementById('role-edit-name-input') as HTMLInputElement;
+  const descInput = document.getElementById('role-edit-desc-input') as HTMLTextAreaElement;
+  const assignedEl = document.getElementById('role-edit-assigned')!;
+  const searchInput = document.getElementById('role-edit-search') as HTMLInputElement;
+  const resultsEl = document.getElementById('role-edit-results')!;
+  const skillsInput = document.getElementById('role-edit-skills-input') as HTMLInputElement;
+  const previewSection = document.getElementById('role-edit-preview-section')!;
+  const previewEl = document.getElementById('role-edit-preview')!;
+
+  interface RoleData {
+    role_id: string;
+    name: string;
+    description: string;
+    prompt_files: string[];
+    skills: string[];
+  }
+
+  let currentRole: RoleData | null = null; // null = create mode
+  let assignedFiles: string[] = [];
+  let allFiles: string[] = [];
+  let filesLoaded = false;
+
+  async function loadPromptFiles() {
+    if (filesLoaded) return;
+    try {
+      const res = await fetch('/api/prompt-files');
+      if (!res.ok) throw new Error(`${res.status}`);
+      allFiles = await res.json();
+      filesLoaded = true;
+    } catch {
+      allFiles = [];
+    }
+  }
+
+  function renderAssigned() {
+    if (assignedFiles.length === 0) {
+      assignedEl.innerHTML = '<span class="role-edit-empty">No prompt files assigned</span>';
+      return;
+    }
+    assignedEl.innerHTML = assignedFiles
+      .map(
+        (f) => `<span class="role-edit-tag" data-path="${f}">
+          <code>${f}</code>
+          <button class="role-edit-tag-remove" data-path="${f}">&times;</button>
+        </span>`,
+      )
+      .join('');
+
+    assignedEl.querySelectorAll('.role-edit-tag-remove').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const path = (e.currentTarget as HTMLElement).dataset.path!;
+        assignedFiles = assignedFiles.filter((f) => f !== path);
+        renderAssigned();
+        renderResults(searchInput.value.trim());
+      });
+    });
+  }
+
+  function renderResults(query: string) {
+    const available = allFiles.filter((f) => !assignedFiles.includes(f));
+    if (!query) {
+      // Show all available files when no query
+      if (available.length === 0) {
+        resultsEl.innerHTML = '<div class="role-edit-no-results">No more files available</div>';
+        return;
+      }
+      resultsEl.innerHTML = available.slice(0, 20)
+        .map(
+          (f) => `<div class="role-edit-result-item">
+            <button class="role-edit-result-add" data-path="${f}">+ ${f}</button>
+            <button class="role-edit-result-eye" data-path="${f}" title="Preview">&#128065;</button>
+          </div>`,
+        )
+        .join('');
+      if (available.length > 20) {
+        resultsEl.innerHTML += `<div class="role-edit-no-results">${available.length - 20} more \u2014 type to filter</div>`;
+      }
+    } else {
+      const q = query.toLowerCase();
+      const matches = available.filter((f) => f.toLowerCase().includes(q));
+      if (matches.length === 0) {
+        resultsEl.innerHTML = '<div class="role-edit-no-results">No matching files</div>';
+        return;
+      }
+      resultsEl.innerHTML = matches
+        .map(
+          (f) => `<div class="role-edit-result-item">
+            <button class="role-edit-result-add" data-path="${f}">+ ${f}</button>
+            <button class="role-edit-result-eye" data-path="${f}" title="Preview">&#128065;</button>
+          </div>`,
+        )
+        .join('');
+    }
+
+    bindResultHandlers();
+  }
+
+  function bindResultHandlers() {
+    resultsEl.querySelectorAll('.role-edit-result-add').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const path = (btn as HTMLElement).dataset.path!;
+        if (!assignedFiles.includes(path)) {
+          assignedFiles.push(path);
+          renderAssigned();
+          renderResults(searchInput.value.trim());
+        }
+      });
+    });
+
+    resultsEl.querySelectorAll('.role-edit-result-eye').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const path = (btn as HTMLElement).dataset.path!;
+        previewSection.hidden = false;
+        previewEl.textContent = 'Loading\u2026';
+        try {
+          const res = await fetch(`/api/prompt-files/preview?path=${encodeURIComponent(path)}`);
+          if (!res.ok) throw new Error(`${res.status}`);
+          const data = await res.json();
+          previewEl.textContent = data.content;
+        } catch {
+          previewEl.textContent = 'Failed to load preview.';
+        }
+      });
+    });
+  }
+
+  function resetModal() {
+    currentRole = null;
+    assignedFiles = [];
+    nameInput.value = '';
+    descInput.value = '';
+    skillsInput.value = '';
+    searchInput.value = '';
+    resultsEl.innerHTML = '';
+    previewSection.hidden = true;
+    previewEl.textContent = '';
+    saveBtn.textContent = 'Create';
+    saveBtn.disabled = false;
+    nameInput.removeAttribute('readonly');
+    titleEl.textContent = 'Create Role';
+  }
+
+  closeBtn.addEventListener('click', () => { modal.close(); resetModal(); });
+  cancelBtn.addEventListener('click', () => { modal.close(); resetModal(); });
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) { modal.close(); resetModal(); }
+  });
+
+  searchInput.addEventListener('input', () => {
+    renderResults(searchInput.value.trim());
+  });
+
+  searchInput.addEventListener('focus', () => {
+    if (resultsEl.innerHTML === '') {
+      renderResults(searchInput.value.trim());
+    }
+  });
+
+  saveBtn.addEventListener('click', async () => {
+    const name = nameInput.value.trim();
+    if (!name) {
+      nameInput.focus();
+      return;
+    }
+
+    const skills = skillsInput.value
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    saveBtn.textContent = 'Saving\u2026';
+    saveBtn.disabled = true;
+
+    try {
+      if (currentRole) {
+        // Edit mode: PATCH
+        const res = await fetch(`/api/roles/${currentRole.role_id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            description: descInput.value.trim(),
+            prompt_files: assignedFiles,
+            skills,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+          throw new Error(err.error || `Failed: ${res.status}`);
+        }
+      } else {
+        // Create mode: POST
+        const res = await fetch('/api/roles', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            description: descInput.value.trim(),
+            prompt_files: assignedFiles,
+            skills,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+          throw new Error(err.error || `Failed: ${res.status}`);
+        }
+      }
+      modal.close();
+      resetModal();
+      window.location.reload();
+    } catch (e: unknown) {
+      saveBtn.textContent = currentRole ? 'Save' : 'Create';
+      saveBtn.disabled = false;
+      alert(`Failed to save: ${e instanceof Error ? e.message : e}`);
+    }
+  });
+
+  (window as any).openRoleEditModal = async (role: RoleData | null) => {
+    resetModal();
+
+    if (role) {
+      // Edit mode
+      currentRole = role;
+      assignedFiles = [...role.prompt_files];
+      titleEl.textContent = `Edit Role \u2014 ${role.name}`;
+      nameInput.value = role.name;
+      descInput.value = role.description || '';
+      skillsInput.value = (role.skills || []).join(', ');
+      saveBtn.textContent = 'Save';
+    } else {
+      // Create mode
+      titleEl.textContent = 'Create Role';
+      saveBtn.textContent = 'Create';
+    }
+
+    renderAssigned();
+    modal.showModal();
+    await loadPromptFiles();
+    renderResults('');
+    if (!role) nameInput.focus();
+    else searchInput.focus();
+  };
+</script>
+
+<style>
+  .role-edit-section {
+    margin-bottom: 16px;
+  }
+
+  .form-textarea {
+    resize: vertical;
+    min-height: 48px;
+  }
+
+  .form-hint {
+    font-weight: 400;
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .role-edit-assigned {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 32px;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--neutral-bg);
+  }
+
+  .role-edit-empty {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .role-edit-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    font-size: 12px;
+  }
+
+  .role-edit-tag code {
+    font-size: 11px;
+    font-family: var(--font-mono, monospace);
+  }
+
+  .role-edit-tag-remove {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 2px;
+    line-height: 1;
+  }
+
+  .role-edit-tag-remove:hover {
+    color: var(--danger, #dc2626);
+  }
+
+  .role-edit-results {
+    max-height: 200px;
+    overflow-y: auto;
+    margin-top: 8px;
+  }
+
+  .role-edit-result-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--line-light);
+  }
+
+  .role-edit-result-add {
+    flex: 1;
+    text-align: left;
+    background: none;
+    border: none;
+    font-size: 12px;
+    font-family: var(--font-mono, monospace);
+    color: var(--ink);
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 3px;
+  }
+
+  .role-edit-result-add:hover {
+    background: var(--neutral-bg);
+  }
+
+  .role-edit-result-eye {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 2px 4px;
+    opacity: 0.5;
+  }
+
+  .role-edit-result-eye:hover {
+    opacity: 1;
+  }
+
+  .role-edit-no-results {
+    font-size: 12px;
+    color: var(--muted);
+    padding: 8px 0;
+  }
+
+  .role-edit-preview {
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--muted);
+    background: var(--neutral-bg);
+    border: 1px solid var(--line-light);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
+    max-height: 250px;
+    overflow-y: auto;
+  }
+</style>

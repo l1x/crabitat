@@ -47,7 +47,7 @@ function stepIcon(status: string): string {
                 </div>
                 <div class="mission-card-meta">
                   {repo && (
-                    <span class={`domain-tag domain-tag--${repo.domain}`}>{repo.full_name}</span>
+                    <span>{repo.full_name}</span>
                   )}
                   <span class="issue-number">#{mission.github_issue_number}</span>
                   {mission.pr_number && (

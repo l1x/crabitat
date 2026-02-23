@@ -20,7 +20,7 @@ const { issues, repos, showRepoFilter = true, repoId } = Astro.props;
     <select class="form-select" id="repo-select">
       <option value="all">All repos</option>
       {repos.map((r) => (
-        <option value={r.repo_id}>{r.full_name} ({r.domain})</option>
+        <option value={r.repo_id}>{r.full_name}</option>
       ))}
     </select>
   </div>
@@ -62,7 +62,6 @@ const { issues, repos, showRepoFilter = true, repoId } = Astro.props;
                     data-issue-number={issue.number}
                     data-issue-title={issue.title}
                     data-repo-name={repo?.full_name}
-                    data-repo-domain={repo?.domain}
                   >
                     Create Mission
                   </button>
@@ -71,7 +70,7 @@ const { issues, repos, showRepoFilter = true, repoId } = Astro.props;
               <div class="issue-card-body issue-prose" set:html={marked.parse(issue.body || '')} />
               <div class="issue-card-footer">
                 {repo && (
-                  <span class={`domain-tag domain-tag--${repo.domain}`}>{repo.full_name}</span>
+                  <span>{repo.full_name}</span>
                 )}
                 {issue.labels.map((label) => (
                   <span class="issue-label">{label}</span>
@@ -200,9 +199,8 @@ const { issues, repos, showRepoFilter = true, repoId } = Astro.props;
         const num = btn.dataset.issueNumber;
         const title = btn.dataset.issueTitle;
         const repoName = btn.dataset.repoName;
-        const domain = btn.dataset.repoDomain;
         issueRef.textContent = `#${num} — ${title}`;
-        repoRef.textContent = repoName ? `${repoName} (${domain})` : '';
+        repoRef.textContent = repoName || '';
         modal.showModal();
       });
     });

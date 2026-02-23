@@ -33,10 +33,11 @@ const { repos } = Astro.props;
       <a href={`/repos/${repo.owner}/${repo.name}`} class="card repo-card-link" data-repo-id={repo.repo_id}>
         <div class="card-title">
           <span>{repo.full_name}</span>
-          <span class={`domain-tag domain-tag--${repo.domain}`}>{repo.domain}</span>
+          <button class="repo-delete-btn" data-repo-id={repo.repo_id} data-repo-name={repo.full_name} title="Remove repo">&times;</button>
         </div>
         <div class="card-meta">
           <code>{repo.default_branch}</code>
+          {repo.language && <span>&middot; {repo.language}</span>}
         </div>
         <div class="repo-card-stats">
           <span class="repo-card-stat">0 issues</span>
@@ -54,4 +55,48 @@ const { repos } = Astro.props;
       window.openAddRepoModal();
     }
   });
+
+  document.querySelectorAll('.repo-delete-btn').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const el = btn as HTMLElement;
+      const repoId = el.dataset.repoId!;
+      const repoName = el.dataset.repoName!;
+
+      if (!confirm(`Remove ${repoName}? This only removes it from Crabitat, not from GitHub.`)) return;
+
+      el.textContent = '\u22EF';
+      el.setAttribute('disabled', '');
+
+      try {
+        const res = await fetch(`/api/repos/${repoId}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error(`${res.status}`);
+        window.location.reload();
+      } catch {
+        el.textContent = '\u00D7';
+        el.removeAttribute('disabled');
+        alert('Failed to remove repo');
+      }
+    });
+  });
 </script>
+
+<style>
+  .repo-delete-btn {
+    background: none;
+    border: none;
+    font-size: 18px;
+    line-height: 1;
+    color: var(--muted);
+    padding: 2px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: color 0.15s, background 0.15s;
+  }
+
+  .repo-delete-btn:hover {
+    color: var(--bad);
+    background: var(--bad-bg);
+  }
+</style>

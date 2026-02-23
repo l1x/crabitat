@@ -1,4 +1,4 @@
-import type { StatusSnapshot, CrabRecord, ColonyRecord, GitHubIssueRecord, MissionRecord, RepoRecord } from './types';
+import type { StatusSnapshot, CrabRecord, ColonyRecord, GitHubIssueRecord, MissionRecord, PromptFilePreview, RepoRecord, RoleRecord, SettingsRecord, SkillRecord, WorkflowRecord } from './types';
 
 const CONTROL_PLANE_URL = import.meta.env.CONTROL_PLANE_URL || 'http://127.0.0.1:8800';
 
@@ -12,7 +12,7 @@ export async function createRepo(body: {
   owner: string;
   name: string;
   default_branch?: string;
-  domain?: string;
+  language?: string;
   local_path: string;
 }): Promise<RepoRecord> {
   const res = await fetch(`${CONTROL_PLANE_URL}/v1/repos`, {
@@ -128,4 +128,69 @@ export async function removeFromQueue(colonyId: string, missionId: string): Prom
     method: 'DELETE',
   });
   if (!res.ok) throw new Error(`DELETE queue/${missionId} failed: ${res.status}`);
+}
+
+export async function fetchWorkflows(): Promise<WorkflowRecord[]> {
+  const res = await fetch(`${CONTROL_PLANE_URL}/v1/workflows`);
+  if (!res.ok) throw new Error(`GET /v1/workflows failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchRoles(): Promise<RoleRecord[]> {
+  const res = await fetch(`${CONTROL_PLANE_URL}/v1/roles`);
+  if (!res.ok) throw new Error(`GET /v1/roles failed: ${res.status}`);
+  return res.json();
+}
+
+export async function updateRole(
+  roleId: string,
+  body: { name?: string; description?: string; prompt_files?: string[]; skills?: string[] },
+): Promise<RoleRecord> {
+  const res = await fetch(`${CONTROL_PLANE_URL}/v1/roles/${roleId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`PATCH /v1/roles/${roleId} failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchPromptFiles(): Promise<string[]> {
+  const res = await fetch(`${CONTROL_PLANE_URL}/v1/prompt-files`);
+  if (!res.ok) throw new Error(`GET /v1/prompt-files failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchPromptFilePreview(path: string): Promise<PromptFilePreview> {
+  const res = await fetch(`${CONTROL_PLANE_URL}/v1/prompt-files/preview?path=${encodeURIComponent(path)}`);
+  if (!res.ok) throw new Error(`GET /v1/prompt-files/preview failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchSettings(): Promise<SettingsRecord> {
+  const res = await fetch(`${CONTROL_PLANE_URL}/v1/settings`);
+  if (!res.ok) throw new Error(`GET /v1/settings failed: ${res.status}`);
+  return res.json();
+}
+
+export async function updateSettings(body: Partial<SettingsRecord>): Promise<SettingsRecord> {
+  const res = await fetch(`${CONTROL_PLANE_URL}/v1/settings`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`PATCH /v1/settings failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchRepoLanguages(repoId: string): Promise<Record<string, number>> {
+  const res = await fetch(`${CONTROL_PLANE_URL}/v1/repos/${repoId}/languages`);
+  if (!res.ok) throw new Error(`GET /v1/repos/${repoId}/languages failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchSkills(): Promise<SkillRecord[]> {
+  const res = await fetch(`${CONTROL_PLANE_URL}/v1/skills`);
+  if (!res.ok) throw new Error(`GET /v1/skills failed: ${res.status}`);
+  return res.json();
 }

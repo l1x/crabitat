@@ -1,0 +1,97 @@
+---
+import type { SkillRecord } from '../lib/types';
+
+interface Props {
+  skills: SkillRecord[];
+}
+
+const { skills } = Astro.props;
+---
+
+<div class="data-panel">
+  <div class="data-panel-header">
+    <span class="data-panel-title">Installed Skills</span>
+    <span class="content-count">{skills.length}</span>
+  </div>
+  <div class="data-panel-body">
+    {skills.length === 0 ? (
+      <div class="empty-state">
+        <div class="empty-state-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+            <path d="M2 17l10 5 10-5"/>
+            <path d="M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <div class="empty-state-title">No skills discovered</div>
+        <p class="empty-state-desc">Skills are discovered from ~/.claude/ directories and the prompts path.</p>
+      </div>
+    ) : (
+      <div class="skill-grid">
+        {skills.map((skill) => (
+          <div class="skill-card">
+            <div class="skill-card-header">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                <path d="M2 17l10 5 10-5"/>
+                <path d="M2 12l10 5 10-5"/>
+              </svg>
+              <span class="skill-name">{skill.name}</span>
+            </div>
+            {skill.description && (
+              <p class="skill-desc">{skill.description}</p>
+            )}
+            <code class="skill-path">{skill.path}</code>
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+</div>
+
+<style>
+  .skill-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 12px;
+  }
+
+  .skill-card {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel);
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .skill-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .skill-card-header svg {
+    color: var(--primary);
+    flex-shrink: 0;
+  }
+
+  .skill-name {
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .skill-desc {
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.4;
+  }
+
+  .skill-path {
+    font-size: 11px;
+    font-family: var(--font-mono, monospace);
+    color: var(--muted);
+    word-break: break-all;
+  }
+</style>

@@ -4,7 +4,7 @@ export interface RepoRecord {
   name: string;
   full_name: string;
   default_branch: string;
-  domain: string;
+  language: string;
   local_path: string;
   created_at_ms: number;
 }
@@ -108,6 +108,52 @@ export interface StatusSnapshot {
   runs: RunRecord[];
 }
 
+export interface WorkflowStepRecord {
+  step_id: string;
+  role: string;
+  prompt_file: string;
+  depends_on: string[];
+  condition: string | null;
+  max_retries: number;
+  position: number;
+}
+
+export interface WorkflowRecord {
+  workflow_id: string;
+  name: string;
+  description: string;
+  stack: string;
+  version: string;
+  created_at_ms: number;
+  steps: WorkflowStepRecord[];
+}
+
+export interface RoleRecord {
+  role_id: string;
+  name: string;
+  description: string;
+  prompt_files: string[];
+  system_prompt: string;
+  skills: string[];
+  created_at_ms: number;
+}
+
+export interface PromptFilePreview {
+  path: string;
+  content: string;
+}
+
+export interface SettingsRecord {
+  prompts_path: string;
+  [key: string]: string;
+}
+
+export interface SkillRecord {
+  name: string;
+  path: string;
+  description: string;
+}
+
 export type ConsoleEvent =
   | { type: 'snapshot' } & StatusSnapshot
   | { type: 'crab_updated'; crab: CrabRecord }
@@ -121,4 +167,7 @@ export type ConsoleEvent =
   | { type: 'run_completed'; run: RunRecord }
   | { type: 'repo_created'; repo: RepoRecord }
   | { type: 'repo_updated'; repo: RepoRecord }
-  | { type: 'repo_deleted'; repo_id: string };
+  | { type: 'repo_deleted'; repo_id: string }
+  | { type: 'role_created'; role: RoleRecord }
+  | { type: 'role_updated'; role: RoleRecord }
+  | { type: 'role_deleted'; role_id: string };

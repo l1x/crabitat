@@ -2,7 +2,7 @@ use anyhow::Result;
 use axum::{
     Json, Router,
     extract::{
-        Path, State,
+        Path, Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::StatusCode,
@@ -23,7 +23,7 @@ use std::{
     fs,
     net::SocketAddr,
     path::{Path as StdPath, PathBuf},
-    sync::Arc,
+    sync::{Arc, RwLock},
     time::Duration,
 };
 use tokio::sync::{Mutex, broadcast, mpsc};
@@ -108,12 +108,6 @@ impl WorkflowRegistry {
 
     fn get(&self, name: &str) -> Option<&WorkflowManifest> {
         self.manifests.get(name)
-    }
-
-    fn list_names(&self) -> Vec<String> {
-        let mut names: Vec<String> = self.manifests.keys().cloned().collect();
-        names.sort();
-        names
     }
 
     fn load_prompt_file(&self, prompt_file: &str) -> Result<String, ApiError> {
@@ -233,6 +227,7 @@ impl GitHubClient {
     // -- Public API (dispatches to GraphQL or gh CLI) -----------------------
 
     async fn list_issues(&self, repo: &str) -> Result<Vec<GhIssue>, ApiError> {
+        info!(repo = %repo, "github: listing issues");
         if self.has_token() {
             let (owner, name) = parse_repo(repo)?;
             self.list_issues_graphql(owner, name).await
@@ -242,6 +237,7 @@ impl GitHubClient {
     }
 
     async fn get_issue(&self, repo: &str, number: i64) -> Result<GhIssueDetail, ApiError> {
+        info!(repo = %repo, number, "github: fetching issue");
         if self.has_token() {
             let (owner, name) = parse_repo(repo)?;
             self.get_issue_graphql(owner, name, number).await
@@ -251,6 +247,7 @@ impl GitHubClient {
     }
 
     async fn get_pr_status(&self, repo: &str, number: i64) -> Result<GhPrStatus, ApiError> {
+        info!(repo = %repo, number, "github: checking PR status");
         if self.has_token() {
             let (owner, name) = parse_repo(repo)?;
             self.get_pr_status_graphql(owner, name, number).await
@@ -300,6 +297,7 @@ impl GitHubClient {
     }
 
     async fn list_issues_graphql(&self, owner: &str, repo: &str) -> Result<Vec<GhIssue>, ApiError> {
+        info!(owner, repo, "github/graphql: listing issues");
         let query = r#"
             query($owner: String!, $repo: String!) {
                 repository(owner: $owner, name: $repo) {
@@ -343,6 +341,7 @@ impl GitHubClient {
         repo: &str,
         number: i64,
     ) -> Result<GhIssueDetail, ApiError> {
+        info!(owner, repo, number, "github/graphql: fetching issue");
         let query = r#"
             query($owner: String!, $repo: String!, $number: Int!) {
                 repository(owner: $owner, name: $repo) {
@@ -374,6 +373,7 @@ impl GitHubClient {
         repo: &str,
         number: i64,
     ) -> Result<GhPrStatus, ApiError> {
+        info!(owner, repo, number, "github/graphql: checking PR status");
         let query = r#"
             query($owner: String!, $repo: String!, $number: Int!) {
                 repository(owner: $owner, name: $repo) {
@@ -402,6 +402,7 @@ impl GitHubClient {
     // -- gh CLI backend -----------------------------------------------------
 
     async fn list_issues_cli(&self, repo: &str) -> Result<Vec<GhIssue>, ApiError> {
+        info!(repo, "github/cli: listing issues");
         let output = tokio::process::Command::new("gh")
             .args([
                 "issue",
@@ -440,6 +441,7 @@ impl GitHubClient {
     }
 
     async fn get_issue_cli(&self, repo: &str, number: i64) -> Result<GhIssueDetail, ApiError> {
+        info!(repo, number, "github/cli: fetching issue");
         let output = tokio::process::Command::new("gh")
             .args(["issue", "view", &number.to_string(), "--repo", repo, "--json", "title,body"])
             .output()
@@ -458,6 +460,7 @@ impl GitHubClient {
     }
 
     async fn get_pr_status_cli(&self, repo: &str, number: i64) -> Result<GhPrStatus, ApiError> {
+        info!(repo, number, "github/cli: checking PR status");
         let output = tokio::process::Command::new("gh")
             .args(["pr", "view", &number.to_string(), "--repo", repo, "--json", "state,mergedAt"])
             .output()
@@ -485,7 +488,7 @@ struct AppState {
     db: Arc<Mutex<Connection>>,
     crab_channels: CrabChannels,
     console_tx: broadcast::Sender<String>,
-    workflows: Arc<WorkflowRegistry>,
+    workflows: Arc<RwLock<WorkflowRegistry>>,
     github: GitHubClient,
 }
 
@@ -505,6 +508,9 @@ enum ConsoleEvent {
     RepoCreated { repo: RepoRecord },
     RepoUpdated { repo: RepoRecord },
     RepoDeleted { repo_id: String },
+    RoleCreated { role: RoleRecord },
+    RoleUpdated { role: RoleRecord },
+    RoleDeleted { role_id: String },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -591,7 +597,7 @@ struct RepoRecord {
     name: String,
     full_name: String,
     default_branch: String,
-    domain: String,
+    language: String,
     local_path: String,
     created_at_ms: u64,
 }
@@ -770,14 +776,13 @@ struct CreateRepoRequest {
     owner: String,
     name: String,
     default_branch: Option<String>,
-    domain: Option<String>,
+    language: Option<String>,
     local_path: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct UpdateRepoRequest {
     default_branch: Option<String>,
-    domain: Option<String>,
     local_path: Option<String>,
 }
 
@@ -795,6 +800,91 @@ struct GitHubIssueRecord {
 struct QueueIssueRequest {
     issue_number: i64,
     workflow: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Workflow DB types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+struct WorkflowStepRecord {
+    step_id: String,
+    role: String,
+    prompt_file: String,
+    depends_on: Vec<String>,
+    condition: Option<String>,
+    max_retries: u32,
+    position: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct WorkflowRecord {
+    workflow_id: String,
+    name: String,
+    description: String,
+    stack: String,
+    version: String,
+    created_at_ms: u64,
+    steps: Vec<WorkflowStepRecord>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateWorkflowStepInput {
+    step_id: String,
+    role: String,
+    prompt_file: Option<String>,
+    depends_on: Option<Vec<String>>,
+    condition: Option<String>,
+    max_retries: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateWorkflowRequest {
+    name: String,
+    description: Option<String>,
+    stack: Option<String>,
+    version: Option<String>,
+    steps: Vec<CreateWorkflowStepInput>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateWorkflowRequest {
+    name: Option<String>,
+    description: Option<String>,
+    stack: Option<String>,
+    version: Option<String>,
+    steps: Option<Vec<CreateWorkflowStepInput>>,
+}
+
+// ---------------------------------------------------------------------------
+// Role DB types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+struct RoleRecord {
+    role_id: String,
+    name: String,
+    description: String,
+    prompt_files: Vec<String>,
+    system_prompt: String, // concatenated from all prompt_files on disk
+    skills: Vec<String>,
+    created_at_ms: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateRoleRequest {
+    name: String,
+    description: Option<String>,
+    prompt_files: Option<Vec<String>>,
+    skills: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateRoleRequest {
+    name: Option<String>,
+    description: Option<String>,
+    prompt_files: Option<Vec<String>>,
+    skills: Option<Vec<String>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -820,6 +910,9 @@ async fn serve(port: u16, db_path: &StdPath, prompts_path: &StdPath) -> Result<(
     info!("crabitat control-plane v{}", env!("CARGO_PKG_VERSION"));
 
     let connection = init_db(db_path)?;
+    seed_default_workflows(&connection)?;
+    seed_default_roles(&connection)?;
+    seed_settings(&connection, prompts_path)?;
     let (console_tx, _) = broadcast::channel::<String>(256);
     let workflows = WorkflowRegistry::load(prompts_path);
     info!(count = workflows.manifests.len(), "workflow registry loaded");
@@ -833,7 +926,7 @@ async fn serve(port: u16, db_path: &StdPath, prompts_path: &StdPath) -> Result<(
         db: Arc::new(Mutex::new(connection)),
         crab_channels: Arc::new(Mutex::new(HashMap::new())),
         console_tx,
-        workflows: Arc::new(workflows),
+        workflows: Arc::new(RwLock::new(workflows)),
         github,
     };
 
@@ -874,7 +967,18 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/runs/start", post(start_run))
         .route("/v1/runs/update", post(update_run))
         .route("/v1/runs/complete", post(complete_run))
-        .route("/v1/workflows", get(list_workflows))
+        .route("/v1/workflows", get(list_db_workflows).post(create_workflow))
+        .route(
+            "/v1/workflows/{workflow_id}",
+            get(get_workflow).patch(update_workflow).delete(delete_workflow),
+        )
+        .route("/v1/roles", get(list_roles).post(create_role))
+        .route("/v1/roles/{role_id}", get(get_role).patch(update_role).delete(delete_role))
+        .route("/v1/prompt-files", get(list_prompt_files))
+        .route("/v1/prompt-files/preview", get(preview_prompt_file))
+        .route("/v1/settings", get(get_settings).patch(patch_settings))
+        .route("/v1/repos/{repo_id}/languages", get(get_repo_languages))
+        .route("/v1/skills", get(list_skills))
         .route("/v1/status", get(get_status))
         .route("/v1/ws/crab/{crab_id}", get(ws_crab_handler))
         .route("/v1/ws/console", get(ws_console_handler))
@@ -952,7 +1056,7 @@ fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
           owner TEXT NOT NULL,
           name TEXT NOT NULL,
           default_branch TEXT NOT NULL DEFAULT 'main',
-          domain TEXT NOT NULL DEFAULT 'any',
+          language TEXT NOT NULL DEFAULT '',
           local_path TEXT NOT NULL,
           created_at_ms INTEGER NOT NULL,
           UNIQUE(owner, name)
@@ -981,6 +1085,42 @@ fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
           FOREIGN KEY(mission_id) REFERENCES missions(mission_id),
           FOREIGN KEY(task_id) REFERENCES tasks(task_id)
         );
+
+        CREATE TABLE IF NOT EXISTS workflows (
+          workflow_id TEXT PRIMARY KEY,
+          name TEXT NOT NULL UNIQUE,
+          description TEXT NOT NULL DEFAULT '',
+          stack TEXT NOT NULL DEFAULT 'any',
+          version TEXT NOT NULL DEFAULT '1.0.0',
+          created_at_ms INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS workflow_steps (
+          workflow_id TEXT NOT NULL,
+          position INTEGER NOT NULL,
+          step_id TEXT NOT NULL,
+          role TEXT NOT NULL,
+          prompt_file TEXT NOT NULL DEFAULT '',
+          depends_on TEXT NOT NULL DEFAULT '[]',
+          condition TEXT,
+          max_retries INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (workflow_id, position),
+          FOREIGN KEY(workflow_id) REFERENCES workflows(workflow_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS roles (
+          role_id TEXT PRIMARY KEY,
+          name TEXT NOT NULL UNIQUE,
+          description TEXT NOT NULL DEFAULT '',
+          prompt_files TEXT NOT NULL DEFAULT '[]',
+          skills TEXT NOT NULL DEFAULT '[]',
+          created_at_ms INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS settings (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
         ",
     )?;
 
@@ -991,11 +1131,34 @@ fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
         "ALTER TABLE missions ADD COLUMN queue_position INTEGER",
         "ALTER TABLE missions ADD COLUMN github_issue_number INTEGER",
         "ALTER TABLE missions ADD COLUMN github_pr_number INTEGER",
+        "ALTER TABLE repos ADD COLUMN language TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE roles ADD COLUMN prompt_file TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE roles ADD COLUMN prompt_files TEXT NOT NULL DEFAULT '[]'",
     ];
     for sql in migrations {
         match conn.execute(sql, []) {
             Ok(_) => {}
             Err(e) if e.to_string().contains("duplicate column") => {}
+            Err(e) => return Err(e),
+        }
+    }
+
+    // Data migration: copy prompt_file → prompt_files JSON array (idempotent)
+    let _ = conn.execute(
+        "UPDATE roles SET prompt_files = '[\"' || prompt_file || '\"]' WHERE prompt_file != '' AND prompt_files = '[]'",
+        [],
+    );
+
+    // Drop-column migrations (safe to re-run)
+    let drop_migrations = [
+        "ALTER TABLE repos DROP COLUMN domain",
+        "ALTER TABLE roles DROP COLUMN system_prompt",
+        "ALTER TABLE roles DROP COLUMN prompt_file",
+    ];
+    for sql in drop_migrations {
+        match conn.execute(sql, []) {
+            Ok(_) => {}
+            Err(e) if e.to_string().contains("no such column") => {}
             Err(e) => return Err(e),
         }
     }
@@ -1187,14 +1350,544 @@ async fn healthz() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "ok": true }))
 }
 
-async fn list_workflows(State(state): State<AppState>) -> Json<Vec<String>> {
-    Json(state.workflows.list_names())
+// ---------------------------------------------------------------------------
+// Workflow CRUD handlers
+// ---------------------------------------------------------------------------
+
+async fn list_db_workflows(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<WorkflowRecord>>, ApiError> {
+    info!("db: listing workflows");
+    let db = state.db.lock().await;
+    Ok(Json(query_workflows(&db)?))
+}
+
+async fn get_workflow(
+    State(state): State<AppState>,
+    Path(workflow_id): Path<String>,
+) -> Result<Json<WorkflowRecord>, ApiError> {
+    info!(workflow_id = %workflow_id, "db: fetching workflow");
+    let db = state.db.lock().await;
+    let wf = fetch_workflow(&db, &workflow_id)?
+        .ok_or_else(|| ApiError::not_found("workflow not found"))?;
+    Ok(Json(wf))
+}
+
+async fn create_workflow(
+    State(state): State<AppState>,
+    Json(request): Json<CreateWorkflowRequest>,
+) -> Result<Json<WorkflowRecord>, ApiError> {
+    info!(name = %request.name, steps = request.steps.len(), "db: creating workflow");
+    if request.name.trim().is_empty() {
+        return Err(ApiError::bad_request("name is required"));
+    }
+    if request.steps.is_empty() {
+        return Err(ApiError::bad_request("at least one step is required"));
+    }
+
+    let workflow_id = ExternalId::new("wf").to_string();
+    let now = now_ms();
+
+    let db = state.db.lock().await;
+    db.execute(
+        "INSERT INTO workflows (workflow_id, name, description, stack, version, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            workflow_id,
+            request.name,
+            request.description.as_deref().unwrap_or(""),
+            request.stack.as_deref().unwrap_or("any"),
+            request.version.as_deref().unwrap_or("1.0.0"),
+            now as i64,
+        ],
+    )?;
+
+    insert_workflow_steps(&db, &workflow_id, &request.steps)?;
+
+    let wf = fetch_workflow(&db, &workflow_id)?
+        .ok_or_else(|| ApiError::internal("failed to reload workflow after creation"))?;
+    Ok(Json(wf))
+}
+
+async fn update_workflow(
+    State(state): State<AppState>,
+    Path(workflow_id): Path<String>,
+    Json(request): Json<UpdateWorkflowRequest>,
+) -> Result<Json<WorkflowRecord>, ApiError> {
+    info!(workflow_id = %workflow_id, "db: updating workflow");
+    let db = state.db.lock().await;
+
+    let existing = fetch_workflow(&db, &workflow_id)?
+        .ok_or_else(|| ApiError::not_found("workflow not found"))?;
+
+    let name = request.name.unwrap_or(existing.name);
+    let description = request.description.unwrap_or(existing.description);
+    let stack = request.stack.unwrap_or(existing.stack);
+    let version = request.version.unwrap_or(existing.version);
+
+    db.execute(
+        "UPDATE workflows SET name = ?2, description = ?3, stack = ?4, version = ?5 WHERE workflow_id = ?1",
+        params![workflow_id, name, description, stack, version],
+    )?;
+
+    if let Some(steps) = request.steps {
+        db.execute("DELETE FROM workflow_steps WHERE workflow_id = ?1", params![workflow_id])?;
+        insert_workflow_steps(&db, &workflow_id, &steps)?;
+    }
+
+    let wf = fetch_workflow(&db, &workflow_id)?
+        .ok_or_else(|| ApiError::internal("failed to reload workflow after update"))?;
+    Ok(Json(wf))
+}
+
+async fn delete_workflow(
+    State(state): State<AppState>,
+    Path(workflow_id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    info!(workflow_id = %workflow_id, "db: deleting workflow");
+    let db = state.db.lock().await;
+    let _existing = fetch_workflow(&db, &workflow_id)?
+        .ok_or_else(|| ApiError::not_found("workflow not found"))?;
+
+    db.execute("DELETE FROM workflow_steps WHERE workflow_id = ?1", params![workflow_id])?;
+    db.execute("DELETE FROM workflows WHERE workflow_id = ?1", params![workflow_id])?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+// ---------------------------------------------------------------------------
+// Role CRUD handlers
+// ---------------------------------------------------------------------------
+
+async fn list_roles(State(state): State<AppState>) -> Result<Json<Vec<RoleRecord>>, ApiError> {
+    info!("db: listing roles");
+    let db = state.db.lock().await;
+    let wf = state.workflows.read().unwrap();
+    Ok(Json(query_roles(&db, &wf)?))
+}
+
+async fn get_role(
+    State(state): State<AppState>,
+    Path(role_id): Path<String>,
+) -> Result<Json<RoleRecord>, ApiError> {
+    info!(role_id = %role_id, "db: fetching role");
+    let db = state.db.lock().await;
+    let wf = state.workflows.read().unwrap();
+    let role = fetch_role(&db, &wf, &role_id)?
+        .ok_or_else(|| ApiError::not_found("role not found"))?;
+    Ok(Json(role))
+}
+
+async fn create_role(
+    State(state): State<AppState>,
+    Json(request): Json<CreateRoleRequest>,
+) -> Result<Json<RoleRecord>, ApiError> {
+    info!(name = %request.name, "db: creating role");
+    if request.name.trim().is_empty() {
+        return Err(ApiError::bad_request("name is required"));
+    }
+
+    let role_id = ExternalId::new("role").to_string();
+    let now = now_ms();
+    let skills_json = serde_json::to_string(&request.skills.unwrap_or_default())
+        .unwrap_or_else(|_| "[]".to_string());
+    let prompt_files_json = serde_json::to_string(&request.prompt_files.unwrap_or_default())
+        .unwrap_or_else(|_| "[]".to_string());
+
+    let db = state.db.lock().await;
+    db.execute(
+        "INSERT INTO roles (role_id, name, description, prompt_files, skills, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            role_id,
+            request.name,
+            request.description.as_deref().unwrap_or(""),
+            prompt_files_json,
+            skills_json,
+            now as i64,
+        ],
+    )?;
+
+    let wf = state.workflows.read().unwrap();
+    let role = fetch_role(&db, &wf, &role_id)?
+        .ok_or_else(|| ApiError::internal("failed to reload role after creation"))?;
+    emit_console_event(&state.console_tx, ConsoleEvent::RoleCreated { role: role.clone() });
+    Ok(Json(role))
+}
+
+async fn update_role(
+    State(state): State<AppState>,
+    Path(role_id): Path<String>,
+    Json(request): Json<UpdateRoleRequest>,
+) -> Result<Json<RoleRecord>, ApiError> {
+    info!(role_id = %role_id, "db: updating role");
+    let db = state.db.lock().await;
+    let wf = state.workflows.read().unwrap();
+
+    let existing = fetch_role(&db, &wf, &role_id)?
+        .ok_or_else(|| ApiError::not_found("role not found"))?;
+
+    let name = request.name.unwrap_or(existing.name);
+    let description = request.description.unwrap_or(existing.description);
+    let prompt_files = request.prompt_files.unwrap_or(existing.prompt_files);
+    let skills = request.skills.unwrap_or(existing.skills);
+    let skills_json = serde_json::to_string(&skills).unwrap_or_else(|_| "[]".to_string());
+    let prompt_files_json =
+        serde_json::to_string(&prompt_files).unwrap_or_else(|_| "[]".to_string());
+
+    db.execute(
+        "UPDATE roles SET name = ?2, description = ?3, prompt_files = ?4, skills = ?5 WHERE role_id = ?1",
+        params![role_id, name, description, prompt_files_json, skills_json],
+    )?;
+
+    let role = fetch_role(&db, &wf, &role_id)?
+        .ok_or_else(|| ApiError::internal("failed to reload role after update"))?;
+    emit_console_event(&state.console_tx, ConsoleEvent::RoleUpdated { role: role.clone() });
+    Ok(Json(role))
+}
+
+async fn delete_role(
+    State(state): State<AppState>,
+    Path(role_id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    info!(role_id = %role_id, "db: deleting role");
+    let db = state.db.lock().await;
+    let wf = state.workflows.read().unwrap();
+    let _existing = fetch_role(&db, &wf, &role_id)?
+        .ok_or_else(|| ApiError::not_found("role not found"))?;
+
+    db.execute("DELETE FROM roles WHERE role_id = ?1", params![role_id])?;
+    emit_console_event(&state.console_tx, ConsoleEvent::RoleDeleted { role_id });
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+// ---------------------------------------------------------------------------
+// Prompt-file browsing endpoints
+// ---------------------------------------------------------------------------
+
+async fn list_prompt_files(State(state): State<AppState>) -> Result<Json<Vec<String>>, ApiError> {
+    let wf = state.workflows.read().unwrap();
+    let base = &wf.prompts_path;
+    info!(base = %base.display(), exists = base.exists(), is_dir = base.is_dir(), "listing prompt files");
+    let mut files = Vec::new();
+    collect_md_files(base, base, &mut files);
+    info!(count = files.len(), "prompt files found: {:?}", files);
+    files.sort();
+    Ok(Json(files))
+}
+
+fn collect_md_files(base: &StdPath, dir: &StdPath, result: &mut Vec<String>) {
+    info!(dir = %dir.display(), exists = dir.exists(), "scanning directory");
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) => {
+            info!(dir = %dir.display(), err = %e, "failed to read directory");
+            return;
+        }
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_dir = path.is_dir();
+        let ext = path.extension().and_then(|e| e.to_str()).map(|s| s.to_string());
+        info!(path = %path.display(), is_dir, ext = ?ext, "found entry");
+        if is_dir {
+            collect_md_files(base, &path, result);
+        } else if ext.as_deref() == Some("md") {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if matches!(name, "README.md" | "AGENTS.md" | "CLAUDE.md") {
+                info!(name, "skipping excluded file");
+                continue;
+            }
+            if let Ok(rel) = path.strip_prefix(base) {
+                info!(rel = %rel.display(), "adding prompt file");
+                result.push(rel.to_string_lossy().to_string());
+            }
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct PromptFileQuery {
+    path: String,
+}
+
+#[derive(Debug, Serialize)]
+struct PromptFilePreview {
+    path: String,
+    content: String,
+}
+
+async fn preview_prompt_file(
+    State(state): State<AppState>,
+    Query(query): Query<PromptFileQuery>,
+) -> Result<Json<PromptFilePreview>, ApiError> {
+    info!(path = %query.path, "previewing prompt file");
+    let wf = state.workflows.read().unwrap();
+    let content = wf.load_prompt_file(&query.path)?;
+    Ok(Json(PromptFilePreview { path: query.path, content }))
+}
+
+// ---------------------------------------------------------------------------
+// Settings endpoints
+// ---------------------------------------------------------------------------
+
+fn seed_settings(conn: &Connection, prompts_path: &StdPath) -> Result<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO settings (key, value) VALUES ('prompts_path', ?1)",
+        params![prompts_path.display().to_string()],
+    )?;
+    Ok(())
+}
+
+async fn get_settings(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+    let db = state.db.lock().await;
+    let mut stmt = db.prepare("SELECT key, value FROM settings")?;
+    let rows = stmt.query_map([], |row| {
+        let key: String = row.get(0)?;
+        let value: String = row.get(1)?;
+        Ok((key, value))
+    })?;
+    let mut map = serde_json::Map::new();
+    for row in rows.flatten() {
+        map.insert(row.0, serde_json::Value::String(row.1));
+    }
+    Ok(Json(serde_json::Value::Object(map)))
+}
+
+async fn patch_settings(
+    State(state): State<AppState>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let obj = body.as_object().ok_or_else(|| ApiError::bad_request("expected JSON object"))?;
+
+    {
+        let db = state.db.lock().await;
+        for (key, value) in obj {
+            let val_str = match value {
+                serde_json::Value::String(s) => s.clone(),
+                other => other.to_string(),
+            };
+            db.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = ?2",
+                params![key, val_str],
+            )?;
+        }
+    }
+
+    // If prompts_path changed, reload WorkflowRegistry
+    if let Some(serde_json::Value::String(new_path)) = obj.get("prompts_path") {
+        let path = PathBuf::from(new_path);
+        let new_registry = WorkflowRegistry::load(&path);
+        info!(count = new_registry.manifests.len(), path = %path.display(), "reloaded workflow registry after settings change");
+        let mut wf = state.workflows.write().unwrap();
+        *wf = new_registry;
+    }
+
+    get_settings(State(state)).await
+}
+
+// ---------------------------------------------------------------------------
+// Repo languages (from disk via git ls-files)
+// ---------------------------------------------------------------------------
+
+fn ext_to_language(ext: &str) -> Option<&'static str> {
+    match ext {
+        "rs" => Some("Rust"),
+        "ts" | "tsx" => Some("TypeScript"),
+        "js" | "jsx" | "mjs" | "cjs" => Some("JavaScript"),
+        "astro" => Some("Astro"),
+        "toml" => Some("TOML"),
+        "yaml" | "yml" => Some("YAML"),
+        "json" => Some("JSON"),
+        "css" => Some("CSS"),
+        "scss" | "sass" => Some("SCSS"),
+        "html" | "htm" => Some("HTML"),
+        "md" | "markdown" => Some("Markdown"),
+        "py" => Some("Python"),
+        "go" => Some("Go"),
+        "java" => Some("Java"),
+        "rb" => Some("Ruby"),
+        "sh" | "bash" | "zsh" | "fish" => Some("Shell"),
+        "sql" => Some("SQL"),
+        "graphql" | "gql" => Some("GraphQL"),
+        "xml" => Some("XML"),
+        "svg" => Some("SVG"),
+        "lock" => Some("Lock file"),
+        "c" => Some("C"),
+        "cpp" | "cc" | "cxx" => Some("C++"),
+        "h" | "hpp" => Some("C/C++ Header"),
+        "swift" => Some("Swift"),
+        "kt" | "kts" => Some("Kotlin"),
+        "lua" => Some("Lua"),
+        "zig" => Some("Zig"),
+        "nix" => Some("Nix"),
+        _ => None,
+    }
+}
+
+fn detect_languages(local_path: &str) -> HashMap<String, u64> {
+    let output = match std::process::Command::new("git")
+        .args(["ls-files", "-z"])
+        .current_dir(local_path)
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return HashMap::new(),
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut lang_bytes: HashMap<String, u64> = HashMap::new();
+
+    for file in stdout.split('\0').filter(|f| !f.is_empty()) {
+        let path = StdPath::new(local_path).join(file);
+        let size = match fs::metadata(&path) {
+            Ok(m) => m.len(),
+            Err(_) => continue,
+        };
+        if let Some(ext) = StdPath::new(file).extension().and_then(|e| e.to_str())
+            && let Some(lang) = ext_to_language(ext)
+        {
+            *lang_bytes.entry(lang.to_string()).or_default() += size;
+        }
+    }
+
+    lang_bytes
+}
+
+async fn get_repo_languages(
+    State(state): State<AppState>,
+    Path(repo_id): Path<String>,
+) -> Result<Json<HashMap<String, u64>>, ApiError> {
+    info!(repo_id = %repo_id, "detecting repo languages");
+    let local_path = {
+        let db = state.db.lock().await;
+        let repo = fetch_repo(&db, &repo_id)?
+            .ok_or_else(|| ApiError::not_found("repo not found"))?;
+        repo.local_path
+    };
+
+    let languages = tokio::task::spawn_blocking(move || detect_languages(&local_path))
+        .await
+        .map_err(|e| ApiError::internal(format!("language detection failed: {e}")))?;
+
+    Ok(Json(languages))
+}
+
+// ---------------------------------------------------------------------------
+// Skills discovery
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+struct SkillRecord {
+    name: String,
+    path: String,
+    description: String,
+}
+
+fn discover_skills(prompts_path: &StdPath) -> Vec<SkillRecord> {
+    let mut skills = Vec::new();
+
+    // Scan common Claude skill locations
+    let home = dirs::home_dir().unwrap_or_default();
+    let scan_dirs = [
+        home.join(".claude/commands"),
+        home.join(".claude/skills"),
+        prompts_path.join("skills"),
+    ];
+
+    for dir in &scan_dirs {
+        if !dir.is_dir() {
+            continue;
+        }
+        scan_skill_dir(dir, &mut skills);
+    }
+
+    skills
+}
+
+fn scan_skill_dir(dir: &StdPath, skills: &mut Vec<SkillRecord>) {
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            // Check for SKILL.md inside subdirectory
+            let skill_md = path.join("SKILL.md");
+            if skill_md.exists() {
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown").to_string();
+                let description = fs::read_to_string(&skill_md)
+                    .ok()
+                    .and_then(|content| content.lines().next().map(|l| l.trim_start_matches('#').trim().to_string()))
+                    .unwrap_or_default();
+                skills.push(SkillRecord {
+                    name,
+                    path: skill_md.display().to_string(),
+                    description,
+                });
+            }
+            scan_skill_dir(&path, skills);
+        } else if path.file_name().and_then(|n| n.to_str()) == Some("SKILL.md") {
+            let name = path.parent()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+            let description = fs::read_to_string(&path)
+                .ok()
+                .and_then(|content| content.lines().next().map(|l| l.trim_start_matches('#').trim().to_string()))
+                .unwrap_or_default();
+            skills.push(SkillRecord {
+                name,
+                path: path.display().to_string(),
+                description,
+            });
+        }
+    }
+}
+
+async fn list_skills(State(state): State<AppState>) -> Result<Json<Vec<SkillRecord>>, ApiError> {
+    let prompts_path = {
+        let wf = state.workflows.read().unwrap();
+        wf.prompts_path.clone()
+    };
+
+    let skills = tokio::task::spawn_blocking(move || discover_skills(&prompts_path))
+        .await
+        .map_err(|e| ApiError::internal(format!("skill discovery failed: {e}")))?;
+
+    Ok(Json(skills))
+}
+
+fn insert_workflow_steps(
+    conn: &Connection,
+    workflow_id: &str,
+    steps: &[CreateWorkflowStepInput],
+) -> Result<(), ApiError> {
+    for (i, step) in steps.iter().enumerate() {
+        let depends_on_json = serde_json::to_string(&step.depends_on.clone().unwrap_or_default())
+            .unwrap_or_else(|_| "[]".to_string());
+
+        conn.execute(
+            "INSERT INTO workflow_steps (workflow_id, position, step_id, role, prompt_file, depends_on, condition, max_retries) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                workflow_id,
+                i as i64,
+                step.step_id,
+                step.role,
+                step.prompt_file.as_deref().unwrap_or(""),
+                depends_on_json,
+                step.condition,
+                step.max_retries.unwrap_or(0) as i64,
+            ],
+        )?;
+    }
+    Ok(())
 }
 
 async fn create_colony(
     State(state): State<AppState>,
     Json(request): Json<CreateColonyRequest>,
 ) -> Result<Json<ColonyRecord>, ApiError> {
+    info!(name = %request.name, "db: creating colony");
     if request.name.trim().is_empty() {
         return Err(ApiError::bad_request("name is required"));
     }
@@ -1220,6 +1913,7 @@ async fn create_colony(
 }
 
 async fn list_colonies(State(state): State<AppState>) -> Result<Json<Vec<ColonyRecord>>, ApiError> {
+    info!("db: listing colonies");
     let db = state.db.lock().await;
     Ok(Json(query_colonies(&db)?))
 }
@@ -1228,6 +1922,7 @@ async fn register_crab(
     State(state): State<AppState>,
     Json(request): Json<RegisterCrabRequest>,
 ) -> Result<Json<CrabRecord>, ApiError> {
+    info!(crab_id = %request.crab_id, name = %request.name, role = %request.role, "db: registering crab");
     if request.crab_id.trim().is_empty()
         || request.colony_id.trim().is_empty()
         || request.name.trim().is_empty()
@@ -1306,6 +2001,7 @@ async fn register_crab(
 }
 
 async fn list_crabs(State(state): State<AppState>) -> Result<Json<Vec<CrabRecord>>, ApiError> {
+    info!("db: listing crabs");
     let db = state.db.lock().await;
     Ok(Json(query_crabs(&db)?))
 }
@@ -1314,6 +2010,7 @@ async fn create_mission(
     State(state): State<AppState>,
     Json(request): Json<CreateMissionRequest>,
 ) -> Result<Json<MissionRecord>, ApiError> {
+    info!(colony_id = %request.colony_id, workflow = ?request.workflow, "db: creating mission");
     if request.prompt.trim().is_empty() {
         return Err(ApiError::bad_request("prompt is required"));
     }
@@ -1323,6 +2020,7 @@ async fn create_mission(
 
     let (row, assignments) = {
         let mut db = state.db.lock().await;
+        let wf = state.workflows.read().unwrap();
         let tx = db.transaction().map_err(ApiError::from)?;
 
         let colony_exists: i64 = tx.query_row(
@@ -1371,8 +2069,7 @@ async fn create_mission(
 
         // If a workflow is specified, expand it into tasks
         if let Some(ref workflow_name) = request.workflow {
-            let manifest = state
-                .workflows
+            let manifest = wf
                 .get(workflow_name)
                 .ok_or_else(|| {
                     ApiError::not_found(format!("workflow '{workflow_name}' not found"))
@@ -1391,7 +2088,7 @@ async fn create_mission(
 
             expand_workflow_into_tasks(
                 &tx,
-                &state.workflows,
+                &wf,
                 &manifest,
                 &row.mission_id,
                 &request.prompt,
@@ -1498,6 +2195,7 @@ fn expand_workflow_into_tasks(
 async fn list_missions(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<MissionRecord>>, ApiError> {
+    info!("db: listing missions");
     let db = state.db.lock().await;
     let missions = query_missions(&db)?;
     Ok(Json(missions))
@@ -1507,6 +2205,7 @@ async fn get_mission(
     State(state): State<AppState>,
     Path(mission_id): Path<String>,
 ) -> Result<Json<MissionRecord>, ApiError> {
+    info!(mission_id = %mission_id, "db: fetching mission");
     let db = state.db.lock().await;
     let mission =
         fetch_mission(&db, &mission_id)?.ok_or_else(|| ApiError::not_found("mission not found"))?;
@@ -1517,6 +2216,7 @@ async fn create_task(
     State(state): State<AppState>,
     Json(request): Json<CreateTaskRequest>,
 ) -> Result<Json<TaskRecord>, ApiError> {
+    info!(mission_id = %request.mission_id, title = %request.title, "db: creating task");
     if request.title.trim().is_empty() {
         return Err(ApiError::bad_request("title is required"));
     }
@@ -1627,6 +2327,7 @@ async fn create_task(
 }
 
 async fn list_tasks(State(state): State<AppState>) -> Result<Json<Vec<TaskRecord>>, ApiError> {
+    info!("db: listing tasks");
     let db = state.db.lock().await;
     Ok(Json(query_tasks(&db)?))
 }
@@ -1635,6 +2336,7 @@ async fn start_run(
     State(state): State<AppState>,
     Json(request): Json<StartRunRequest>,
 ) -> Result<Json<RunRecord>, ApiError> {
+    info!(task_id = %request.task_id, crab_id = %request.crab_id, "db: starting run");
     if request.burrow_path.trim().is_empty() {
         return Err(ApiError::bad_request("burrow_path is required"));
     }
@@ -1710,6 +2412,7 @@ async fn update_run(
     State(state): State<AppState>,
     Json(request): Json<UpdateRunRequest>,
 ) -> Result<Json<RunRecord>, ApiError> {
+    info!(run_id = %request.run_id, status = ?request.status, "db: updating run");
     let mut db = state.db.lock().await;
     let tx = db.transaction().map_err(ApiError::from)?;
 
@@ -1798,6 +2501,7 @@ async fn complete_run(
     State(state): State<AppState>,
     Json(request): Json<CompleteRunRequest>,
 ) -> Result<Json<RunRecord>, ApiError> {
+    info!(run_id = %request.run_id, status = ?request.status, "db: completing run");
     if !matches!(request.status, RunStatus::Completed | RunStatus::Failed) {
         return Err(ApiError::bad_request(
             "status must be completed or failed for /v1/runs/complete",
@@ -1806,6 +2510,7 @@ async fn complete_run(
 
     let (run, assignments) = {
         let mut db = state.db.lock().await;
+        let wf = state.workflows.read().unwrap();
         let tx = db.transaction().map_err(ApiError::from)?;
 
         let existing = fetch_run(&tx, &request.run_id)?
@@ -1869,7 +2574,7 @@ async fn complete_run(
             &existing.mission_id,
             &existing.task_id,
             &state.console_tx,
-            &state.workflows,
+            &wf,
         )?;
 
         let assignments = run_scheduler_tick_db(&tx, &state.console_tx)?;
@@ -2211,6 +2916,7 @@ async fn create_repo(
     State(state): State<AppState>,
     Json(request): Json<CreateRepoRequest>,
 ) -> Result<Json<RepoRecord>, ApiError> {
+    info!(owner = %request.owner, name = %request.name, "db: creating repo");
     if request.owner.trim().is_empty() || request.name.trim().is_empty() {
         return Err(ApiError::bad_request("owner and name are required"));
     }
@@ -2220,7 +2926,7 @@ async fn create_repo(
 
     let repo_id = ExternalId::new("repo").to_string();
     let default_branch = request.default_branch.unwrap_or_else(|| "main".to_string());
-    let domain = request.domain.unwrap_or_else(|| "any".to_string());
+    let language = request.language.unwrap_or_default();
     let created_at_ms = now_ms();
     let full_name = format!("{}/{}", request.owner, request.name);
 
@@ -2230,15 +2936,15 @@ async fn create_repo(
         name: request.name,
         full_name,
         default_branch,
-        domain,
+        language,
         local_path: request.local_path,
         created_at_ms,
     };
 
     let db = state.db.lock().await;
     db.execute(
-        "INSERT INTO repos (repo_id, owner, name, default_branch, domain, local_path, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![row.repo_id, row.owner, row.name, row.default_branch, row.domain, row.local_path, row.created_at_ms as i64],
+        "INSERT INTO repos (repo_id, owner, name, default_branch, language, local_path, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![row.repo_id, row.owner, row.name, row.default_branch, row.language, row.local_path, row.created_at_ms as i64],
     )?;
 
     emit_console_event(&state.console_tx, ConsoleEvent::RepoCreated { repo: row.clone() });
@@ -2246,6 +2952,7 @@ async fn create_repo(
 }
 
 async fn list_repos(State(state): State<AppState>) -> Result<Json<Vec<RepoRecord>>, ApiError> {
+    info!("db: listing repos");
     let db = state.db.lock().await;
     Ok(Json(query_repos(&db)?))
 }
@@ -2254,6 +2961,7 @@ async fn get_repo(
     State(state): State<AppState>,
     Path(repo_id): Path<String>,
 ) -> Result<Json<RepoRecord>, ApiError> {
+    info!(repo_id = %repo_id, "db: fetching repo");
     let db = state.db.lock().await;
     let repo = fetch_repo(&db, &repo_id)?.ok_or_else(|| ApiError::not_found("repo not found"))?;
     Ok(Json(repo))
@@ -2264,18 +2972,18 @@ async fn update_repo(
     Path(repo_id): Path<String>,
     Json(request): Json<UpdateRepoRequest>,
 ) -> Result<Json<RepoRecord>, ApiError> {
+    info!(repo_id = %repo_id, "db: updating repo");
     let db = state.db.lock().await;
 
     let existing =
         fetch_repo(&db, &repo_id)?.ok_or_else(|| ApiError::not_found("repo not found"))?;
 
     let default_branch = request.default_branch.unwrap_or(existing.default_branch);
-    let domain = request.domain.unwrap_or(existing.domain);
     let local_path = request.local_path.unwrap_or(existing.local_path);
 
     db.execute(
-        "UPDATE repos SET default_branch = ?2, domain = ?3, local_path = ?4 WHERE repo_id = ?1",
-        params![repo_id, default_branch, domain, local_path],
+        "UPDATE repos SET default_branch = ?2, local_path = ?3 WHERE repo_id = ?1",
+        params![repo_id, default_branch, local_path],
     )?;
 
     let updated = RepoRecord {
@@ -2284,7 +2992,7 @@ async fn update_repo(
         name: existing.name,
         full_name: existing.full_name,
         default_branch,
-        domain,
+        language: existing.language,
         local_path,
         created_at_ms: existing.created_at_ms,
     };
@@ -2297,6 +3005,7 @@ async fn delete_repo(
     State(state): State<AppState>,
     Path(repo_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    info!(repo_id = %repo_id, "db: deleting repo");
     let db = state.db.lock().await;
 
     let _existing =
@@ -2312,6 +3021,7 @@ async fn list_repo_issues(
     State(state): State<AppState>,
     Path(repo_id): Path<String>,
 ) -> Result<Json<Vec<GitHubIssueRecord>>, ApiError> {
+    info!(repo_id = %repo_id, "db+github: listing repo issues");
     let repo = {
         let db = state.db.lock().await;
         fetch_repo(&db, &repo_id)?.ok_or_else(|| ApiError::not_found("repo not found"))?
@@ -2344,6 +3054,7 @@ async fn update_colony(
     Path(colony_id): Path<String>,
     Json(request): Json<UpdateColonyRequest>,
 ) -> Result<Json<ColonyRecord>, ApiError> {
+    info!(colony_id = %colony_id, "db: updating colony");
     let db = state.db.lock().await;
 
     // Verify colony exists
@@ -2378,6 +3089,7 @@ async fn list_colony_issues(
     State(state): State<AppState>,
     Path(colony_id): Path<String>,
 ) -> Result<Json<Vec<GitHubIssueRecord>>, ApiError> {
+    info!(colony_id = %colony_id, "db+github: listing colony issues");
     let (repo, queued_issues) = {
         let db = state.db.lock().await;
 
@@ -2426,6 +3138,7 @@ async fn queue_issue(
     Path(colony_id): Path<String>,
     Json(request): Json<QueueIssueRequest>,
 ) -> Result<Json<MissionRecord>, ApiError> {
+    info!(colony_id = %colony_id, issue_number = request.issue_number, "db+github: queuing issue");
     // Phase 1: Validate colony and get repo (brief lock)
     let repo = {
         let db = state.db.lock().await;
@@ -2445,6 +3158,7 @@ async fn queue_issue(
     // Phase 3: All DB work in a single transaction
     let (row, assignments) = {
         let mut db = state.db.lock().await;
+        let wf = state.workflows.read().unwrap();
         let tx = db.transaction().map_err(ApiError::from)?;
 
         // Check if issue is already queued
@@ -2505,7 +3219,7 @@ async fn queue_issue(
             ConsoleEvent::MissionCreated { mission: row.clone() },
         );
 
-        activate_next_mission_in_colony(&tx, &colony_id, &state.workflows, &state.console_tx)?;
+        activate_next_mission_in_colony(&tx, &colony_id, &wf, &state.console_tx)?;
 
         let assignments = run_scheduler_tick_db(&tx, &state.console_tx)?;
         tx.commit().map_err(ApiError::from)?;
@@ -2520,6 +3234,7 @@ async fn list_queue(
     State(state): State<AppState>,
     Path(colony_id): Path<String>,
 ) -> Result<Json<Vec<MissionRecord>>, ApiError> {
+    info!(colony_id = %colony_id, "db: listing queue");
     let db = state.db.lock().await;
 
     let mut stmt = db.prepare(
@@ -2547,6 +3262,7 @@ async fn remove_from_queue(
     State(state): State<AppState>,
     Path((colony_id, mission_id)): Path<(String, String)>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    info!(colony_id = %colony_id, mission_id = %mission_id, "db: removing from queue");
     let mut db = state.db.lock().await;
     let tx = db.transaction().map_err(ApiError::from)?;
 
@@ -2787,6 +3503,7 @@ fn run_scheduler_tick_db(
 }
 
 async fn get_status(State(state): State<AppState>) -> Result<Json<StatusSnapshot>, ApiError> {
+    info!("db: building status snapshot");
     let db = state.db.lock().await;
     Ok(Json(build_status_snapshot(&db)?))
 }
@@ -2845,7 +3562,7 @@ fn build_status_snapshot(conn: &Connection) -> Result<StatusSnapshot, ApiError> 
 
 fn query_repos(conn: &Connection) -> Result<Vec<RepoRecord>, ApiError> {
     let mut stmt = conn.prepare(
-        "SELECT repo_id, owner, name, default_branch, domain, local_path, created_at_ms FROM repos ORDER BY created_at_ms DESC",
+        "SELECT repo_id, owner, name, default_branch, language, local_path, created_at_ms FROM repos ORDER BY created_at_ms DESC",
     )?;
     let rows = stmt.query_map([], |row| {
         let owner: String = row.get(1)?;
@@ -2857,7 +3574,7 @@ fn query_repos(conn: &Connection) -> Result<Vec<RepoRecord>, ApiError> {
             name,
             full_name,
             default_branch: row.get(3)?,
-            domain: row.get(4)?,
+            language: row.get(4)?,
             local_path: row.get(5)?,
             created_at_ms: row.get::<_, i64>(6)? as u64,
         })
@@ -2867,7 +3584,7 @@ fn query_repos(conn: &Connection) -> Result<Vec<RepoRecord>, ApiError> {
 
 fn fetch_repo(conn: &Connection, repo_id: &str) -> Result<Option<RepoRecord>, ApiError> {
     let mut stmt = conn.prepare(
-        "SELECT repo_id, owner, name, default_branch, domain, local_path, created_at_ms FROM repos WHERE repo_id = ?1",
+        "SELECT repo_id, owner, name, default_branch, language, local_path, created_at_ms FROM repos WHERE repo_id = ?1",
     )?;
     let mut rows = stmt.query(params![repo_id])?;
     if let Some(row) = rows.next()? {
@@ -2880,7 +3597,7 @@ fn fetch_repo(conn: &Connection, repo_id: &str) -> Result<Option<RepoRecord>, Ap
             name,
             full_name,
             default_branch: row.get(3)?,
-            domain: row.get(4)?,
+            language: row.get(4)?,
             local_path: row.get(5)?,
             created_at_ms: row.get::<_, i64>(6)? as u64,
         }));
@@ -3107,6 +3824,314 @@ fn map_run_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunRecord> {
 }
 
 // ---------------------------------------------------------------------------
+// Workflow query helpers
+// ---------------------------------------------------------------------------
+
+fn query_workflows(conn: &Connection) -> Result<Vec<WorkflowRecord>, ApiError> {
+    let mut wf_stmt = conn.prepare(
+        "SELECT workflow_id, name, description, stack, version, created_at_ms FROM workflows ORDER BY name",
+    )?;
+    let workflows: Vec<(String, String, String, String, String, i64)> = wf_stmt
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?))
+        })?
+        .filter_map(Result::ok)
+        .collect();
+
+    let mut result = Vec::with_capacity(workflows.len());
+    for (wf_id, name, description, stack, version, created_at_ms) in workflows {
+        let steps = query_workflow_steps(conn, &wf_id)?;
+        result.push(WorkflowRecord {
+            workflow_id: wf_id,
+            name,
+            description,
+            stack,
+            version,
+            created_at_ms: created_at_ms as u64,
+            steps,
+        });
+    }
+    Ok(result)
+}
+
+fn fetch_workflow(
+    conn: &Connection,
+    workflow_id: &str,
+) -> Result<Option<WorkflowRecord>, ApiError> {
+    let mut stmt = conn.prepare(
+        "SELECT workflow_id, name, description, stack, version, created_at_ms FROM workflows WHERE workflow_id = ?1",
+    )?;
+    let mut rows = stmt.query(params![workflow_id])?;
+    if let Some(row) = rows.next()? {
+        let wf_id: String = row.get(0)?;
+        let steps = query_workflow_steps(conn, &wf_id)?;
+        return Ok(Some(WorkflowRecord {
+            workflow_id: wf_id,
+            name: row.get(1)?,
+            description: row.get(2)?,
+            stack: row.get(3)?,
+            version: row.get(4)?,
+            created_at_ms: row.get::<_, i64>(5)? as u64,
+            steps,
+        }));
+    }
+    Ok(None)
+}
+
+fn query_workflow_steps(
+    conn: &Connection,
+    workflow_id: &str,
+) -> Result<Vec<WorkflowStepRecord>, ApiError> {
+    let mut stmt = conn.prepare(
+        "SELECT step_id, role, prompt_file, depends_on, condition, max_retries, position FROM workflow_steps WHERE workflow_id = ?1 ORDER BY position",
+    )?;
+    let rows = stmt.query_map(params![workflow_id], |row| {
+        let depends_on_raw: String = row.get(3)?;
+        let depends_on: Vec<String> = serde_json::from_str(&depends_on_raw).unwrap_or_default();
+        Ok(WorkflowStepRecord {
+            step_id: row.get(0)?,
+            role: row.get(1)?,
+            prompt_file: row.get(2)?,
+            depends_on,
+            condition: row.get(4)?,
+            max_retries: row.get::<_, i64>(5)? as u32,
+            position: row.get(6)?,
+        })
+    })?;
+    Ok(rows.filter_map(Result::ok).collect())
+}
+
+type SeedStep = (&'static str, &'static str, &'static str, &'static str, Option<&'static str>, i64);
+
+fn seed_default_workflows(conn: &Connection) -> Result<()> {
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM workflows", [], |row| row.get(0))?;
+    if count > 0 {
+        return Ok(());
+    }
+
+    info!("seeding default workflows");
+    let now = now_ms() as i64;
+
+    let seed_steps = |conn: &Connection,
+                      wf_id: &str,
+                      steps: &[SeedStep]|
+     -> Result<(), rusqlite::Error> {
+        for (i, (step_id, role, deps, prompt_file, condition, max_retries)) in
+            steps.iter().enumerate()
+        {
+            conn.execute(
+                "INSERT INTO workflow_steps (workflow_id, position, step_id, role, prompt_file, depends_on, condition, max_retries) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![wf_id, i as i64, step_id, role, prompt_file, deps, condition, max_retries],
+            )?;
+        }
+        Ok(())
+    };
+
+    // Backend Rust workflow
+    let backend_id = ExternalId::new("wf").to_string();
+    conn.execute(
+        "INSERT INTO workflows (workflow_id, name, description, stack, version, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![backend_id, "Feature Plan & Implementation - Backend Rust", "End-to-end workflow for planning, implementing, testing, and reviewing backend Rust features", "backend", "1.0.0", now],
+    )?;
+    seed_steps(
+        conn,
+        &backend_id,
+        &[
+            ("plan", "planner", "[]", "", None, 0),
+            ("implement", "developer", r#"["plan"]"#, "", None, 0),
+            ("test", "tester", r#"["implement"]"#, "", None, 0),
+            ("review", "reviewer", r#"["test"]"#, "", None, 0),
+            ("fix", "developer", r#"["review"]"#, "", Some("review.result == 'FAIL'"), 3),
+            ("pr", "developer", r#"["review"]"#, "", Some("review.result == 'PASS'"), 0),
+        ],
+    )?;
+
+    // Frontend Astro workflow
+    let frontend_id = ExternalId::new("wf").to_string();
+    conn.execute(
+        "INSERT INTO workflows (workflow_id, name, description, stack, version, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![frontend_id, "Feature Plan & Implementation - Frontend Astro", "End-to-end workflow for planning, implementing, testing, and reviewing frontend Astro features", "web-dev", "1.0.0", now],
+    )?;
+    seed_steps(
+        conn,
+        &frontend_id,
+        &[
+            ("plan", "planner", "[]", "", None, 0),
+            ("implement", "developer", r#"["plan"]"#, "", None, 0),
+            ("test", "tester", r#"["implement"]"#, "", None, 0),
+            ("review", "reviewer", r#"["test"]"#, "", None, 0),
+            ("fix", "developer", r#"["review"]"#, "", Some("review.result == 'FAIL'"), 3),
+            ("pr", "developer", r#"["review"]"#, "", Some("review.result == 'PASS'"), 0),
+        ],
+    )?;
+
+    info!(count = 2, "default workflows seeded");
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Role query helpers
+// ---------------------------------------------------------------------------
+
+fn assemble_system_prompt(registry: &WorkflowRegistry, prompt_files: &[String]) -> String {
+    prompt_files
+        .iter()
+        .filter_map(|pf| registry.load_prompt_file(pf).ok())
+        .collect::<Vec<_>>()
+        .join("\n\n---\n\n")
+}
+
+fn query_roles(
+    conn: &Connection,
+    registry: &WorkflowRegistry,
+) -> Result<Vec<RoleRecord>, ApiError> {
+    let mut stmt = conn.prepare(
+        "SELECT role_id, name, description, prompt_files, skills, created_at_ms FROM roles ORDER BY name",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        let prompt_files_raw: String = row.get(3)?;
+        let prompt_files: Vec<String> = serde_json::from_str(&prompt_files_raw).unwrap_or_default();
+        let skills_raw: String = row.get(4)?;
+        let skills: Vec<String> = serde_json::from_str(&skills_raw).unwrap_or_default();
+        Ok((
+            row.get(0)?,
+            row.get(1)?,
+            row.get(2)?,
+            prompt_files,
+            skills,
+            row.get::<_, i64>(5)? as u64,
+        ))
+    })?;
+    let mut result = Vec::new();
+    for row in rows.flatten() {
+        let (role_id, name, description, prompt_files, skills, created_at_ms) = row;
+        let system_prompt = assemble_system_prompt(registry, &prompt_files);
+        result.push(RoleRecord {
+            role_id,
+            name,
+            description,
+            prompt_files,
+            system_prompt,
+            skills,
+            created_at_ms,
+        });
+    }
+    Ok(result)
+}
+
+fn fetch_role(
+    conn: &Connection,
+    registry: &WorkflowRegistry,
+    role_id: &str,
+) -> Result<Option<RoleRecord>, ApiError> {
+    let mut stmt = conn.prepare(
+        "SELECT role_id, name, description, prompt_files, skills, created_at_ms FROM roles WHERE role_id = ?1",
+    )?;
+    let mut rows = stmt.query(params![role_id])?;
+    if let Some(row) = rows.next()? {
+        let prompt_files_raw: String = row.get(3)?;
+        let prompt_files: Vec<String> = serde_json::from_str(&prompt_files_raw).unwrap_or_default();
+        let skills_raw: String = row.get(4)?;
+        let skills: Vec<String> = serde_json::from_str(&skills_raw).unwrap_or_default();
+        let system_prompt = assemble_system_prompt(registry, &prompt_files);
+        return Ok(Some(RoleRecord {
+            role_id: row.get(0)?,
+            name: row.get(1)?,
+            description: row.get(2)?,
+            prompt_files,
+            system_prompt,
+            skills,
+            created_at_ms: row.get::<_, i64>(5)? as u64,
+        }));
+    }
+    Ok(None)
+}
+
+#[allow(dead_code)]
+fn fetch_role_by_name(
+    conn: &Connection,
+    registry: &WorkflowRegistry,
+    name: &str,
+) -> Result<Option<RoleRecord>, ApiError> {
+    let mut stmt = conn.prepare(
+        "SELECT role_id, name, description, prompt_files, skills, created_at_ms FROM roles WHERE name = ?1",
+    )?;
+    let mut rows = stmt.query(params![name])?;
+    if let Some(row) = rows.next()? {
+        let prompt_files_raw: String = row.get(3)?;
+        let prompt_files: Vec<String> = serde_json::from_str(&prompt_files_raw).unwrap_or_default();
+        let skills_raw: String = row.get(4)?;
+        let skills: Vec<String> = serde_json::from_str(&skills_raw).unwrap_or_default();
+        let system_prompt = assemble_system_prompt(registry, &prompt_files);
+        return Ok(Some(RoleRecord {
+            role_id: row.get(0)?,
+            name: row.get(1)?,
+            description: row.get(2)?,
+            prompt_files,
+            system_prompt,
+            skills,
+            created_at_ms: row.get::<_, i64>(5)? as u64,
+        }));
+    }
+    Ok(None)
+}
+
+fn seed_default_roles(conn: &Connection) -> Result<()> {
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM roles", [], |row| row.get(0))?;
+    if count > 0 {
+        return Ok(());
+    }
+
+    info!("seeding default roles");
+    let now = now_ms() as i64;
+
+    // (name, description, prompt_files_json, skills_json)
+    let roles: &[(&str, &str, &str, &str)] = &[
+        (
+            "planner",
+            "Explore codebase, understand architecture, design step-by-step plan. Do NOT implement.",
+            r#"["roles/planner.md"]"#,
+            r#"["codebase-exploration", "architecture", "planning"]"#,
+        ),
+        (
+            "rust-developer",
+            "Implement Rust code following the plan. Idiomatic Rust, proper error handling.",
+            r#"["roles/rust-developer.md"]"#,
+            r#"["git", "coding", "rust", "cargo", "refactoring", "debugging"]"#,
+        ),
+        (
+            "astro-developer",
+            "Implement Astro/TypeScript frontend. Use bun, follow component patterns.",
+            r#"["roles/astro-developer.md"]"#,
+            r#"["git", "coding", "typescript", "astro", "bun", "css"]"#,
+        ),
+        (
+            "tester",
+            "Write and run tests. Verify coverage. Report failures with context.",
+            r#"["roles/tester.md"]"#,
+            r#"["testing", "cargo", "verification"]"#,
+        ),
+        (
+            "reviewer",
+            "Review diff for correctness, style, security. Output structured PASS/FAIL JSON.",
+            r#"["roles/reviewer.md"]"#,
+            r#"["code-review", "standards", "quality"]"#,
+        ),
+    ];
+
+    for (name, description, prompt_files_json, skills_json) in roles {
+        let role_id = ExternalId::new("role").to_string();
+        conn.execute(
+            "INSERT INTO roles (role_id, name, description, prompt_files, skills, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![role_id, name, description, prompt_files_json, skills_json, now],
+        )?;
+    }
+
+    info!(count = roles.len(), "default roles seeded");
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
 
@@ -3242,6 +4267,7 @@ struct MergeWaitPollItem {
 }
 
 async fn poll_merge_wait_tasks(state: &AppState) -> Result<(), ApiError> {
+    info!("db+github: polling merge-wait tasks");
     // Find merge-wait tasks that are queued
     let tasks_to_poll: Vec<MergeWaitPollItem> = {
         let db = state.db.lock().await;
@@ -3283,6 +4309,7 @@ async fn poll_merge_wait_tasks(state: &AppState) -> Result<(), ApiError> {
 
         let assignments = {
             let mut db = state.db.lock().await;
+            let wf = state.workflows.read().unwrap();
             let tx = db.transaction().map_err(ApiError::from)?;
             let now = now_ms();
 
@@ -3307,7 +4334,7 @@ async fn poll_merge_wait_tasks(state: &AppState) -> Result<(), ApiError> {
                     &item.mission_id,
                     &item.task_id,
                     &state.console_tx,
-                    &state.workflows,
+                    &wf,
                 )?;
 
                 let assignments = run_scheduler_tick_db(&tx, &state.console_tx)?;
@@ -3330,7 +4357,7 @@ async fn poll_merge_wait_tasks(state: &AppState) -> Result<(), ApiError> {
                     &item.mission_id,
                     &item.task_id,
                     &state.console_tx,
-                    &state.workflows,
+                    &wf,
                 )?;
 
                 let assignments = run_scheduler_tick_db(&tx, &state.console_tx)?;
@@ -3370,7 +4397,7 @@ mod tests {
             db: Arc::new(Mutex::new(conn)),
             crab_channels: Arc::new(Mutex::new(HashMap::new())),
             console_tx,
-            workflows: Arc::new(workflows),
+            workflows: Arc::new(RwLock::new(workflows)),
             github: GitHubClient { http: reqwest::Client::new(), token: None },
         }
     }

@@ -3,15 +3,20 @@ import Layout from '../layouts/Layout.astro';
 import Sidebar from '../components/Sidebar.astro';
 import ContentHeader from '../components/ContentHeader.astro';
 import AgentList from '../components/AgentList.astro';
-import { fetchRepos } from '../lib/api-client';
+import { fetchRepos, fetchWorkflows, fetchRoles, fetchPromptFiles } from '../lib/api-client';
 import { mockIssues, mockMissions, mockAgents, mockMessages } from '../lib/mock-data';
 
 let repos = [];
-try {
-  repos = await fetchRepos();
-} catch {
-  // Control-plane not available
-}
+try { repos = await fetchRepos(); } catch {}
+
+let workflows = [];
+try { workflows = await fetchWorkflows(); } catch {}
+
+let roles = [];
+try { roles = await fetchRoles(); } catch {}
+
+let promptFiles: string[] = [];
+try { promptFiles = await fetchPromptFiles(); } catch {}
 ---
 
 <Layout title="Agents — Crabitat Console">
@@ -22,6 +27,9 @@ try {
     missionCount={mockMissions.length}
     agentCount={mockAgents.length}
     messageCount={mockMessages.length}
+    workflowCount={workflows.length}
+    promptCount={promptFiles.length}
+    roleCount={roles.length}
   />
 
   <div class="content">

@@ -711,7 +711,12 @@ dialog.modal {
   width: 480px;
   max-width: 90vw;
   max-height: 85vh;
-  overflow: visible;
+  overflow: hidden;
+}
+
+dialog.modal[open] {
+  display: flex;
+  flex-direction: column;
 }
 
 dialog.modal::backdrop {
@@ -721,6 +726,8 @@ dialog.modal::backdrop {
 .modal-content {
   display: flex;
   flex-direction: column;
+  max-height: 85vh;
+  overflow: hidden;
 }
 
 .modal-header {
@@ -753,6 +760,9 @@ dialog.modal::backdrop {
 
 .modal-body {
   padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .modal-footer {
