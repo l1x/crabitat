@@ -1,6 +1,6 @@
 # Example: Two Agents Working on the Same Repo
 
-This walkthrough shows two Claude Code agents (a planner/worker and a reviewer) collaborating through the workflow engine on a single crabitat repo.
+This walkthrough shows two Claude Code agents collaborating through the workflow engine on a single crabitat repo.
 
 ## Prerequisites
 
@@ -47,29 +47,19 @@ curl -s http://localhost:8800/v1/workflows | jq .
 # Should return: ["dev-task"]
 ```
 
-### Role Enforcement
-
-Each colony allows **one crab per named role** (`planner`, `worker`, `reviewer`). The role `any` allows unlimited crabs. If you try to register a second `worker` in the same colony, the API rejects it:
-
-```json
-{"error": "role 'worker' is already taken in this colony by crab 'atlas-id'"}
-```
-
-For this two-agent setup, Atlas registers as `worker` and handles plan, implement, fix, and pr steps. Coral registers as `reviewer` and handles review steps. The scheduler prefers exact role matches, so Coral always gets review tasks even though Atlas (as `worker`) could match via `any` fallback.
-
-## Launch Agent 1: Planner/Worker
+## Launch Agent 1
 
 ### Terminal 3: Open a Claude Code session
 
 Paste this onboarding prompt (replace `$COLONY_ID`):
 
 ```
-You are a Crabitat crab agent. You handle planning and implementation.
+You are a Crabitat crab agent.
 
 Register with the colony, then poll for tasks in a loop.
 
 1. Register:
-   crabitat-crab register --colony-id $COLONY_ID --name "Atlas" --role worker
+   crabitat-crab register --colony-id $COLONY_ID --name "Atlas"
 
 2. Save your crab_id, then poll every 5 seconds:
    crabitat-crab poll --crab-id <YOUR_CRAB_ID>
@@ -81,31 +71,29 @@ Register with the colony, then poll for tasks in a loop.
 Work in the worktree path specified by the task. Never stop polling.
 ```
 
-Atlas registers as role `worker` and will match workflow steps with role `worker` or `any`.
-
-## Launch Agent 2: Reviewer
+## Launch Agent 2
 
 ### Terminal 4: Open another Claude Code session
 
 ```
-You are a Crabitat crab agent. You handle code review.
+You are a Crabitat crab agent.
 
 Register with the colony, then poll for tasks in a loop.
 
 1. Register:
-   crabitat-crab register --colony-id $COLONY_ID --name "Coral" --role reviewer
+   crabitat-crab register --colony-id $COLONY_ID --name "Coral"
 
 2. Save your crab_id, then poll every 5 seconds:
    crabitat-crab poll --crab-id <YOUR_CRAB_ID>
 
-3. When you get a review task, read the diff and context.
-   Complete the run with --result PASS or --result FAIL.
+3. When you get a task, read its prompt field for instructions.
+   Complete the run with --result PASS or --result FAIL for review tasks.
    For detailed instructions see: docs/onboarding-prompt.md
 
 Never stop polling.
 ```
 
-Coral registers as role `reviewer` and will match workflow steps with role `reviewer`.
+Both agents are interchangeable — the scheduler assigns queued tasks to whichever crab is idle first. The `prompt_file` on each workflow step determines what the agent does for that step.
 
 ## Create a Workflow Mission
 
@@ -124,17 +112,17 @@ curl -s -X POST http://localhost:8800/v1/missions \
 Save the `mission_id`. This creates 5 tasks:
 
 ```
-[plan] planner    → Queued
-[implement] worker → Blocked
-[review] reviewer  → Blocked
-[fix] worker       → Blocked (condition: review.result == 'FAIL')
-[pr] any           → Blocked (condition: review.result == 'PASS')
+[plan]       → Queued  (no deps)
+[implement]  → Blocked (depends on plan)
+[review]     → Blocked (depends on implement)
+[fix]        → Blocked (depends on review, condition: review.result == 'FAIL')
+[pr]         → Blocked (depends on review, condition: review.result == 'PASS')
 ```
 
 ### Verify tasks were created
 
 ```bash
-curl -s http://localhost:8800/v1/tasks | jq '.[] | {task_id, title: .title, status, step_id, role}'
+curl -s http://localhost:8800/v1/tasks | jq '.[] | {task_id, title: .title, status, step_id}'
 ```
 
 ## Trigger the Scheduler
@@ -147,21 +135,13 @@ curl -s -X POST http://localhost:8800/v1/scheduler/tick | jq .
 
 ### What happens
 
-1. **plan** task is `Queued`, Atlas (worker) is idle
-   - `plan` requires role `planner` — but Atlas is `worker`, no exact match
-   - However, the scheduler's fallback pass allows `any` ↔ non-matching roles
-   - In a 2-agent setup, Atlas handles planning too
-
-**Note**: if you want strict role separation, register a third agent as `planner` (see Variations below). For this demo, Atlas picks up all non-reviewer tasks.
-
-The scheduler assigns `plan` to Atlas:
+1. **plan** task is `Queued`, Atlas is idle → scheduler assigns plan to Atlas
+2. Atlas receives a `TaskAssigned` WebSocket message with the rendered planning prompt
 
 ```bash
 curl -s -X POST http://localhost:8800/v1/scheduler/tick | jq .
 # {"ok": true, "assigned": 1}
 ```
-
-Atlas receives a `TaskAssigned` WebSocket message with the rendered planning prompt.
 
 ## The Workflow Unfolds
 
@@ -191,9 +171,9 @@ Trigger the scheduler to assign implement:
 curl -s -X POST http://localhost:8800/v1/scheduler/tick | jq .
 ```
 
-### Step 2: Implement (Atlas)
+### Step 2: Implement (whichever crab is idle)
 
-Atlas picks up the implement task (exact role match: `worker` → `worker`). His prompt includes the plan summary as context. He implements the endpoint and completes:
+The idle crab picks up the implement task. The prompt includes the plan summary as context. The agent implements the endpoint and completes:
 
 ```bash
 crabitat-crab complete-run --run-id <RUN_ID> --status completed \
@@ -202,15 +182,15 @@ crabitat-crab complete-run --run-id <RUN_ID> --status completed \
 
 ### Cascade: review becomes Queued
 
-Trigger scheduler -- Coral (reviewer) gets the review task:
+Trigger scheduler — the next idle crab gets the review task:
 
 ```bash
 curl -s -X POST http://localhost:8800/v1/scheduler/tick | jq .
 ```
 
-### Step 3: Review (Coral)
+### Step 3: Review
 
-Coral receives the review task. Her prompt instructs her to review the diff and output a JSON verdict. Her context includes both the plan and implementation summaries.
+The assigned crab receives the review task. The prompt instructs it to review the diff and output a JSON verdict. Context includes both the plan and implementation summaries.
 
 **If the code looks good:**
 
@@ -236,15 +216,15 @@ Cascade:
 - `fix` has condition `review.result == 'FAIL'` → **Queued**
 - `pr` stays `Blocked` (condition not met, but not skipped because review might pass next time)
 
-### Step 4a: Fix (Atlas) -- only if review FAIL
+### Step 4a: Fix -- only if review FAIL
 
-Atlas picks up the fix task. His context includes the review comments. He fixes the issues and completes.
+The idle crab picks up the fix task. Context includes the review comments. It fixes the issues and completes.
 
-After fix completes, the engine automatically re-queues `review` for Coral. The cycle repeats until review passes (max 3 retries).
+After fix completes, the engine automatically re-queues `review`. The cycle repeats until review passes (max 3 retries).
 
-### Step 4b: PR (Atlas or Coral) -- only if review PASS
+### Step 4b: PR -- only if review PASS
 
-Whoever is idle picks up the PR task (role is `any`). They create a PR using `gh pr create`.
+The idle crab picks up the PR task and creates a PR using `gh pr create`.
 
 ### Mission Complete
 
@@ -273,24 +253,23 @@ Connect to `ws://localhost:8800/v1/ws/console` for live events (task created, up
 
 ## Variations
 
-### Three agents (recommended for production)
+### Scale up with more crabs
 
-Register three agents with distinct roles:
+Register additional crabs to handle more concurrent missions:
 
-| Agent | Role | Handles |
-|-------|------|---------|
-| Sage | planner | plan step |
-| Atlas | worker | implement, fix, pr steps |
-| Coral | reviewer | review step |
+```bash
+crabitat-crab register --colony-id $COLONY_ID --name "Extra1"
+crabitat-crab register --colony-id $COLONY_ID --name "Extra2"
+```
 
-This gives full separation of concerns. The scheduler automatically routes each step to the right agent.
+All crabs are interchangeable. The scheduler assigns queued tasks to idle crabs in FIFO order. More crabs means more missions can run in parallel.
 
 ### One agent does everything
 
-Register a single agent with role `any`:
+Register a single crab:
 
 ```bash
-crabitat-crab register --colony-id $COLONY_ID --name "Solo" --role any
+crabitat-crab register --colony-id $COLONY_ID --name "Solo"
 ```
 
 All steps are assigned to Solo sequentially. Useful for testing but defeats the purpose of multi-agent collaboration.

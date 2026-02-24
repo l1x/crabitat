@@ -201,7 +201,6 @@ pub struct Task {
     pub assigned_crab_id: Option<String>,
     pub status: TaskStatus,
     pub step_id: Option<String>,
-    pub role: Option<String>,
     pub prompt: Option<String>,
     pub context: Option<String>,
     pub created_at_ms: u64,
@@ -217,18 +216,20 @@ pub struct WorkflowMeta {
     pub name: String,
     pub description: String,
     pub version: String,
+    #[serde(default)]
+    pub stack: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowStep {
     pub id: String,
-    pub role: String,
     pub prompt_file: String,
     #[serde(default)]
     pub depends_on: Vec<String>,
     pub condition: Option<String>,
     #[serde(default)]
     pub max_retries: u32,
+    pub stack: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

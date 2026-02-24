@@ -508,9 +508,6 @@ enum ConsoleEvent {
     RepoCreated { repo: RepoRecord },
     RepoUpdated { repo: RepoRecord },
     RepoDeleted { repo_id: String },
-    RoleCreated { role: RoleRecord },
-    RoleUpdated { role: RoleRecord },
-    RoleDeleted { role_id: String },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -607,7 +604,6 @@ struct CrabRecord {
     crab_id: String,
     colony_id: String,
     name: String,
-    role: String,
     state: CrabState,
     current_task_id: Option<String>,
     current_run_id: Option<String>,
@@ -636,7 +632,6 @@ struct TaskRecord {
     assigned_crab_id: Option<String>,
     status: TaskStatus,
     step_id: Option<String>,
-    role: Option<String>,
     prompt: Option<String>,
     context: Option<String>,
     created_at_ms: u64,
@@ -700,7 +695,6 @@ struct RegisterCrabRequest {
     crab_id: String,
     colony_id: String,
     name: String,
-    role: String,
     state: Option<CrabState>,
 }
 
@@ -809,12 +803,12 @@ struct QueueIssueRequest {
 #[derive(Debug, Clone, Serialize)]
 struct WorkflowStepRecord {
     step_id: String,
-    role: String,
     prompt_file: String,
     depends_on: Vec<String>,
     condition: Option<String>,
     max_retries: u32,
     position: i64,
+    stack: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -822,7 +816,7 @@ struct WorkflowRecord {
     workflow_id: String,
     name: String,
     description: String,
-    stack: String,
+    stack: Vec<String>,
     version: String,
     created_at_ms: u64,
     steps: Vec<WorkflowStepRecord>,
@@ -831,18 +825,18 @@ struct WorkflowRecord {
 #[derive(Debug, Deserialize)]
 struct CreateWorkflowStepInput {
     step_id: String,
-    role: String,
     prompt_file: Option<String>,
     depends_on: Option<Vec<String>>,
     condition: Option<String>,
     max_retries: Option<u32>,
+    stack: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
 struct CreateWorkflowRequest {
     name: String,
     description: Option<String>,
-    stack: Option<String>,
+    stack: Option<Vec<String>>,
     version: Option<String>,
     steps: Vec<CreateWorkflowStepInput>,
 }
@@ -851,40 +845,9 @@ struct CreateWorkflowRequest {
 struct UpdateWorkflowRequest {
     name: Option<String>,
     description: Option<String>,
-    stack: Option<String>,
+    stack: Option<Vec<String>>,
     version: Option<String>,
     steps: Option<Vec<CreateWorkflowStepInput>>,
-}
-
-// ---------------------------------------------------------------------------
-// Role DB types
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Serialize)]
-struct RoleRecord {
-    role_id: String,
-    name: String,
-    description: String,
-    prompt_files: Vec<String>,
-    system_prompt: String, // concatenated from all prompt_files on disk
-    skills: Vec<String>,
-    created_at_ms: u64,
-}
-
-#[derive(Debug, Deserialize)]
-struct CreateRoleRequest {
-    name: String,
-    description: Option<String>,
-    prompt_files: Option<Vec<String>>,
-    skills: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct UpdateRoleRequest {
-    name: Option<String>,
-    description: Option<String>,
-    prompt_files: Option<Vec<String>>,
-    skills: Option<Vec<String>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -911,7 +874,6 @@ async fn serve(port: u16, db_path: &StdPath, prompts_path: &StdPath) -> Result<(
 
     let connection = init_db(db_path)?;
     seed_default_workflows(&connection)?;
-    seed_default_roles(&connection)?;
     seed_settings(&connection, prompts_path)?;
     let (console_tx, _) = broadcast::channel::<String>(256);
     let workflows = WorkflowRegistry::load(prompts_path);
@@ -972,8 +934,6 @@ fn build_router(state: AppState) -> Router {
             "/v1/workflows/{workflow_id}",
             get(get_workflow).patch(update_workflow).delete(delete_workflow),
         )
-        .route("/v1/roles", get(list_roles).post(create_role))
-        .route("/v1/roles/{role_id}", get(get_role).patch(update_role).delete(delete_role))
         .route("/v1/prompt-files", get(list_prompt_files))
         .route("/v1/prompt-files/preview", get(preview_prompt_file))
         .route("/v1/settings", get(get_settings).patch(patch_settings))
@@ -1008,7 +968,6 @@ fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
           crab_id TEXT PRIMARY KEY,
           colony_id TEXT NOT NULL,
           name TEXT NOT NULL,
-          role TEXT NOT NULL,
           state TEXT NOT NULL,
           current_task_id TEXT,
           current_run_id TEXT,
@@ -1037,7 +996,6 @@ fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
           assigned_crab_id TEXT,
           status TEXT NOT NULL,
           step_id TEXT,
-          role TEXT,
           prompt TEXT,
           context TEXT,
           created_at_ms INTEGER NOT NULL,
@@ -1099,22 +1057,12 @@ fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
           workflow_id TEXT NOT NULL,
           position INTEGER NOT NULL,
           step_id TEXT NOT NULL,
-          role TEXT NOT NULL,
           prompt_file TEXT NOT NULL DEFAULT '',
           depends_on TEXT NOT NULL DEFAULT '[]',
           condition TEXT,
           max_retries INTEGER NOT NULL DEFAULT 0,
           PRIMARY KEY (workflow_id, position),
           FOREIGN KEY(workflow_id) REFERENCES workflows(workflow_id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE IF NOT EXISTS roles (
-          role_id TEXT PRIMARY KEY,
-          name TEXT NOT NULL UNIQUE,
-          description TEXT NOT NULL DEFAULT '',
-          prompt_files TEXT NOT NULL DEFAULT '[]',
-          skills TEXT NOT NULL DEFAULT '[]',
-          created_at_ms INTEGER NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS settings (
@@ -1132,8 +1080,7 @@ fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
         "ALTER TABLE missions ADD COLUMN github_issue_number INTEGER",
         "ALTER TABLE missions ADD COLUMN github_pr_number INTEGER",
         "ALTER TABLE repos ADD COLUMN language TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE roles ADD COLUMN prompt_file TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE roles ADD COLUMN prompt_files TEXT NOT NULL DEFAULT '[]'",
+        "ALTER TABLE workflow_steps ADD COLUMN stack TEXT NOT NULL DEFAULT '[]'",
     ];
     for sql in migrations {
         match conn.execute(sql, []) {
@@ -1143,17 +1090,22 @@ fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
         }
     }
 
-    // Data migration: copy prompt_file → prompt_files JSON array (idempotent)
+    // Drop roles table (removed feature)
+    let _ = conn.execute("DROP TABLE IF EXISTS roles", []);
+
+    // Migrate workflow stack from plain string to JSON array (idempotent)
+    // Only convert values that aren't already JSON arrays
     let _ = conn.execute(
-        "UPDATE roles SET prompt_files = '[\"' || prompt_file || '\"]' WHERE prompt_file != '' AND prompt_files = '[]'",
+        "UPDATE workflows SET stack = '[\"' || stack || '\"]' WHERE stack NOT LIKE '[%'",
         [],
     );
 
     // Drop-column migrations (safe to re-run)
     let drop_migrations = [
         "ALTER TABLE repos DROP COLUMN domain",
-        "ALTER TABLE roles DROP COLUMN system_prompt",
-        "ALTER TABLE roles DROP COLUMN prompt_file",
+        "ALTER TABLE crabs DROP COLUMN role",
+        "ALTER TABLE tasks DROP COLUMN role",
+        "ALTER TABLE workflow_steps DROP COLUMN role",
     ];
     for sql in drop_migrations {
         match conn.execute(sql, []) {
@@ -1387,6 +1339,8 @@ async fn create_workflow(
 
     let workflow_id = ExternalId::new("wf").to_string();
     let now = now_ms();
+    let stack_json = serde_json::to_string(&request.stack.unwrap_or_default())
+        .unwrap_or_else(|_| "[]".to_string());
 
     let db = state.db.lock().await;
     db.execute(
@@ -1395,7 +1349,7 @@ async fn create_workflow(
             workflow_id,
             request.name,
             request.description.as_deref().unwrap_or(""),
-            request.stack.as_deref().unwrap_or("any"),
+            stack_json,
             request.version.as_deref().unwrap_or("1.0.0"),
             now as i64,
         ],
@@ -1422,11 +1376,12 @@ async fn update_workflow(
     let name = request.name.unwrap_or(existing.name);
     let description = request.description.unwrap_or(existing.description);
     let stack = request.stack.unwrap_or(existing.stack);
+    let stack_json = serde_json::to_string(&stack).unwrap_or_else(|_| "[]".to_string());
     let version = request.version.unwrap_or(existing.version);
 
     db.execute(
         "UPDATE workflows SET name = ?2, description = ?3, stack = ?4, version = ?5 WHERE workflow_id = ?1",
-        params![workflow_id, name, description, stack, version],
+        params![workflow_id, name, description, stack_json, version],
     )?;
 
     if let Some(steps) = request.steps {
@@ -1450,111 +1405,6 @@ async fn delete_workflow(
 
     db.execute("DELETE FROM workflow_steps WHERE workflow_id = ?1", params![workflow_id])?;
     db.execute("DELETE FROM workflows WHERE workflow_id = ?1", params![workflow_id])?;
-    Ok(Json(serde_json::json!({ "ok": true })))
-}
-
-// ---------------------------------------------------------------------------
-// Role CRUD handlers
-// ---------------------------------------------------------------------------
-
-async fn list_roles(State(state): State<AppState>) -> Result<Json<Vec<RoleRecord>>, ApiError> {
-    info!("db: listing roles");
-    let db = state.db.lock().await;
-    let wf = state.workflows.read().unwrap();
-    Ok(Json(query_roles(&db, &wf)?))
-}
-
-async fn get_role(
-    State(state): State<AppState>,
-    Path(role_id): Path<String>,
-) -> Result<Json<RoleRecord>, ApiError> {
-    info!(role_id = %role_id, "db: fetching role");
-    let db = state.db.lock().await;
-    let wf = state.workflows.read().unwrap();
-    let role = fetch_role(&db, &wf, &role_id)?
-        .ok_or_else(|| ApiError::not_found("role not found"))?;
-    Ok(Json(role))
-}
-
-async fn create_role(
-    State(state): State<AppState>,
-    Json(request): Json<CreateRoleRequest>,
-) -> Result<Json<RoleRecord>, ApiError> {
-    info!(name = %request.name, "db: creating role");
-    if request.name.trim().is_empty() {
-        return Err(ApiError::bad_request("name is required"));
-    }
-
-    let role_id = ExternalId::new("role").to_string();
-    let now = now_ms();
-    let skills_json = serde_json::to_string(&request.skills.unwrap_or_default())
-        .unwrap_or_else(|_| "[]".to_string());
-    let prompt_files_json = serde_json::to_string(&request.prompt_files.unwrap_or_default())
-        .unwrap_or_else(|_| "[]".to_string());
-
-    let db = state.db.lock().await;
-    db.execute(
-        "INSERT INTO roles (role_id, name, description, prompt_files, skills, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![
-            role_id,
-            request.name,
-            request.description.as_deref().unwrap_or(""),
-            prompt_files_json,
-            skills_json,
-            now as i64,
-        ],
-    )?;
-
-    let wf = state.workflows.read().unwrap();
-    let role = fetch_role(&db, &wf, &role_id)?
-        .ok_or_else(|| ApiError::internal("failed to reload role after creation"))?;
-    emit_console_event(&state.console_tx, ConsoleEvent::RoleCreated { role: role.clone() });
-    Ok(Json(role))
-}
-
-async fn update_role(
-    State(state): State<AppState>,
-    Path(role_id): Path<String>,
-    Json(request): Json<UpdateRoleRequest>,
-) -> Result<Json<RoleRecord>, ApiError> {
-    info!(role_id = %role_id, "db: updating role");
-    let db = state.db.lock().await;
-    let wf = state.workflows.read().unwrap();
-
-    let existing = fetch_role(&db, &wf, &role_id)?
-        .ok_or_else(|| ApiError::not_found("role not found"))?;
-
-    let name = request.name.unwrap_or(existing.name);
-    let description = request.description.unwrap_or(existing.description);
-    let prompt_files = request.prompt_files.unwrap_or(existing.prompt_files);
-    let skills = request.skills.unwrap_or(existing.skills);
-    let skills_json = serde_json::to_string(&skills).unwrap_or_else(|_| "[]".to_string());
-    let prompt_files_json =
-        serde_json::to_string(&prompt_files).unwrap_or_else(|_| "[]".to_string());
-
-    db.execute(
-        "UPDATE roles SET name = ?2, description = ?3, prompt_files = ?4, skills = ?5 WHERE role_id = ?1",
-        params![role_id, name, description, prompt_files_json, skills_json],
-    )?;
-
-    let role = fetch_role(&db, &wf, &role_id)?
-        .ok_or_else(|| ApiError::internal("failed to reload role after update"))?;
-    emit_console_event(&state.console_tx, ConsoleEvent::RoleUpdated { role: role.clone() });
-    Ok(Json(role))
-}
-
-async fn delete_role(
-    State(state): State<AppState>,
-    Path(role_id): Path<String>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    info!(role_id = %role_id, "db: deleting role");
-    let db = state.db.lock().await;
-    let wf = state.workflows.read().unwrap();
-    let _existing = fetch_role(&db, &wf, &role_id)?
-        .ok_or_else(|| ApiError::not_found("role not found"))?;
-
-    db.execute("DELETE FROM roles WHERE role_id = ?1", params![role_id])?;
-    emit_console_event(&state.console_tx, ConsoleEvent::RoleDeleted { role_id });
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -1865,18 +1715,20 @@ fn insert_workflow_steps(
     for (i, step) in steps.iter().enumerate() {
         let depends_on_json = serde_json::to_string(&step.depends_on.clone().unwrap_or_default())
             .unwrap_or_else(|_| "[]".to_string());
+        let stack_json = serde_json::to_string(&step.stack.clone().unwrap_or_default())
+            .unwrap_or_else(|_| "[]".to_string());
 
         conn.execute(
-            "INSERT INTO workflow_steps (workflow_id, position, step_id, role, prompt_file, depends_on, condition, max_retries) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO workflow_steps (workflow_id, position, step_id, prompt_file, depends_on, condition, max_retries, stack) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 workflow_id,
                 i as i64,
                 step.step_id,
-                step.role,
                 step.prompt_file.as_deref().unwrap_or(""),
                 depends_on_json,
                 step.condition,
                 step.max_retries.unwrap_or(0) as i64,
+                stack_json,
             ],
         )?;
     }
@@ -1922,13 +1774,12 @@ async fn register_crab(
     State(state): State<AppState>,
     Json(request): Json<RegisterCrabRequest>,
 ) -> Result<Json<CrabRecord>, ApiError> {
-    info!(crab_id = %request.crab_id, name = %request.name, role = %request.role, "db: registering crab");
+    info!(crab_id = %request.crab_id, name = %request.name, "db: registering crab");
     if request.crab_id.trim().is_empty()
         || request.colony_id.trim().is_empty()
         || request.name.trim().is_empty()
-        || request.role.trim().is_empty()
     {
-        return Err(ApiError::bad_request("crab_id, colony_id, name, and role are required"));
+        return Err(ApiError::bad_request("crab_id, colony_id, and name are required"));
     }
 
     let (crab, assignments) = {
@@ -1947,32 +1798,13 @@ async fn register_crab(
         let updated_at_ms = now_ms();
         let crab_state = request.state.unwrap_or(CrabState::Idle);
 
-        // Enforce one crab per role per colony (except "any" which allows multiple)
-        if request.role != "any" {
-            let existing: Option<String> = tx
-                .query_row(
-                    "SELECT crab_id FROM crabs WHERE colony_id = ?1 AND role = ?2 AND crab_id != ?3",
-                    params![request.colony_id, request.role, request.crab_id],
-                    |row| row.get(0),
-                )
-                .ok();
-
-            if let Some(existing_crab_id) = existing {
-                return Err(ApiError::bad_request(format!(
-                    "role '{}' is already taken in this colony by crab '{}'",
-                    request.role, existing_crab_id
-                )));
-            }
-        }
-
         tx.execute(
             "
-            INSERT INTO crabs (crab_id, colony_id, name, role, state, current_task_id, current_run_id, updated_at_ms)
-            VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, ?6)
+            INSERT INTO crabs (crab_id, colony_id, name, state, current_task_id, current_run_id, updated_at_ms)
+            VALUES (?1, ?2, ?3, ?4, NULL, NULL, ?5)
             ON CONFLICT(crab_id) DO UPDATE SET
               colony_id=excluded.colony_id,
               name=excluded.name,
-              role=excluded.role,
               state=excluded.state,
               updated_at_ms=excluded.updated_at_ms
             ",
@@ -1980,7 +1812,6 @@ async fn register_crab(
                 request.crab_id,
                 request.colony_id,
                 request.name,
-                request.role,
                 crab_state.as_str(),
                 updated_at_ms
             ],
@@ -2123,12 +1954,22 @@ fn expand_workflow_into_tasks(
         let has_deps = !step.depends_on.is_empty();
         let status = if has_deps { TaskStatus::Blocked } else { TaskStatus::Queued };
 
-        // Load and render the prompt template
+        // Load and render the core prompt template
         let prompt_template = registry.load_prompt_file(&step.prompt_file).unwrap_or_default();
-        let rendered_prompt = prompt_template
+        let mut rendered_prompt = prompt_template
             .replace("{{mission_prompt}}", mission_prompt)
             .replace("{{context}}", "")
             .replace("{{worktree_path}}", &format!("burrows/mission-{mission_id}"));
+
+        // Resolve effective stack: step overrides workflow default
+        let effective_stack = step.stack.as_deref().unwrap_or(&manifest.workflow.stack);
+        for stack_name in effective_stack {
+            let stack_path = format!("stacks/{stack_name}.md");
+            if let Ok(stack_content) = registry.load_prompt_file(&stack_path) {
+                rendered_prompt.push_str("\n\n---\n\n");
+                rendered_prompt.push_str(&stack_content);
+            }
+        }
 
         // Store condition and max_retries in context JSON if present
         let context_json = if step.condition.is_some() || step.max_retries > 0 {
@@ -2150,17 +1991,16 @@ fn expand_workflow_into_tasks(
         conn.execute(
             "
             INSERT INTO tasks (task_id, mission_id, title, assigned_crab_id, status,
-                               step_id, role, prompt, context,
+                               step_id, prompt, context,
                                created_at_ms, updated_at_ms)
-            VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, ?9)
             ",
             params![
                 task_id,
                 mission_id,
-                format!("[{}] {}", step.id, step.role),
+                format!("[{}]", step.id),
                 task_status_to_db(status),
                 step.id,
-                step.role,
                 rendered_prompt,
                 context_json,
                 now,
@@ -2243,9 +2083,9 @@ async fn create_task(
         tx.execute(
             "
             INSERT INTO tasks (task_id, mission_id, title, assigned_crab_id, status,
-                               step_id, role, prompt, context,
+                               step_id, prompt, context,
                                created_at_ms, updated_at_ms)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
             ",
             params![
                 task_id,
@@ -2253,7 +2093,6 @@ async fn create_task(
                 request.title,
                 request.assigned_crab_id,
                 task_status_to_db(status),
-                Option::<String>::None,
                 Option::<String>::None,
                 Option::<String>::None,
                 Option::<String>::None,
@@ -2307,7 +2146,6 @@ async fn create_task(
                     mission_prompt,
                     desired_status: TaskStatus::Running,
                     step_id: task.step_id.clone(),
-                    role: task.role.clone(),
                     prompt: task.prompt.clone(),
                     context: task.context.clone(),
                     worktree_path: None,
@@ -3360,7 +3198,7 @@ fn run_scheduler_tick_db(
     // Get all queued tasks (ordered by created_at_ms)
     let mut task_stmt = conn.prepare(
         "
-        SELECT task_id, mission_id, title, step_id, role, prompt, context
+        SELECT task_id, mission_id, title, step_id, prompt, context
         FROM tasks
         WHERE status = 'queued'
         ORDER BY created_at_ms ASC
@@ -3372,7 +3210,6 @@ fn run_scheduler_tick_db(
         mission_id: String,
         title: String,
         step_id: Option<String>,
-        role: Option<String>,
         prompt: Option<String>,
         context: Option<String>,
     }
@@ -3384,19 +3221,18 @@ fn run_scheduler_tick_db(
                 mission_id: row.get(1)?,
                 title: row.get(2)?,
                 step_id: row.get(3)?,
-                role: row.get(4)?,
-                prompt: row.get(5)?,
-                context: row.get(6)?,
+                prompt: row.get(4)?,
+                context: row.get(5)?,
             })
         })?
         .filter_map(Result::ok)
         .collect();
 
     // Get all idle crabs
-    let mut crab_stmt = conn.prepare("SELECT crab_id, role FROM crabs WHERE state = 'idle'")?;
+    let mut crab_stmt = conn.prepare("SELECT crab_id FROM crabs WHERE state = 'idle'")?;
 
-    let mut idle_crabs: Vec<(String, String)> = crab_stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+    let mut idle_crabs: Vec<String> = crab_stmt
+        .query_map([], |row| row.get(0))?
         .filter_map(Result::ok)
         .collect();
 
@@ -3423,79 +3259,67 @@ fn run_scheduler_tick_db(
             }
         }
 
-        let task_role = task.role.as_deref().unwrap_or("any");
+        // Simple assignment: first idle crab gets the task
+        let crab_id = idle_crabs.remove(0);
 
-        // Find a matching crab — prefer exact role match, fall back to "any"
-        let crab_idx =
-            idle_crabs.iter().position(|(_, crab_role)| crab_role == task_role).or_else(|| {
-                idle_crabs
-                    .iter()
-                    .position(|(_, crab_role)| task_role == "any" || crab_role == "any")
-            });
+        // Assign the task
+        conn.execute(
+            "UPDATE tasks SET assigned_crab_id = ?2, status = ?3, updated_at_ms = ?4 WHERE task_id = ?1",
+            params![task.task_id, crab_id, task_status_to_db(TaskStatus::Assigned), now],
+        )?;
 
-        if let Some(idx) = crab_idx {
-            let (crab_id, _) = idle_crabs.remove(idx);
+        conn.execute(
+            "UPDATE crabs SET state = 'busy', current_task_id = ?2, updated_at_ms = ?3 WHERE crab_id = ?1",
+            params![crab_id, task.task_id, now],
+        )?;
 
-            // Assign the task
-            conn.execute(
-                "UPDATE tasks SET assigned_crab_id = ?2, status = ?3, updated_at_ms = ?4 WHERE task_id = ?1",
-                params![task.task_id, crab_id, task_status_to_db(TaskStatus::Assigned), now],
-            )?;
+        // Get worktree_path for this mission
+        let worktree_path: Option<String> = conn
+            .query_row(
+                "SELECT worktree_path FROM missions WHERE mission_id = ?1",
+                params![task.mission_id],
+                |row| row.get(0),
+            )
+            .ok();
 
-            conn.execute(
-                "UPDATE crabs SET state = 'busy', current_task_id = ?2, updated_at_ms = ?3 WHERE crab_id = ?1",
-                params![crab_id, task.task_id, now],
-            )?;
+        // Get mission_prompt
+        let mission_prompt: String = conn
+            .query_row(
+                "SELECT prompt FROM missions WHERE mission_id = ?1",
+                params![task.mission_id],
+                |row| row.get(0),
+            )
+            .unwrap_or_default();
 
-            // Get worktree_path for this mission
-            let worktree_path: Option<String> = conn
-                .query_row(
-                    "SELECT worktree_path FROM missions WHERE mission_id = ?1",
-                    params![task.mission_id],
-                    |row| row.get(0),
-                )
-                .ok();
+        let task_uuid: Uuid = task.task_id.parse().unwrap_or_else(|_| Uuid::new_v4());
+        let mission_uuid: Uuid = task.mission_id.parse().unwrap_or_else(|_| Uuid::new_v4());
 
-            // Get mission_prompt
-            let mission_prompt: String = conn
-                .query_row(
-                    "SELECT prompt FROM missions WHERE mission_id = ?1",
-                    params![task.mission_id],
-                    |row| row.get(0),
-                )
-                .unwrap_or_default();
+        let mut envelope = Envelope::new(
+            "control-plane",
+            &crab_id,
+            MessageKind::TaskAssigned(crabitat_protocol::TaskAssigned {
+                task_id: TaskId(task_uuid),
+                mission_id: MissionId(mission_uuid),
+                title: task.title.clone(),
+                mission_prompt,
+                desired_status: TaskStatus::Running,
+                step_id: task.step_id.clone(),
+                prompt: task.prompt.clone(),
+                context: task.context.clone(),
+                worktree_path,
+            }),
+            now,
+        );
+        envelope.task_id = Some(TaskId(task_uuid));
+        envelope.mission_id = Some(MissionId(mission_uuid));
 
-            let task_uuid: Uuid = task.task_id.parse().unwrap_or_else(|_| Uuid::new_v4());
-            let mission_uuid: Uuid = task.mission_id.parse().unwrap_or_else(|_| Uuid::new_v4());
+        assignments.push(SchedulerAssignment { crab_id: crab_id.clone(), envelope });
 
-            let mut envelope = Envelope::new(
-                "control-plane",
-                &crab_id,
-                MessageKind::TaskAssigned(crabitat_protocol::TaskAssigned {
-                    task_id: TaskId(task_uuid),
-                    mission_id: MissionId(mission_uuid),
-                    title: task.title.clone(),
-                    mission_prompt,
-                    desired_status: TaskStatus::Running,
-                    step_id: task.step_id.clone(),
-                    role: task.role.clone(),
-                    prompt: task.prompt.clone(),
-                    context: task.context.clone(),
-                    worktree_path,
-                }),
-                now,
-            );
-            envelope.task_id = Some(TaskId(task_uuid));
-            envelope.mission_id = Some(MissionId(mission_uuid));
-
-            assignments.push(SchedulerAssignment { crab_id: crab_id.clone(), envelope });
-
-            if let Ok(Some(t)) = fetch_task(conn, &task.task_id) {
-                emit_console_event(console_tx, ConsoleEvent::TaskUpdated { task: t });
-            }
-            if let Ok(Some(crab)) = fetch_crab(conn, &crab_id) {
-                emit_console_event(console_tx, ConsoleEvent::CrabUpdated { crab });
-            }
+        if let Ok(Some(t)) = fetch_task(conn, &task.task_id) {
+            emit_console_event(console_tx, ConsoleEvent::TaskUpdated { task: t });
+        }
+        if let Ok(Some(crab)) = fetch_crab(conn, &crab_id) {
+            emit_console_event(console_tx, ConsoleEvent::CrabUpdated { crab });
         }
     }
 
@@ -3623,18 +3447,17 @@ fn query_colonies(conn: &Connection) -> Result<Vec<ColonyRecord>, ApiError> {
 
 fn query_crabs(conn: &Connection) -> Result<Vec<CrabRecord>, ApiError> {
     let mut stmt = conn.prepare(
-        "SELECT crab_id, colony_id, name, role, state, current_task_id, current_run_id, updated_at_ms FROM crabs ORDER BY crab_id",
+        "SELECT crab_id, colony_id, name, state, current_task_id, current_run_id, updated_at_ms FROM crabs ORDER BY crab_id",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(CrabRecord {
             crab_id: row.get(0)?,
             colony_id: row.get(1)?,
             name: row.get(2)?,
-            role: row.get(3)?,
-            state: CrabState::from_str(&row.get::<_, String>(4)?),
-            current_task_id: row.get(5)?,
-            current_run_id: row.get(6)?,
-            updated_at_ms: row.get::<_, i64>(7)? as u64,
+            state: CrabState::from_str(&row.get::<_, String>(3)?),
+            current_task_id: row.get(4)?,
+            current_run_id: row.get(5)?,
+            updated_at_ms: row.get::<_, i64>(6)? as u64,
         })
     })?;
     Ok(rows.filter_map(Result::ok).collect())
@@ -3687,7 +3510,7 @@ fn query_tasks(conn: &Connection) -> Result<Vec<TaskRecord>, ApiError> {
     let mut stmt = conn.prepare(
         "
         SELECT task_id, mission_id, title, assigned_crab_id, status,
-               step_id, role, prompt, context,
+               step_id, prompt, context,
                created_at_ms, updated_at_ms
         FROM tasks
         ORDER BY updated_at_ms DESC
@@ -3701,11 +3524,10 @@ fn query_tasks(conn: &Connection) -> Result<Vec<TaskRecord>, ApiError> {
             assigned_crab_id: row.get(3)?,
             status: task_status_from_db(&row.get::<_, String>(4)?),
             step_id: row.get(5)?,
-            role: row.get(6)?,
-            prompt: row.get(7)?,
-            context: row.get(8)?,
-            created_at_ms: row.get::<_, i64>(9)? as u64,
-            updated_at_ms: row.get::<_, i64>(10)? as u64,
+            prompt: row.get(6)?,
+            context: row.get(7)?,
+            created_at_ms: row.get::<_, i64>(8)? as u64,
+            updated_at_ms: row.get::<_, i64>(9)? as u64,
         })
     })?;
     Ok(rows.filter_map(Result::ok).collect())
@@ -3729,7 +3551,7 @@ fn query_runs(conn: &Connection) -> Result<Vec<RunRecord>, ApiError> {
 fn fetch_crab(conn: &Connection, crab_id: &str) -> Result<Option<CrabRecord>, ApiError> {
     let mut stmt = conn.prepare(
         "
-        SELECT crab_id, colony_id, name, role, state, current_task_id, current_run_id, updated_at_ms
+        SELECT crab_id, colony_id, name, state, current_task_id, current_run_id, updated_at_ms
         FROM crabs WHERE crab_id = ?1
         ",
     )?;
@@ -3740,11 +3562,10 @@ fn fetch_crab(conn: &Connection, crab_id: &str) -> Result<Option<CrabRecord>, Ap
             crab_id: row.get(0)?,
             colony_id: row.get(1)?,
             name: row.get(2)?,
-            role: row.get(3)?,
-            state: CrabState::from_str(&row.get::<_, String>(4)?),
-            current_task_id: row.get(5)?,
-            current_run_id: row.get(6)?,
-            updated_at_ms: row.get::<_, i64>(7)? as u64,
+            state: CrabState::from_str(&row.get::<_, String>(3)?),
+            current_task_id: row.get(4)?,
+            current_run_id: row.get(5)?,
+            updated_at_ms: row.get::<_, i64>(6)? as u64,
         }));
     }
     Ok(None)
@@ -3754,7 +3575,7 @@ fn fetch_task(conn: &Connection, task_id: &str) -> Result<Option<TaskRecord>, Ap
     let mut stmt = conn.prepare(
         "
         SELECT task_id, mission_id, title, assigned_crab_id, status,
-               step_id, role, prompt, context,
+               step_id, prompt, context,
                created_at_ms, updated_at_ms
         FROM tasks WHERE task_id = ?1
         ",
@@ -3769,11 +3590,10 @@ fn fetch_task(conn: &Connection, task_id: &str) -> Result<Option<TaskRecord>, Ap
             assigned_crab_id: row.get(3)?,
             status: task_status_from_db(&row.get::<_, String>(4)?),
             step_id: row.get(5)?,
-            role: row.get(6)?,
-            prompt: row.get(7)?,
-            context: row.get(8)?,
-            created_at_ms: row.get::<_, i64>(9)? as u64,
-            updated_at_ms: row.get::<_, i64>(10)? as u64,
+            prompt: row.get(6)?,
+            context: row.get(7)?,
+            created_at_ms: row.get::<_, i64>(8)? as u64,
+            updated_at_ms: row.get::<_, i64>(9)? as u64,
         }));
     }
     Ok(None)
@@ -3839,7 +3659,8 @@ fn query_workflows(conn: &Connection) -> Result<Vec<WorkflowRecord>, ApiError> {
         .collect();
 
     let mut result = Vec::with_capacity(workflows.len());
-    for (wf_id, name, description, stack, version, created_at_ms) in workflows {
+    for (wf_id, name, description, stack_raw, version, created_at_ms) in workflows {
+        let stack: Vec<String> = serde_json::from_str(&stack_raw).unwrap_or_default();
         let steps = query_workflow_steps(conn, &wf_id)?;
         result.push(WorkflowRecord {
             workflow_id: wf_id,
@@ -3864,12 +3685,14 @@ fn fetch_workflow(
     let mut rows = stmt.query(params![workflow_id])?;
     if let Some(row) = rows.next()? {
         let wf_id: String = row.get(0)?;
+        let stack_raw: String = row.get(3)?;
+        let stack: Vec<String> = serde_json::from_str(&stack_raw).unwrap_or_default();
         let steps = query_workflow_steps(conn, &wf_id)?;
         return Ok(Some(WorkflowRecord {
             workflow_id: wf_id,
             name: row.get(1)?,
             description: row.get(2)?,
-            stack: row.get(3)?,
+            stack,
             version: row.get(4)?,
             created_at_ms: row.get::<_, i64>(5)? as u64,
             steps,
@@ -3883,25 +3706,27 @@ fn query_workflow_steps(
     workflow_id: &str,
 ) -> Result<Vec<WorkflowStepRecord>, ApiError> {
     let mut stmt = conn.prepare(
-        "SELECT step_id, role, prompt_file, depends_on, condition, max_retries, position FROM workflow_steps WHERE workflow_id = ?1 ORDER BY position",
+        "SELECT step_id, prompt_file, depends_on, condition, max_retries, position, stack FROM workflow_steps WHERE workflow_id = ?1 ORDER BY position",
     )?;
     let rows = stmt.query_map(params![workflow_id], |row| {
-        let depends_on_raw: String = row.get(3)?;
+        let depends_on_raw: String = row.get(2)?;
         let depends_on: Vec<String> = serde_json::from_str(&depends_on_raw).unwrap_or_default();
+        let stack_raw: String = row.get(6)?;
+        let stack: Vec<String> = serde_json::from_str(&stack_raw).unwrap_or_default();
         Ok(WorkflowStepRecord {
             step_id: row.get(0)?,
-            role: row.get(1)?,
-            prompt_file: row.get(2)?,
+            prompt_file: row.get(1)?,
             depends_on,
-            condition: row.get(4)?,
-            max_retries: row.get::<_, i64>(5)? as u32,
-            position: row.get(6)?,
+            condition: row.get(3)?,
+            max_retries: row.get::<_, i64>(4)? as u32,
+            position: row.get(5)?,
+            stack,
         })
     })?;
     Ok(rows.filter_map(Result::ok).collect())
 }
 
-type SeedStep = (&'static str, &'static str, &'static str, &'static str, Option<&'static str>, i64);
+type SeedStep = (&'static str, &'static str, &'static str, Option<&'static str>, i64);
 
 fn seed_default_workflows(conn: &Connection) -> Result<()> {
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM workflows", [], |row| row.get(0))?;
@@ -3916,12 +3741,12 @@ fn seed_default_workflows(conn: &Connection) -> Result<()> {
                       wf_id: &str,
                       steps: &[SeedStep]|
      -> Result<(), rusqlite::Error> {
-        for (i, (step_id, role, deps, prompt_file, condition, max_retries)) in
+        for (i, (step_id, deps, prompt_file, condition, max_retries)) in
             steps.iter().enumerate()
         {
             conn.execute(
-                "INSERT INTO workflow_steps (workflow_id, position, step_id, role, prompt_file, depends_on, condition, max_retries) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![wf_id, i as i64, step_id, role, prompt_file, deps, condition, max_retries],
+                "INSERT INTO workflow_steps (workflow_id, position, step_id, prompt_file, depends_on, condition, max_retries) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![wf_id, i as i64, step_id, prompt_file, deps, condition, max_retries],
             )?;
         }
         Ok(())
@@ -3931,18 +3756,18 @@ fn seed_default_workflows(conn: &Connection) -> Result<()> {
     let backend_id = ExternalId::new("wf").to_string();
     conn.execute(
         "INSERT INTO workflows (workflow_id, name, description, stack, version, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![backend_id, "Feature Plan & Implementation - Backend Rust", "End-to-end workflow for planning, implementing, testing, and reviewing backend Rust features", "backend", "1.0.0", now],
+        params![backend_id, "Feature Plan & Implementation - Backend Rust", "End-to-end workflow for planning, implementing, testing, and reviewing backend Rust features", r#"["rust"]"#, "1.0.0", now],
     )?;
     seed_steps(
         conn,
         &backend_id,
         &[
-            ("plan", "planner", "[]", "", None, 0),
-            ("implement", "developer", r#"["plan"]"#, "", None, 0),
-            ("test", "tester", r#"["implement"]"#, "", None, 0),
-            ("review", "reviewer", r#"["test"]"#, "", None, 0),
-            ("fix", "developer", r#"["review"]"#, "", Some("review.result == 'FAIL'"), 3),
-            ("pr", "developer", r#"["review"]"#, "", Some("review.result == 'PASS'"), 0),
+            ("plan", "[]", "", None, 0),
+            ("implement", r#"["plan"]"#, "", None, 0),
+            ("test", r#"["implement"]"#, "", None, 0),
+            ("review", r#"["test"]"#, "", None, 0),
+            ("fix", r#"["review"]"#, "", Some("review.result == 'FAIL'"), 3),
+            ("pr", r#"["review"]"#, "", Some("review.result == 'PASS'"), 0),
         ],
     )?;
 
@@ -3950,184 +3775,22 @@ fn seed_default_workflows(conn: &Connection) -> Result<()> {
     let frontend_id = ExternalId::new("wf").to_string();
     conn.execute(
         "INSERT INTO workflows (workflow_id, name, description, stack, version, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![frontend_id, "Feature Plan & Implementation - Frontend Astro", "End-to-end workflow for planning, implementing, testing, and reviewing frontend Astro features", "web-dev", "1.0.0", now],
+        params![frontend_id, "Feature Plan & Implementation - Frontend Astro", "End-to-end workflow for planning, implementing, testing, and reviewing frontend Astro features", r#"["astro"]"#, "1.0.0", now],
     )?;
     seed_steps(
         conn,
         &frontend_id,
         &[
-            ("plan", "planner", "[]", "", None, 0),
-            ("implement", "developer", r#"["plan"]"#, "", None, 0),
-            ("test", "tester", r#"["implement"]"#, "", None, 0),
-            ("review", "reviewer", r#"["test"]"#, "", None, 0),
-            ("fix", "developer", r#"["review"]"#, "", Some("review.result == 'FAIL'"), 3),
-            ("pr", "developer", r#"["review"]"#, "", Some("review.result == 'PASS'"), 0),
+            ("plan", "[]", "", None, 0),
+            ("implement", r#"["plan"]"#, "", None, 0),
+            ("test", r#"["implement"]"#, "", None, 0),
+            ("review", r#"["test"]"#, "", None, 0),
+            ("fix", r#"["review"]"#, "", Some("review.result == 'FAIL'"), 3),
+            ("pr", r#"["review"]"#, "", Some("review.result == 'PASS'"), 0),
         ],
     )?;
 
     info!(count = 2, "default workflows seeded");
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Role query helpers
-// ---------------------------------------------------------------------------
-
-fn assemble_system_prompt(registry: &WorkflowRegistry, prompt_files: &[String]) -> String {
-    prompt_files
-        .iter()
-        .filter_map(|pf| registry.load_prompt_file(pf).ok())
-        .collect::<Vec<_>>()
-        .join("\n\n---\n\n")
-}
-
-fn query_roles(
-    conn: &Connection,
-    registry: &WorkflowRegistry,
-) -> Result<Vec<RoleRecord>, ApiError> {
-    let mut stmt = conn.prepare(
-        "SELECT role_id, name, description, prompt_files, skills, created_at_ms FROM roles ORDER BY name",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        let prompt_files_raw: String = row.get(3)?;
-        let prompt_files: Vec<String> = serde_json::from_str(&prompt_files_raw).unwrap_or_default();
-        let skills_raw: String = row.get(4)?;
-        let skills: Vec<String> = serde_json::from_str(&skills_raw).unwrap_or_default();
-        Ok((
-            row.get(0)?,
-            row.get(1)?,
-            row.get(2)?,
-            prompt_files,
-            skills,
-            row.get::<_, i64>(5)? as u64,
-        ))
-    })?;
-    let mut result = Vec::new();
-    for row in rows.flatten() {
-        let (role_id, name, description, prompt_files, skills, created_at_ms) = row;
-        let system_prompt = assemble_system_prompt(registry, &prompt_files);
-        result.push(RoleRecord {
-            role_id,
-            name,
-            description,
-            prompt_files,
-            system_prompt,
-            skills,
-            created_at_ms,
-        });
-    }
-    Ok(result)
-}
-
-fn fetch_role(
-    conn: &Connection,
-    registry: &WorkflowRegistry,
-    role_id: &str,
-) -> Result<Option<RoleRecord>, ApiError> {
-    let mut stmt = conn.prepare(
-        "SELECT role_id, name, description, prompt_files, skills, created_at_ms FROM roles WHERE role_id = ?1",
-    )?;
-    let mut rows = stmt.query(params![role_id])?;
-    if let Some(row) = rows.next()? {
-        let prompt_files_raw: String = row.get(3)?;
-        let prompt_files: Vec<String> = serde_json::from_str(&prompt_files_raw).unwrap_or_default();
-        let skills_raw: String = row.get(4)?;
-        let skills: Vec<String> = serde_json::from_str(&skills_raw).unwrap_or_default();
-        let system_prompt = assemble_system_prompt(registry, &prompt_files);
-        return Ok(Some(RoleRecord {
-            role_id: row.get(0)?,
-            name: row.get(1)?,
-            description: row.get(2)?,
-            prompt_files,
-            system_prompt,
-            skills,
-            created_at_ms: row.get::<_, i64>(5)? as u64,
-        }));
-    }
-    Ok(None)
-}
-
-#[allow(dead_code)]
-fn fetch_role_by_name(
-    conn: &Connection,
-    registry: &WorkflowRegistry,
-    name: &str,
-) -> Result<Option<RoleRecord>, ApiError> {
-    let mut stmt = conn.prepare(
-        "SELECT role_id, name, description, prompt_files, skills, created_at_ms FROM roles WHERE name = ?1",
-    )?;
-    let mut rows = stmt.query(params![name])?;
-    if let Some(row) = rows.next()? {
-        let prompt_files_raw: String = row.get(3)?;
-        let prompt_files: Vec<String> = serde_json::from_str(&prompt_files_raw).unwrap_or_default();
-        let skills_raw: String = row.get(4)?;
-        let skills: Vec<String> = serde_json::from_str(&skills_raw).unwrap_or_default();
-        let system_prompt = assemble_system_prompt(registry, &prompt_files);
-        return Ok(Some(RoleRecord {
-            role_id: row.get(0)?,
-            name: row.get(1)?,
-            description: row.get(2)?,
-            prompt_files,
-            system_prompt,
-            skills,
-            created_at_ms: row.get::<_, i64>(5)? as u64,
-        }));
-    }
-    Ok(None)
-}
-
-fn seed_default_roles(conn: &Connection) -> Result<()> {
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM roles", [], |row| row.get(0))?;
-    if count > 0 {
-        return Ok(());
-    }
-
-    info!("seeding default roles");
-    let now = now_ms() as i64;
-
-    // (name, description, prompt_files_json, skills_json)
-    let roles: &[(&str, &str, &str, &str)] = &[
-        (
-            "planner",
-            "Explore codebase, understand architecture, design step-by-step plan. Do NOT implement.",
-            r#"["roles/planner.md"]"#,
-            r#"["codebase-exploration", "architecture", "planning"]"#,
-        ),
-        (
-            "rust-developer",
-            "Implement Rust code following the plan. Idiomatic Rust, proper error handling.",
-            r#"["roles/rust-developer.md"]"#,
-            r#"["git", "coding", "rust", "cargo", "refactoring", "debugging"]"#,
-        ),
-        (
-            "astro-developer",
-            "Implement Astro/TypeScript frontend. Use bun, follow component patterns.",
-            r#"["roles/astro-developer.md"]"#,
-            r#"["git", "coding", "typescript", "astro", "bun", "css"]"#,
-        ),
-        (
-            "tester",
-            "Write and run tests. Verify coverage. Report failures with context.",
-            r#"["roles/tester.md"]"#,
-            r#"["testing", "cargo", "verification"]"#,
-        ),
-        (
-            "reviewer",
-            "Review diff for correctness, style, security. Output structured PASS/FAIL JSON.",
-            r#"["roles/reviewer.md"]"#,
-            r#"["code-review", "standards", "quality"]"#,
-        ),
-    ];
-
-    for (name, description, prompt_files_json, skills_json) in roles {
-        let role_id = ExternalId::new("role").to_string();
-        conn.execute(
-            "INSERT INTO roles (role_id, name, description, prompt_files, skills, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![role_id, name, description, prompt_files_json, skills_json, now],
-        )?;
-    }
-
-    info!(count = roles.len(), "default roles seeded");
     Ok(())
 }
 
@@ -4423,7 +4086,6 @@ mod tests {
                 crab_id: "crab-1".into(),
                 colony_id: colony.colony_id.clone(),
                 name: "Alice".into(),
-                role: "coder".into(),
                 state: None,
             }),
         )
@@ -4466,7 +4128,6 @@ mod tests {
                 crab_id: "crab-1".into(),
                 colony_id: colony.colony_id.clone(),
                 name: "Alice".into(),
-                role: "coder".into(),
                 state: None,
             }),
         )
@@ -4501,7 +4162,6 @@ mod tests {
                 crab_id: "crab-1".into(),
                 colony_id: colony.colony_id.clone(),
                 name: "Alice".into(),
-                role: "coder".into(),
                 state: None,
             }),
         )
@@ -4622,7 +4282,6 @@ mod tests {
                 crab_id: "crab-1".into(),
                 colony_id: colony.colony_id.clone(),
                 name: "Alice".into(),
-                role: "coder".into(),
                 state: None,
             }),
         )
@@ -4635,7 +4294,6 @@ mod tests {
                 crab_id: "crab-2".into(),
                 colony_id: colony.colony_id.clone(),
                 name: "Bob".into(),
-                role: "reviewer".into(),
                 state: None,
             }),
         )

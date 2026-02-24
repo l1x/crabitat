@@ -3,7 +3,7 @@ import Layout from '../layouts/Layout.astro';
 import Sidebar from '../components/Sidebar.astro';
 import ContentHeader from '../components/ContentHeader.astro';
 import AgentList from '../components/AgentList.astro';
-import { fetchRepos, fetchWorkflows, fetchRoles, fetchPromptFiles } from '../lib/api-client';
+import { fetchRepos, fetchWorkflows, fetchPromptFiles } from '../lib/api-client';
 import { mockIssues, mockMissions, mockAgents, mockMessages } from '../lib/mock-data';
 
 let repos = [];
@@ -11,9 +11,6 @@ try { repos = await fetchRepos(); } catch {}
 
 let workflows = [];
 try { workflows = await fetchWorkflows(); } catch {}
-
-let roles = [];
-try { roles = await fetchRoles(); } catch {}
 
 let promptFiles: string[] = [];
 try { promptFiles = await fetchPromptFiles(); } catch {}
@@ -29,7 +26,6 @@ try { promptFiles = await fetchPromptFiles(); } catch {}
     messageCount={mockMessages.length}
     workflowCount={workflows.length}
     promptCount={promptFiles.length}
-    roleCount={roles.length}
   />
 
   <div class="content">

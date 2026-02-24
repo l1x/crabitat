@@ -1,4 +1,4 @@
-import type { StatusSnapshot, CrabRecord, ColonyRecord, GitHubIssueRecord, MissionRecord, PromptFilePreview, RepoRecord, RoleRecord, SettingsRecord, SkillRecord, WorkflowRecord } from './types';
+import type { StatusSnapshot, CrabRecord, ColonyRecord, GitHubIssueRecord, MissionRecord, PromptFilePreview, RepoRecord, SettingsRecord, SkillRecord, WorkflowRecord } from './types';
 
 const CONTROL_PLANE_URL = import.meta.env.CONTROL_PLANE_URL || 'http://127.0.0.1:8800';
 
@@ -66,7 +66,6 @@ export async function registerCrab(body: {
   crab_id: string;
   colony_id: string;
   name: string;
-  role: string;
   state?: 'idle' | 'busy' | 'offline';
 }): Promise<CrabRecord> {
   const res = await fetch(`${CONTROL_PLANE_URL}/v1/crabs/register`, {
@@ -133,25 +132,6 @@ export async function removeFromQueue(colonyId: string, missionId: string): Prom
 export async function fetchWorkflows(): Promise<WorkflowRecord[]> {
   const res = await fetch(`${CONTROL_PLANE_URL}/v1/workflows`);
   if (!res.ok) throw new Error(`GET /v1/workflows failed: ${res.status}`);
-  return res.json();
-}
-
-export async function fetchRoles(): Promise<RoleRecord[]> {
-  const res = await fetch(`${CONTROL_PLANE_URL}/v1/roles`);
-  if (!res.ok) throw new Error(`GET /v1/roles failed: ${res.status}`);
-  return res.json();
-}
-
-export async function updateRole(
-  roleId: string,
-  body: { name?: string; description?: string; prompt_files?: string[]; skills?: string[] },
-): Promise<RoleRecord> {
-  const res = await fetch(`${CONTROL_PLANE_URL}/v1/roles/${roleId}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`PATCH /v1/roles/${roleId} failed: ${res.status}`);
   return res.json();
 }
 

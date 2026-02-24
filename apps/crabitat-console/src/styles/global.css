@@ -1257,11 +1257,10 @@ dialog.modal::backdrop {
 }
 
 /* ------------------------------------------------------------------ */
-/* Domain + role tags                                                  */
+/* Domain tags                                                         */
 /* ------------------------------------------------------------------ */
 
-.domain-tag,
-.role-tag {
+.domain-tag {
   display: inline-block;
   padding: 1px 7px;
   border-radius: 4px;
@@ -1275,11 +1274,11 @@ dialog.modal::backdrop {
 .domain-tag--web-dev   { background: #fce7f3; color: #be185d; }
 .domain-tag--infra     { background: var(--warn-bg); color: var(--warn); }
 .domain-tag--docs      { background: var(--good-bg); color: var(--good); }
-
-.role-tag--any     { background: var(--neutral-bg); color: var(--muted); }
-.role-tag--plan    { background: #ede9fe; color: #6d28d9; }
-.role-tag--code    { background: #dbeafe; color: #1d4ed8; }
-.role-tag--review  { background: var(--warn-bg); color: var(--warn); }
+.domain-tag--rust      { background: #fef3c7; color: #92400e; }
+.domain-tag--astro     { background: #fce7f3; color: #be185d; }
+.domain-tag--aws       { background: #fef3c7; color: #d97706; }
+.domain-tag--mise      { background: #e0e7ff; color: #4338ca; }
+.domain-tag--github-issue { background: #dbeafe; color: #1d4ed8; }
 
 /* ------------------------------------------------------------------ */
 /* Repo filter                                                         */

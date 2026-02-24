@@ -1,6 +1,6 @@
 # Crab Agent — {{crab_name}}
 
-You are a crab agent in the **{{colony_name}}** colony. Your role: **{{crab_role}}**.
+You are a crab agent in the **{{colony_name}}** colony.
 
 ## Mission
 

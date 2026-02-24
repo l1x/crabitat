@@ -44,9 +44,6 @@ enum Cmd {
         #[arg(long)]
         name: String,
 
-        #[arg(long, default_value = "coder")]
-        role: String,
-
         /// Explicit crab ID (auto-generated if omitted)
         #[arg(long)]
         crab_id: Option<String>,
@@ -128,9 +125,6 @@ enum Cmd {
         #[arg(long)]
         name: String,
 
-        #[arg(long, default_value = "coder")]
-        role: String,
-
         #[arg(long, default_value = ".")]
         repo: PathBuf,
 
@@ -148,7 +142,6 @@ struct RegisterCrabBody {
     crab_id: String,
     colony_id: String,
     name: String,
-    role: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -195,7 +188,6 @@ struct TaskRecord {
     assigned_crab_id: Option<String>,
     status: String,
     step_id: Option<String>,
-    role: Option<String>,
     prompt: Option<String>,
     context: Option<String>,
     created_at_ms: u64,
@@ -216,8 +208,8 @@ async fn main() -> Result<()> {
     let cp = &cli.control_plane;
 
     match cli.command {
-        Cmd::Register { colony_id, name, role, crab_id } => {
-            cmd_register(cp, &colony_id, &name, &role, crab_id).await?;
+        Cmd::Register { colony_id, name, crab_id } => {
+            cmd_register(cp, &colony_id, &name, crab_id).await?;
         }
         Cmd::Poll { crab_id } => {
             cmd_poll(cp, &crab_id).await?;
@@ -261,8 +253,8 @@ async fn main() -> Result<()> {
         Cmd::Tasks => {
             cmd_tasks(cp).await?;
         }
-        Cmd::Connect { colony_id, name, role, repo, crab_id } => {
-            run_connect(cp, &colony_id, &name, &role, &repo, crab_id).await?;
+        Cmd::Connect { colony_id, name, repo, crab_id } => {
+            run_connect(cp, &colony_id, &name, &repo, crab_id).await?;
         }
     }
 
@@ -277,7 +269,6 @@ async fn cmd_register(
     cp: &str,
     colony_id: &str,
     name: &str,
-    role: &str,
     crab_id: Option<String>,
 ) -> Result<()> {
     let http = Client::new();
@@ -289,7 +280,6 @@ async fn cmd_register(
             crab_id,
             colony_id: colony_id.to_string(),
             name: name.to_string(),
-            role: role.to_string(),
         })
         .send()
         .await
@@ -310,10 +300,10 @@ fn cmd_guide(cp: &str) {
 
 ## Step 1: Register
 
-Pick a name and role for yourself, then register:
+Pick a name for yourself, then register:
 
 ```
-crabitat-crab register --control-plane {cp} --colony-id <COLONY_ID> --name <NAME> --role <ROLE>
+crabitat-crab register --control-plane {cp} --colony-id <COLONY_ID> --name <NAME>
 ```
 
 This prints JSON with your `crab_id`. Save it — you need it for all subsequent commands.
@@ -545,14 +535,13 @@ async fn run_connect(
     control_plane: &str,
     colony_id: &str,
     name: &str,
-    role: &str,
     repo: &Path,
     crab_id_opt: Option<String>,
 ) -> Result<()> {
     let http = Client::new();
     let crab_id = crab_id_opt.unwrap_or_else(|| Uuid::new_v4().to_string());
 
-    info!(crab_id = %crab_id, name = %name, role = %role, "registering with control-plane");
+    info!(crab_id = %crab_id, name = %name, "registering with control-plane");
 
     let resp = http
         .post(format!("{control_plane}/v1/crabs/register"))
@@ -560,7 +549,6 @@ async fn run_connect(
             crab_id: crab_id.clone(),
             colony_id: colony_id.to_string(),
             name: name.to_string(),
-            role: role.to_string(),
         })
         .send()
         .await
@@ -622,7 +610,6 @@ async fn run_connect(
                                         control_plane,
                                         &crab_id,
                                         name,
-                                        role,
                                         colony_id,
                                         repo,
                                         &task,
@@ -664,7 +651,6 @@ async fn handle_task(
     control_plane: &str,
     crab_id: &str,
     crab_name: &str,
-    crab_role: &str,
     colony_name: &str,
     repo: &Path,
     task: &TaskAssigned,
@@ -707,7 +693,7 @@ async fn handle_task(
     };
 
     let result =
-        execute_in_burrow(crab_name, crab_role, colony_name, repo, task, &burrow_dir).await;
+        execute_in_burrow(crab_name, colony_name, repo, task, &burrow_dir).await;
 
     let end_to_end_ms = now_ms().saturating_sub(started_at);
 
@@ -804,7 +790,6 @@ struct LlmCliUsage {
 
 async fn execute_in_burrow(
     crab_name: &str,
-    crab_role: &str,
     colony_name: &str,
     repo: &Path,
     task: &TaskAssigned,
@@ -834,7 +819,6 @@ async fn execute_in_burrow(
 
     let prompt_content = CRAB_PROMPT_TEMPLATE
         .replace("{{crab_name}}", crab_name)
-        .replace("{{crab_role}}", crab_role)
         .replace("{{colony_name}}", colony_name)
         .replace("{{task_title}}", &task.title)
         .replace("{{mission_prompt}}", &task.mission_prompt);

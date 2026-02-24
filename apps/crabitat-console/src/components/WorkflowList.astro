@@ -7,14 +7,10 @@ interface Props {
 
 const { workflows } = Astro.props;
 
-function roleColor(role: string): string {
-  switch (role) {
-    case 'planner':   return 'role--planner';
-    case 'developer': return 'role--developer';
-    case 'tester':    return 'role--tester';
-    case 'reviewer':  return 'role--reviewer';
-    default:          return 'role--default';
-  }
+const STEP_COLORS = ['step--1', 'step--2', 'step--3', 'step--4', 'step--5'];
+
+function stepColor(index: number): string {
+  return STEP_COLORS[index % STEP_COLORS.length];
 }
 
 function stepNumber(step: WorkflowStepRecord): string {
@@ -47,7 +43,13 @@ function stepNumber(step: WorkflowStepRecord): string {
               <div class="wf-card-identity">
                 <h3 class="wf-name">{wf.name}</h3>
                 <div class="wf-badges">
-                  <span class={`domain-tag domain-tag--${wf.stack}`}>{wf.stack}</span>
+                  {wf.stack.length > 0 ? (
+                    wf.stack.map((s) => (
+                      <span class={`domain-tag domain-tag--${s}`}>{s}</span>
+                    ))
+                  ) : (
+                    <span class="domain-tag domain-tag--any">any</span>
+                  )}
                   <span class="wf-version">v{wf.version}</span>
                 </div>
               </div>
@@ -60,13 +62,12 @@ function stepNumber(step: WorkflowStepRecord): string {
               {wf.steps.map((step, i) => (
                 <>
                   <div class={`wf-step ${step.condition ? 'wf-step--conditional' : ''}`}>
-                    <div class={`wf-step-num ${roleColor(step.role)}`}>
+                    <div class={`wf-step-num ${stepColor(i)}`}>
                       {stepNumber(step)}
                     </div>
                     <div class="wf-step-body">
                       <div class="wf-step-header">
                         <span class="wf-step-id">{step.step_id}</span>
-                        <span class={`wf-role-tag ${roleColor(step.role)}`}>{step.role}</span>
                       </div>
                       {step.depends_on.length > 0 && (
                         <div class="wf-step-deps">
@@ -91,6 +92,13 @@ function stepNumber(step: WorkflowStepRecord): string {
                             <path d="M14 8a6 6 0 01-11.5 2.3M2 14v-4h4"/>
                           </svg>
                           {step.max_retries} retries
+                        </div>
+                      )}
+                      {step.stack.length > 0 && JSON.stringify(step.stack) !== JSON.stringify(wf.stack) && (
+                        <div class="wf-step-stack">
+                          {step.stack.map((s) => (
+                            <span class={`domain-tag domain-tag--${s}`}>{s}</span>
+                          ))}
                         </div>
                       )}
                     </div>
@@ -205,11 +213,11 @@ function stepNumber(step: WorkflowStepRecord): string {
     margin-top: 1px;
   }
 
-  .wf-step-num.role--planner   { background: #ede9fe; color: #6d28d9; }
-  .wf-step-num.role--developer { background: #dbeafe; color: #1d4ed8; }
-  .wf-step-num.role--tester    { background: #dcfce7; color: #16a34a; }
-  .wf-step-num.role--reviewer  { background: #fef3c7; color: #d97706; }
-  .wf-step-num.role--default   { background: var(--neutral-bg); color: var(--muted); }
+  .wf-step-num.step--1 { background: #ede9fe; color: #6d28d9; }
+  .wf-step-num.step--2 { background: #dbeafe; color: #1d4ed8; }
+  .wf-step-num.step--3 { background: #dcfce7; color: #16a34a; }
+  .wf-step-num.step--4 { background: #fef3c7; color: #d97706; }
+  .wf-step-num.step--5 { background: var(--neutral-bg); color: var(--muted); }
 
   .wf-step-body {
     min-width: 0;
@@ -227,21 +235,6 @@ function stepNumber(step: WorkflowStepRecord): string {
     font-weight: 600;
     color: var(--ink);
   }
-
-  .wf-role-tag {
-    font-size: 10px;
-    font-weight: 600;
-    padding: 1px 6px;
-    border-radius: 3px;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-  }
-
-  .wf-role-tag.role--planner   { background: #ede9fe; color: #6d28d9; }
-  .wf-role-tag.role--developer { background: #dbeafe; color: #1d4ed8; }
-  .wf-role-tag.role--tester    { background: #dcfce7; color: #16a34a; }
-  .wf-role-tag.role--reviewer  { background: #fef3c7; color: #d97706; }
-  .wf-role-tag.role--default   { background: var(--neutral-bg); color: var(--muted); }
 
   .wf-step-deps,
   .wf-step-cond,
@@ -264,6 +257,13 @@ function stepNumber(step: WorkflowStepRecord): string {
 
   .wf-step-retry {
     color: var(--muted);
+  }
+
+  .wf-step-stack {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    margin-top: 4px;
   }
 
   .wf-dep-icon,
