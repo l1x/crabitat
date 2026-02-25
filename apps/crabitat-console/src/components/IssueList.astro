@@ -53,6 +53,9 @@ const { issues, repos, colonies, workflows, showRepoFilter = true, repoId } = As
       <div class="issue-list" id="issue-list">
         {issues.map((issue) => {
           const repo = repos.find((r) => r.repo_id === issue.repo_id);
+          const body = (issue.body || '').trim();
+          const isLong = body.length > 180;
+          const snippetMd = isLong ? body.slice(0, 180) + '\u2026' : body;
           return (
             <div class="issue-card" data-issue-number={issue.number} data-repo-id={issue.repo_id}>
               <div class="issue-card-header">
@@ -60,21 +63,37 @@ const { issues, repos, colonies, workflows, showRepoFilter = true, repoId } = As
                   <span class="issue-number">#{issue.number}</span>
                   {issue.title}
                 </div>
-                {issue.already_queued ? (
-                  <span class="badge badge--muted">Queued</span>
-                ) : (
-                  <button
-                    class="btn btn--primary btn--sm launch-mission-btn"
-                    data-issue-number={issue.number}
-                    data-issue-title={issue.title}
-                    data-repo-id={issue.repo_id}
-                    data-repo-name={repo?.full_name}
-                  >
-                    Create Mission
-                  </button>
-                )}
+                <div class="issue-card-actions">
+                  {issue.already_queued ? (
+                    <span class="badge badge--muted">Queued</span>
+                  ) : (
+                    <button
+                      class="btn btn--primary btn--sm launch-mission-btn"
+                      data-issue-number={issue.number}
+                      data-issue-title={issue.title}
+                      data-issue-body={issue.body || ''}
+                      data-repo-id={issue.repo_id}
+                      data-repo-name={repo?.full_name}
+                    >
+                      Create Mission
+                    </button>
+                  )}
+                </div>
               </div>
-              <div class="issue-card-body issue-prose" set:html={marked.parse(issue.body || '')} />
+              {snippetMd && (
+                <div class="issue-card-body issue-prose issue-card-body--clamp" set:html={marked.parse(snippetMd)} />
+              )}
+              {isLong && (
+                <button
+                  class="issue-expand-btn"
+                  data-issue-number={issue.number}
+                  data-issue-title={issue.title}
+                  data-issue-body={issue.body}
+                  data-repo-name={repo?.full_name || ''}
+                  data-labels={issue.labels.join(',')}
+                  data-state={issue.state}
+                >&hellip;</button>
+              )}
               <div class="issue-card-footer">
                 {repo && (
                   <span>{repo.full_name}</span>
@@ -135,6 +154,20 @@ const { issues, repos, colonies, workflows, showRepoFilter = true, repoId } = As
   </div>
 </dialog>
 
+<!-- Issue Detail Modal -->
+<dialog class="modal modal--wide" id="issue-detail-modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <span class="modal-title" id="issue-detail-title"></span>
+      <button class="modal-close" id="issue-detail-close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="issue-detail-meta" id="issue-detail-meta"></div>
+      <div class="issue-detail-body issue-prose" id="issue-detail-body"></div>
+    </div>
+  </div>
+</dialog>
+
 <script>
   import { marked } from 'marked';
   marked.setOptions({ breaks: true });
@@ -154,6 +187,40 @@ const { issues, repos, colonies, workflows, showRepoFilter = true, repoId } = As
   const newColonyGroup = document.getElementById('launch-new-colony-group')!;
   const newColonyInput = document.getElementById('launch-new-colony-name') as HTMLInputElement;
   const workflowSelect = document.getElementById('launch-workflow') as HTMLSelectElement;
+
+  const detailModal = document.getElementById('issue-detail-modal') as HTMLDialogElement;
+  const detailTitle = document.getElementById('issue-detail-title')!;
+  const detailMeta = document.getElementById('issue-detail-meta')!;
+  const detailBody = document.getElementById('issue-detail-body')!;
+  const detailClose = document.getElementById('issue-detail-close')!;
+
+  detailClose.addEventListener('click', () => detailModal.close());
+  detailModal.addEventListener('click', (e) => {
+    if (e.target === detailModal) detailModal.close();
+  });
+
+  function bindExpandButtons() {
+    document.querySelectorAll<HTMLButtonElement>('.issue-expand-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const num = btn.dataset.issueNumber;
+        const title = btn.dataset.issueTitle || '';
+        const body = btn.dataset.issueBody || '';
+        const repoName = btn.dataset.repoName || '';
+        const labels = (btn.dataset.labels || '').split(',').filter(Boolean);
+        const state = btn.dataset.state || '';
+
+        detailTitle.textContent = `#${num} — ${title}`;
+        detailMeta.innerHTML = [
+          repoName ? `<span>${repoName}</span>` : '',
+          ...labels.map((l) => `<span class="issue-label">${l}</span>`),
+          state ? `<span class="issue-state issue-state--${state}">${state}</span>` : '',
+        ].filter(Boolean).join(' ');
+        detailBody.innerHTML = marked.parse(body) as string;
+        detailModal.showModal();
+      });
+    });
+  }
+  bindExpandButtons();
 
   let currentIssueNumber: number | null = null;
   let currentRepoId: string | null = null;
@@ -194,31 +261,48 @@ const { issues, repos, colonies, workflows, showRepoFilter = true, repoId } = As
         already_queued: boolean;
       }> = await res.json();
 
-      issueList.innerHTML = issues.map((issue) => `
+      issueList.innerHTML = issues.map((issue) => {
+        const body = (issue.body || '').trim();
+        const isLong = body.length > 180;
+        const snippetMd = isLong ? body.slice(0, 180) + '\u2026' : body;
+        const escapedTitle = issue.title.replace(/"/g, '&quot;');
+        const escapedBody = body.replace(/"/g, '&quot;');
+        return `
         <div class="issue-card" data-issue-number="${issue.number}" data-repo-id="${repoId}">
           <div class="issue-card-header">
             <div class="issue-card-title">
               <span class="issue-number">#${issue.number}</span>
               ${issue.title}
             </div>
+            <div class="issue-card-actions">
             ${issue.already_queued
               ? '<span class="badge badge--muted">Queued</span>'
               : `<button class="btn btn--primary btn--sm launch-mission-btn"
                   data-issue-number="${issue.number}"
-                  data-issue-title="${issue.title.replace(/"/g, '&quot;')}"
+                  data-issue-title="${escapedTitle}"
+                  data-issue-body="${escapedBody}"
                   data-repo-id="${repoId}"
                 >Create Mission</button>`}
+            </div>
           </div>
-          <div class="issue-card-body issue-prose">${marked.parse(issue.body || '')}</div>
+          ${snippetMd ? `<div class="issue-card-body issue-prose issue-card-body--clamp">${marked.parse(snippetMd)}</div>` : ''}
+          ${isLong ? `<button class="issue-expand-btn"
+            data-issue-number="${issue.number}"
+            data-issue-title="${escapedTitle}"
+            data-issue-body="${escapedBody}"
+            data-labels="${issue.labels.join(',')}"
+            data-state="${issue.state}"
+          >&hellip;</button>` : ''}
           <div class="issue-card-footer">
             ${issue.labels.map((l) => `<span class="issue-label">${l}</span>`).join('')}
             <span class="issue-state issue-state--${issue.state}">${issue.state}</span>
           </div>
         </div>
-      `).join('');
+      `}).join('');
 
       issueCount.textContent = String(issues.length);
       bindLaunchButtons();
+      bindExpandButtons();
     } catch (e) {
       console.error('Failed to refresh issues:', e);
     } finally {
@@ -318,3 +402,91 @@ const { issues, repos, colonies, workflows, showRepoFilter = true, repoId } = As
     }
   });
 </script>
+
+<style>
+  .issue-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .issue-card-body--clamp {
+    max-height: 4.8em;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .issue-expand-btn {
+    background: none;
+    border: none;
+    color: var(--primary, #2563eb);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-top: 4px;
+    letter-spacing: 0.1em;
+  }
+
+  .issue-expand-btn:hover {
+    background: var(--primary-soft, #eff6ff);
+  }
+
+  .issue-detail-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .issue-detail-body :global(p) { margin: 0 0 8px; }
+  .issue-detail-body :global(p:last-child) { margin-bottom: 0; }
+  .issue-detail-body :global(h1),
+  .issue-detail-body :global(h2),
+  .issue-detail-body :global(h3) {
+    font-weight: 700;
+    margin: 16px 0 6px;
+  }
+  .issue-detail-body :global(h1:first-child),
+  .issue-detail-body :global(h2:first-child),
+  .issue-detail-body :global(h3:first-child) { margin-top: 0; }
+  .issue-detail-body :global(h1) { font-size: 17px; }
+  .issue-detail-body :global(h2) { font-size: 15px; }
+  .issue-detail-body :global(h3) { font-size: 14px; }
+  .issue-detail-body :global(ul),
+  .issue-detail-body :global(ol) { margin: 4px 0 8px; padding-left: 20px; }
+  .issue-detail-body :global(li) { margin-bottom: 2px; }
+  .issue-detail-body :global(code) {
+    background: var(--neutral-bg, #f3f4f6);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 12px;
+    font-family: var(--font-mono, monospace);
+  }
+  .issue-detail-body :global(pre) {
+    background: var(--neutral-bg, #f3f4f6);
+    padding: 10px 12px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 6px 0 8px;
+  }
+  .issue-detail-body :global(pre code) { background: none; padding: 0; }
+  .issue-detail-body :global(blockquote) {
+    border-left: 3px solid var(--line, #e5e7eb);
+    margin: 6px 0;
+    padding: 2px 12px;
+    color: var(--muted, #6b7280);
+  }
+  .issue-detail-body :global(a) { color: var(--primary, #2563eb); text-decoration: none; }
+  .issue-detail-body :global(a:hover) { text-decoration: underline; }
+
+  #issue-detail-modal {
+    width: 800px;
+    max-width: 90vw;
+  }
+</style>
