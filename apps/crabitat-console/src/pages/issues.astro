@@ -3,15 +3,30 @@ import Layout from '../layouts/Layout.astro';
 import Sidebar from '../components/Sidebar.astro';
 import ContentHeader from '../components/ContentHeader.astro';
 import IssueList from '../components/IssueList.astro';
-import { fetchRepos, fetchWorkflows } from '../lib/api-client';
-import { mockIssues, mockMissions, mockAgents, mockMessages } from '../lib/mock-data';
-import type { RepoRecord } from '../lib/types';
+import type { IssueWithRepo } from '../components/IssueList.astro';
+import { fetchRepos, fetchRepoIssues, fetchWorkflows, fetchMissions } from '../lib/api-client';
+import { mockAgents, mockMessages } from '../lib/mock-data';
+import type { RepoRecord, MissionRecord, WorkflowRecord } from '../lib/types';
 
 let repos: RepoRecord[] = [];
 try { repos = await fetchRepos(); } catch {}
 
-let workflows = [];
+let workflows: WorkflowRecord[] = [];
 try { workflows = await fetchWorkflows(); } catch {}
+
+let missions: MissionRecord[] = [];
+try { missions = await fetchMissions(); } catch {}
+
+// Fetch real issues from GitHub for each registered repo
+const allIssues: IssueWithRepo[] = [];
+for (const repo of repos) {
+  try {
+    const repoIssues = await fetchRepoIssues(repo.repo_id);
+    for (const issue of repoIssues) {
+      allIssues.push({ ...issue, repo_id: repo.repo_id });
+    }
+  } catch {}
+}
 
 ---
 
@@ -19,8 +34,8 @@ try { workflows = await fetchWorkflows(); } catch {}
   <Sidebar
     activePage="/issues"
     repoCount={repos.length}
-    issueCount={mockIssues.length}
-    missionCount={mockMissions.length}
+    issueCount={allIssues.length}
+    missionCount={missions.length}
     agentCount={mockAgents.length}
     messageCount={mockMessages.length}
     workflowCount={workflows.length}
@@ -29,7 +44,7 @@ try { workflows = await fetchWorkflows(); } catch {}
   <div class="content">
     <ContentHeader title="Issues" />
     <div class="section">
-      <IssueList issues={mockIssues} repos={repos} />
+      <IssueList issues={allIssues} repos={repos} />
     </div>
   </div>
 </Layout>

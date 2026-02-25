@@ -4,8 +4,12 @@ import type { GitHubIssueRecord, RepoRecord } from '../lib/types';
 
 marked.setOptions({ breaks: true });
 
+export interface IssueWithRepo extends GitHubIssueRecord {
+  repo_id: string;
+}
+
 interface Props {
-  issues: GitHubIssueRecord[];
+  issues: IssueWithRepo[];
   repos: RepoRecord[];
   showRepoFilter?: boolean;
   repoId?: string;
@@ -46,9 +50,9 @@ const { issues, repos, showRepoFilter = true, repoId } = Astro.props;
     ) : (
       <div class="issue-list" id="issue-list">
         {issues.map((issue) => {
-          const repo = repos.length === 1 ? repos[0] : undefined;
+          const repo = repos.find((r) => r.repo_id === issue.repo_id);
           return (
-            <div class="issue-card" data-issue-number={issue.number}>
+            <div class="issue-card" data-issue-number={issue.number} data-repo-id={issue.repo_id}>
               <div class="issue-card-header">
                 <div class="issue-card-title">
                   <span class="issue-number">#{issue.number}</span>
@@ -61,6 +65,7 @@ const { issues, repos, showRepoFilter = true, repoId } = Astro.props;
                     class="btn btn--primary btn--sm launch-mission-btn"
                     data-issue-number={issue.number}
                     data-issue-title={issue.title}
+                    data-repo-id={issue.repo_id}
                     data-repo-name={repo?.full_name}
                   >
                     Create Mission
