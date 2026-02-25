@@ -1,0 +1,157 @@
+---
+import type { ColonyRecord, WorkflowRecord } from '../lib/types';
+
+interface Props {
+  colonies: ColonyRecord[];
+  workflows: WorkflowRecord[];
+}
+
+const { colonies, workflows } = Astro.props;
+---
+
+<dialog class="modal modal--wide" id="create-mission-modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <span class="modal-title">Create Mission</span>
+      <button class="modal-close" id="create-mission-close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label" for="mission-colony">Colony</label>
+        <select class="form-input" id="mission-colony">
+          {colonies.map((c) => (
+            <option value={c.colony_id}>{c.name}</option>
+          ))}
+          <option value="__new__">Create new&hellip;</option>
+        </select>
+      </div>
+
+      <div class="form-group" id="new-colony-group" hidden>
+        <label class="form-label" for="new-colony-name">New colony name</label>
+        <input type="text" class="form-input" id="new-colony-name" placeholder="my-colony" />
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="mission-prompt">Prompt</label>
+        <textarea
+          class="form-input"
+          id="mission-prompt"
+          rows="4"
+          placeholder="Describe what this mission should accomplish..."
+        ></textarea>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="mission-workflow">Workflow (optional)</label>
+        <select class="form-input" id="mission-workflow">
+          <option value="">None</option>
+          {workflows.map((wf) => (
+            <option value={wf.name}>{wf.name}</option>
+          ))}
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" id="create-mission-cancel">Cancel</button>
+      <button class="btn btn--primary" id="create-mission-submit">Create</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+  const modal = document.getElementById('create-mission-modal') as HTMLDialogElement;
+  const closeBtn = document.getElementById('create-mission-close')!;
+  const cancelBtn = document.getElementById('create-mission-cancel')!;
+  const submitBtn = document.getElementById('create-mission-submit') as HTMLButtonElement;
+
+  const colonySelect = document.getElementById('mission-colony') as HTMLSelectElement;
+  const newColonyGroup = document.getElementById('new-colony-group')!;
+  const newColonyInput = document.getElementById('new-colony-name') as HTMLInputElement;
+  const promptInput = document.getElementById('mission-prompt') as HTMLTextAreaElement;
+  const workflowSelect = document.getElementById('mission-workflow') as HTMLSelectElement;
+
+  colonySelect.addEventListener('change', () => {
+    newColonyGroup.hidden = colonySelect.value !== '__new__';
+  });
+
+  function resetModal() {
+    colonySelect.selectedIndex = 0;
+    newColonyGroup.hidden = true;
+    newColonyInput.value = '';
+    promptInput.value = '';
+    workflowSelect.selectedIndex = 0;
+    submitBtn.textContent = 'Create';
+    submitBtn.disabled = false;
+  }
+
+  closeBtn.addEventListener('click', () => { modal.close(); resetModal(); });
+  cancelBtn.addEventListener('click', () => { modal.close(); resetModal(); });
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) { modal.close(); resetModal(); }
+  });
+
+  submitBtn.addEventListener('click', async () => {
+    const prompt = promptInput.value.trim();
+    if (!prompt) {
+      alert('Prompt is required.');
+      return;
+    }
+
+    submitBtn.textContent = 'Creating...';
+    submitBtn.disabled = true;
+
+    try {
+      let colonyId = colonySelect.value;
+
+      if (colonyId === '__new__') {
+        const name = newColonyInput.value.trim();
+        if (!name) {
+          alert('Colony name is required.');
+          submitBtn.textContent = 'Create';
+          submitBtn.disabled = false;
+          return;
+        }
+        const colonyRes = await fetch('/api/colonies', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name }),
+        });
+        if (!colonyRes.ok) {
+          const err = await colonyRes.json().catch(() => ({ error: 'Unknown error' }));
+          throw new Error(err.error || `Failed to create colony: ${colonyRes.status}`);
+        }
+        const colony = await colonyRes.json();
+        colonyId = colony.colony_id;
+      }
+
+      const body: Record<string, string> = { colony_id: colonyId, prompt };
+      const workflow = workflowSelect.value;
+      if (workflow) body.workflow = workflow;
+
+      const res = await fetch('/api/missions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(err.error || `Failed to create mission: ${res.status}`);
+      }
+
+      modal.close();
+      resetModal();
+      window.location.reload();
+    } catch (e: unknown) {
+      submitBtn.textContent = 'Create';
+      submitBtn.disabled = false;
+      alert(`Error: ${e instanceof Error ? e.message : e}`);
+    }
+  });
+
+  (window as any).openCreateMissionModal = () => {
+    resetModal();
+    modal.showModal();
+    promptInput.focus();
+  };
+</script>

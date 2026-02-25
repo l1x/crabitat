@@ -1,4 +1,4 @@
-import type { StatusSnapshot, CrabRecord, ColonyRecord, GitHubIssueRecord, MissionRecord, PromptFilePreview, RepoRecord, SettingsRecord, SkillRecord, SyncResult, WorkflowRecord } from './types';
+import type { StatusSnapshot, CrabRecord, ColonyRecord, GitHubIssueRecord, MissionRecord, PromptFilePreview, RepoRecord, SettingsRecord, SkillRecord, SyncResult, TaskRecord, WorkflowRecord } from './types';
 
 const CONTROL_PLANE_URL = import.meta.env.CONTROL_PLANE_URL || 'http://127.0.0.1:8800';
 
@@ -180,5 +180,31 @@ export async function fetchRepoLanguages(repoId: string): Promise<Record<string,
 export async function fetchSkills(): Promise<SkillRecord[]> {
   const res = await fetch(`${CONTROL_PLANE_URL}/v1/skills`);
   if (!res.ok) throw new Error(`GET /v1/skills failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchMissions(): Promise<MissionRecord[]> {
+  const res = await fetch(`${CONTROL_PLANE_URL}/v1/missions`);
+  if (!res.ok) throw new Error(`GET /v1/missions failed: ${res.status}`);
+  return res.json();
+}
+
+export async function createMission(body: {
+  colony_id: string;
+  prompt: string;
+  workflow?: string;
+}): Promise<MissionRecord> {
+  const res = await fetch(`${CONTROL_PLANE_URL}/v1/missions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`POST /v1/missions failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchTasks(): Promise<TaskRecord[]> {
+  const res = await fetch(`${CONTROL_PLANE_URL}/v1/tasks`);
+  if (!res.ok) throw new Error(`GET /v1/tasks failed: ${res.status}`);
   return res.json();
 }
