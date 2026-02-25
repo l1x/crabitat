@@ -18,7 +18,29 @@ interface Props {
 }
 
 const { issues, repos, colonies, workflows, showRepoFilter = true, repoId } = Astro.props;
+
+function truncateBody(body: string, max: number): string {
+  const trimmed = body.trim();
+  if (trimmed.length <= max) return trimmed;
+  return trimmed.slice(0, max) + '\u2026';
+}
+
+// Build a lookup for JS to reference issue data by number
+const issueDataMap: Record<number, { title: string; body: string; repoId: string; repoName: string; labels: string[]; state: string }> = {};
+for (const issue of issues) {
+  const repo = repos.find((r) => r.repo_id === issue.repo_id);
+  issueDataMap[issue.number] = {
+    title: issue.title,
+    body: issue.body || '',
+    repoId: issue.repo_id,
+    repoName: repo?.full_name || '',
+    labels: issue.labels,
+    state: issue.state,
+  };
+}
 ---
+
+<script id="issue-data-json" type="application/json" set:html={JSON.stringify(issueDataMap)} />
 
 {showRepoFilter && (
   <div class="repo-filter">
@@ -55,7 +77,7 @@ const { issues, repos, colonies, workflows, showRepoFilter = true, repoId } = As
           const repo = repos.find((r) => r.repo_id === issue.repo_id);
           const body = (issue.body || '').trim();
           const isLong = body.length > 180;
-          const snippetMd = isLong ? body.slice(0, 180) + '\u2026' : body;
+          const snippetMd = isLong ? truncateBody(body, 180) : body;
           return (
             <div class="issue-card" data-issue-number={issue.number} data-repo-id={issue.repo_id}>
               <div class="issue-card-header">
@@ -70,10 +92,6 @@ const { issues, repos, colonies, workflows, showRepoFilter = true, repoId } = As
                     <button
                       class="btn btn--primary btn--sm launch-mission-btn"
                       data-issue-number={issue.number}
-                      data-issue-title={issue.title}
-                      data-issue-body={issue.body || ''}
-                      data-repo-id={issue.repo_id}
-                      data-repo-name={repo?.full_name}
                     >
                       Create Mission
                     </button>
@@ -84,15 +102,7 @@ const { issues, repos, colonies, workflows, showRepoFilter = true, repoId } = As
                 <div class="issue-card-body issue-prose issue-card-body--clamp" set:html={marked.parse(snippetMd)} />
               )}
               {isLong && (
-                <button
-                  class="issue-expand-btn"
-                  data-issue-number={issue.number}
-                  data-issue-title={issue.title}
-                  data-issue-body={issue.body}
-                  data-repo-name={repo?.full_name || ''}
-                  data-labels={issue.labels.join(',')}
-                  data-state={issue.state}
-                >&hellip;</button>
+                <button class="issue-expand-btn" data-issue-number={issue.number}>&hellip;</button>
               )}
               <div class="issue-card-footer">
                 {repo && (
@@ -172,6 +182,11 @@ const { issues, repos, colonies, workflows, showRepoFilter = true, repoId } = As
   import { marked } from 'marked';
   marked.setOptions({ breaks: true });
 
+  // Load issue data from JSON instead of data attributes
+  const issueDataEl = document.getElementById('issue-data-json');
+  const issueDataMap: Record<number, { title: string; body: string; repoId: string; repoName: string; labels: string[]; state: string }> =
+    issueDataEl ? JSON.parse(issueDataEl.textContent || '{}') : {};
+
   const modal = document.getElementById('launch-modal') as HTMLDialogElement;
   const issueRef = document.getElementById('launch-issue-ref')!;
   const repoRef = document.getElementById('launch-repo-ref')!;
@@ -202,20 +217,17 @@ const { issues, repos, colonies, workflows, showRepoFilter = true, repoId } = As
   function bindExpandButtons() {
     document.querySelectorAll<HTMLButtonElement>('.issue-expand-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const num = btn.dataset.issueNumber;
-        const title = btn.dataset.issueTitle || '';
-        const body = btn.dataset.issueBody || '';
-        const repoName = btn.dataset.repoName || '';
-        const labels = (btn.dataset.labels || '').split(',').filter(Boolean);
-        const state = btn.dataset.state || '';
+        const num = Number(btn.dataset.issueNumber);
+        const data = issueDataMap[num];
+        if (!data) return;
 
-        detailTitle.textContent = `#${num} — ${title}`;
+        detailTitle.textContent = `#${num} — ${data.title}`;
         detailMeta.innerHTML = [
-          repoName ? `<span>${repoName}</span>` : '',
-          ...labels.map((l) => `<span class="issue-label">${l}</span>`),
-          state ? `<span class="issue-state issue-state--${state}">${state}</span>` : '',
+          data.repoName ? `<span>${data.repoName}</span>` : '',
+          ...data.labels.map((l) => `<span class="issue-label">${l}</span>`),
+          data.state ? `<span class="issue-state issue-state--${data.state}">${data.state}</span>` : '',
         ].filter(Boolean).join(' ');
-        detailBody.innerHTML = marked.parse(body) as string;
+        detailBody.innerHTML = marked.parse(data.body) as string;
         detailModal.showModal();
       });
     });
@@ -223,7 +235,6 @@ const { issues, repos, colonies, workflows, showRepoFilter = true, repoId } = As
   bindExpandButtons();
 
   let currentIssueNumber: number | null = null;
-  let currentRepoId: string | null = null;
 
   colonySelect.addEventListener('change', () => {
     newColonyGroup.hidden = colonySelect.value !== '__new__';
@@ -261,12 +272,22 @@ const { issues, repos, colonies, workflows, showRepoFilter = true, repoId } = As
         already_queued: boolean;
       }> = await res.json();
 
+      // Update the data map with refreshed issues
+      for (const issue of issues) {
+        issueDataMap[issue.number] = {
+          title: issue.title,
+          body: issue.body || '',
+          repoId,
+          repoName: '',
+          labels: issue.labels,
+          state: issue.state,
+        };
+      }
+
       issueList.innerHTML = issues.map((issue) => {
         const body = (issue.body || '').trim();
         const isLong = body.length > 180;
         const snippetMd = isLong ? body.slice(0, 180) + '\u2026' : body;
-        const escapedTitle = issue.title.replace(/"/g, '&quot;');
-        const escapedBody = body.replace(/"/g, '&quot;');
         return `
         <div class="issue-card" data-issue-number="${issue.number}" data-repo-id="${repoId}">
           <div class="issue-card-header">
@@ -279,20 +300,11 @@ const { issues, repos, colonies, workflows, showRepoFilter = true, repoId } = As
               ? '<span class="badge badge--muted">Queued</span>'
               : `<button class="btn btn--primary btn--sm launch-mission-btn"
                   data-issue-number="${issue.number}"
-                  data-issue-title="${escapedTitle}"
-                  data-issue-body="${escapedBody}"
-                  data-repo-id="${repoId}"
                 >Create Mission</button>`}
             </div>
           </div>
           ${snippetMd ? `<div class="issue-card-body issue-prose issue-card-body--clamp">${marked.parse(snippetMd)}</div>` : ''}
-          ${isLong ? `<button class="issue-expand-btn"
-            data-issue-number="${issue.number}"
-            data-issue-title="${escapedTitle}"
-            data-issue-body="${escapedBody}"
-            data-labels="${issue.labels.join(',')}"
-            data-state="${issue.state}"
-          >&hellip;</button>` : ''}
+          ${isLong ? `<button class="issue-expand-btn" data-issue-number="${issue.number}">&hellip;</button>` : ''}
           <div class="issue-card-footer">
             ${issue.labels.map((l) => `<span class="issue-label">${l}</span>`).join('')}
             <span class="issue-state issue-state--${issue.state}">${issue.state}</span>
@@ -320,19 +332,17 @@ const { issues, repos, colonies, workflows, showRepoFilter = true, repoId } = As
     executeBtn.textContent = 'Create';
     executeBtn.disabled = false;
     currentIssueNumber = null;
-    currentRepoId = null;
   }
 
   function bindLaunchButtons() {
     document.querySelectorAll<HTMLButtonElement>('.launch-mission-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         resetModal();
-        currentIssueNumber = Number(btn.dataset.issueNumber);
-        currentRepoId = btn.dataset.repoId || null;
-        const title = btn.dataset.issueTitle;
-        const repoName = btn.dataset.repoName;
-        issueRef.textContent = `#${currentIssueNumber} — ${title}`;
-        repoRef.textContent = repoName || '';
+        const num = Number(btn.dataset.issueNumber);
+        const data = issueDataMap[num];
+        currentIssueNumber = num;
+        issueRef.textContent = `#${num} — ${data?.title || ''}`;
+        repoRef.textContent = data?.repoName || '';
         modal.showModal();
       });
     });
