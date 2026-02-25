@@ -818,6 +818,8 @@ struct WorkflowRecord {
     description: String,
     include: Vec<String>,
     version: String,
+    source: String,
+    commit_hash: Option<String>,
     created_at_ms: u64,
     steps: Vec<WorkflowStepRecord>,
 }
@@ -878,6 +880,17 @@ async fn serve(port: u16, db_path: &StdPath, prompts_path: &StdPath) -> Result<(
     let (console_tx, _) = broadcast::channel::<String>(256);
     let workflows = WorkflowRegistry::load(prompts_path);
     info!(count = workflows.manifests.len(), "workflow registry loaded");
+
+    // Auto-sync TOML workflows to DB on startup
+    let sync_result = sync_toml_workflows_to_db(&connection, &workflows);
+    info!(
+        synced = sync_result.synced,
+        removed = sync_result.removed,
+        commit = ?sync_result.commit_hash,
+        errors = sync_result.errors.len(),
+        "startup workflow sync"
+    );
+
     let github = GitHubClient::new();
     if github.has_token() {
         info!("GitHub: using GraphQL API (GITHUB_TOKEN set)");
@@ -930,6 +943,7 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/runs/update", post(update_run))
         .route("/v1/runs/complete", post(complete_run))
         .route("/v1/workflows", get(list_db_workflows).post(create_workflow))
+        .route("/v1/workflows/sync", post(sync_workflows))
         .route(
             "/v1/workflows/{workflow_id}",
             get(get_workflow).patch(update_workflow).delete(delete_workflow),
@@ -1083,6 +1097,8 @@ fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
         "ALTER TABLE workflow_steps ADD COLUMN include TEXT NOT NULL DEFAULT '[]'",
         "ALTER TABLE workflows RENAME COLUMN stack TO include",
         "ALTER TABLE workflow_steps RENAME COLUMN stack TO include",
+        "ALTER TABLE workflows ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'",
+        "ALTER TABLE workflows ADD COLUMN commit_hash TEXT",
     ];
     for sql in migrations {
         match conn.execute(sql, []) {
@@ -1350,13 +1366,14 @@ async fn create_workflow(
 
     let db = state.db.lock().await;
     db.execute(
-        "INSERT INTO workflows (workflow_id, name, description, include, version, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO workflows (workflow_id, name, description, include, version, source, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             workflow_id,
             request.name,
             request.description.as_deref().unwrap_or(""),
             include_json,
             request.version.as_deref().unwrap_or("1.0.0"),
+            "manual",
             now as i64,
         ],
     )?;
@@ -1398,6 +1415,30 @@ async fn update_workflow(
     let wf = fetch_workflow(&db, &workflow_id)?
         .ok_or_else(|| ApiError::internal("failed to reload workflow after update"))?;
     Ok(Json(wf))
+}
+
+async fn sync_workflows(
+    State(state): State<AppState>,
+) -> Result<Json<SyncResult>, ApiError> {
+    // Reload registry from current prompts_path
+    let prompts_path = {
+        let wf = state.workflows.read().unwrap();
+        wf.prompts_path.clone()
+    };
+    let new_registry = WorkflowRegistry::load(&prompts_path);
+    info!(count = new_registry.manifests.len(), path = %prompts_path.display(), "reloaded workflow registry for sync");
+
+    // Update in-memory registry and clone for DB sync
+    let registry_clone = {
+        let mut wf = state.workflows.write().unwrap();
+        *wf = new_registry;
+        wf.clone()
+    };
+
+    // Sync to DB
+    let db = state.db.lock().await;
+    let result = sync_toml_workflows_to_db(&db, &registry_clone);
+    Ok(Json(result))
 }
 
 async fn delete_workflow(
@@ -1527,13 +1568,19 @@ async fn patch_settings(
         }
     }
 
-    // If prompts_path changed, reload WorkflowRegistry
+    // If prompts_path changed, reload WorkflowRegistry and sync to DB
     if let Some(serde_json::Value::String(new_path)) = obj.get("prompts_path") {
         let path = PathBuf::from(new_path);
         let new_registry = WorkflowRegistry::load(&path);
         info!(count = new_registry.manifests.len(), path = %path.display(), "reloaded workflow registry after settings change");
-        let mut wf = state.workflows.write().unwrap();
-        *wf = new_registry;
+        let registry_clone = {
+            let mut wf = state.workflows.write().unwrap();
+            *wf = new_registry;
+            wf.clone()
+        };
+        let db = state.db.lock().await;
+        let sync = sync_toml_workflows_to_db(&db, &registry_clone);
+        info!(synced = sync.synced, removed = sync.removed, "auto-synced workflows after prompts_path change");
     }
 
     get_settings(State(state)).await
@@ -3654,17 +3701,17 @@ fn map_run_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunRecord> {
 
 fn query_workflows(conn: &Connection) -> Result<Vec<WorkflowRecord>, ApiError> {
     let mut wf_stmt = conn.prepare(
-        "SELECT workflow_id, name, description, include, version, created_at_ms FROM workflows ORDER BY name",
+        "SELECT workflow_id, name, description, include, version, created_at_ms, source, commit_hash FROM workflows ORDER BY name",
     )?;
-    let workflows: Vec<(String, String, String, String, String, i64)> = wf_stmt
+    let workflows: Vec<(String, String, String, String, String, i64, String, Option<String>)> = wf_stmt
         .query_map([], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?))
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?))
         })?
         .filter_map(Result::ok)
         .collect();
 
     let mut result = Vec::with_capacity(workflows.len());
-    for (wf_id, name, description, include_raw, version, created_at_ms) in workflows {
+    for (wf_id, name, description, include_raw, version, created_at_ms, source, commit_hash) in workflows {
         let include: Vec<String> = serde_json::from_str(&include_raw).unwrap_or_default();
         let steps = query_workflow_steps(conn, &wf_id)?;
         result.push(WorkflowRecord {
@@ -3673,6 +3720,8 @@ fn query_workflows(conn: &Connection) -> Result<Vec<WorkflowRecord>, ApiError> {
             description,
             include,
             version,
+            source,
+            commit_hash,
             created_at_ms: created_at_ms as u64,
             steps,
         });
@@ -3685,7 +3734,7 @@ fn fetch_workflow(
     workflow_id: &str,
 ) -> Result<Option<WorkflowRecord>, ApiError> {
     let mut stmt = conn.prepare(
-        "SELECT workflow_id, name, description, include, version, created_at_ms FROM workflows WHERE workflow_id = ?1",
+        "SELECT workflow_id, name, description, include, version, created_at_ms, source, commit_hash FROM workflows WHERE workflow_id = ?1",
     )?;
     let mut rows = stmt.query(params![workflow_id])?;
     if let Some(row) = rows.next()? {
@@ -3699,6 +3748,8 @@ fn fetch_workflow(
             description: row.get(2)?,
             include,
             version: row.get(4)?,
+            source: row.get(6)?,
+            commit_hash: row.get(7)?,
             created_at_ms: row.get::<_, i64>(5)? as u64,
             steps,
         }));
@@ -3731,72 +3782,157 @@ fn query_workflow_steps(
     Ok(rows.filter_map(Result::ok).collect())
 }
 
-type SeedStep = (&'static str, &'static str, &'static str, Option<&'static str>, i64);
-
 fn seed_default_workflows(conn: &Connection) -> Result<()> {
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM workflows", [], |row| row.get(0))?;
     if count > 0 {
         return Ok(());
     }
+    info!("no default workflows to seed — onboard from a prompts repo");
+    Ok(())
+}
 
-    info!("seeding default workflows");
-    let now = now_ms() as i64;
+// ---------------------------------------------------------------------------
+// Workflow TOML → DB sync
+// ---------------------------------------------------------------------------
 
-    let seed_steps = |conn: &Connection,
-                      wf_id: &str,
-                      steps: &[SeedStep]|
-     -> Result<(), rusqlite::Error> {
-        for (i, (step_id, deps, prompt_file, condition, max_retries)) in
-            steps.iter().enumerate()
-        {
-            conn.execute(
-                "INSERT INTO workflow_steps (workflow_id, position, step_id, prompt_file, depends_on, condition, max_retries) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![wf_id, i as i64, step_id, prompt_file, deps, condition, max_retries],
-            )?;
+#[derive(Debug, Serialize)]
+struct SyncResult {
+    synced: usize,
+    removed: usize,
+    commit_hash: Option<String>,
+    errors: Vec<String>,
+}
+
+/// Get the git HEAD commit hash for the prompts directory (submodule or repo).
+fn get_prompts_commit_hash(prompts_path: &StdPath) -> Option<String> {
+    std::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(prompts_path)
+        .output()
+        .ok()
+        .and_then(|out| {
+            if out.status.success() {
+                Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+            } else {
+                None
+            }
+        })
+}
+
+fn sync_toml_workflows_to_db(
+    conn: &Connection,
+    registry: &WorkflowRegistry,
+) -> SyncResult {
+    let mut synced = 0usize;
+    let mut errors = Vec::new();
+    let commit_hash = get_prompts_commit_hash(&registry.prompts_path);
+
+    let manifest_names: Vec<&String> = registry.manifests.keys().collect();
+
+    for (name, manifest) in &registry.manifests {
+        let include_json = serde_json::to_string(&manifest.workflow.include)
+            .unwrap_or_else(|_| "[]".to_string());
+
+        // Upsert workflow by name
+        let upsert_result = conn.execute(
+            "INSERT INTO workflows (workflow_id, name, description, include, version, source, commit_hash, created_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'toml', ?6, ?7)
+             ON CONFLICT(name) DO UPDATE SET
+               description = excluded.description,
+               include = excluded.include,
+               version = excluded.version,
+               source = 'toml',
+               commit_hash = excluded.commit_hash",
+            params![
+                ExternalId::new("wf").to_string(),
+                name,
+                manifest.workflow.description,
+                include_json,
+                manifest.workflow.version,
+                commit_hash,
+                now_ms() as i64,
+            ],
+        );
+
+        if let Err(e) = upsert_result {
+            errors.push(format!("upsert workflow {name}: {e}"));
+            continue;
         }
-        Ok(())
+
+        // Get the workflow_id for this name (may be new or existing)
+        let wf_id: String = match conn.query_row(
+            "SELECT workflow_id FROM workflows WHERE name = ?1",
+            params![name],
+            |row| row.get(0),
+        ) {
+            Ok(id) => id,
+            Err(e) => {
+                errors.push(format!("lookup workflow_id for {name}: {e}"));
+                continue;
+            }
+        };
+
+        // Replace steps: delete old, insert new
+        if let Err(e) = conn.execute(
+            "DELETE FROM workflow_steps WHERE workflow_id = ?1",
+            params![wf_id],
+        ) {
+            errors.push(format!("delete steps for {name}: {e}"));
+            continue;
+        }
+
+        let mut step_ok = true;
+        for (i, step) in manifest.steps.iter().enumerate() {
+            let depends_on_json = serde_json::to_string(&step.depends_on)
+                .unwrap_or_else(|_| "[]".to_string());
+            let include_json = serde_json::to_string(&step.include.clone().unwrap_or_default())
+                .unwrap_or_else(|_| "[]".to_string());
+
+            if let Err(e) = conn.execute(
+                "INSERT INTO workflow_steps (workflow_id, position, step_id, prompt_file, depends_on, condition, max_retries, include) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    wf_id,
+                    i as i64,
+                    step.id,
+                    step.prompt_file,
+                    depends_on_json,
+                    step.condition,
+                    step.max_retries as i64,
+                    include_json,
+                ],
+            ) {
+                errors.push(format!("insert step {} for {name}: {e}", step.id));
+                step_ok = false;
+                break;
+            }
+        }
+
+        if step_ok {
+            synced += 1;
+        }
+    }
+
+    // Remove stale toml-sourced workflows not in current registry
+    let removed = if manifest_names.is_empty() {
+        // Remove all toml-sourced workflows
+        conn.execute("DELETE FROM workflows WHERE source = 'toml'", [])
+            .unwrap_or(0)
+    } else {
+        // Build placeholders for NOT IN
+        let placeholders: Vec<String> = manifest_names.iter().enumerate().map(|(i, _)| format!("?{}", i + 1)).collect();
+        let sql = format!(
+            "DELETE FROM workflows WHERE source = 'toml' AND name NOT IN ({})",
+            placeholders.join(", ")
+        );
+        let params: Vec<&dyn rusqlite::types::ToSql> = manifest_names
+            .iter()
+            .map(|n| n as &dyn rusqlite::types::ToSql)
+            .collect();
+        conn.execute(&sql, params.as_slice()).unwrap_or(0)
     };
 
-    // Backend Rust workflow
-    let backend_id = ExternalId::new("wf").to_string();
-    conn.execute(
-        "INSERT INTO workflows (workflow_id, name, description, include, version, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![backend_id, "Feature Plan & Implementation - Backend Rust", "End-to-end workflow for planning, implementing, testing, and reviewing backend Rust features", r#"["stacks/rust.md"]"#, "1.0.0", now],
-    )?;
-    seed_steps(
-        conn,
-        &backend_id,
-        &[
-            ("plan", "[]", "", None, 0),
-            ("implement", r#"["plan"]"#, "", None, 0),
-            ("test", r#"["implement"]"#, "", None, 0),
-            ("review", r#"["test"]"#, "", None, 0),
-            ("fix", r#"["review"]"#, "", Some("review.result == 'FAIL'"), 3),
-            ("pr", r#"["review"]"#, "", Some("review.result == 'PASS'"), 0),
-        ],
-    )?;
-
-    // Frontend Astro workflow
-    let frontend_id = ExternalId::new("wf").to_string();
-    conn.execute(
-        "INSERT INTO workflows (workflow_id, name, description, include, version, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![frontend_id, "Feature Plan & Implementation - Frontend Astro", "End-to-end workflow for planning, implementing, testing, and reviewing frontend Astro features", r#"["stacks/astro.md"]"#, "1.0.0", now],
-    )?;
-    seed_steps(
-        conn,
-        &frontend_id,
-        &[
-            ("plan", "[]", "", None, 0),
-            ("implement", r#"["plan"]"#, "", None, 0),
-            ("test", r#"["implement"]"#, "", None, 0),
-            ("review", r#"["test"]"#, "", None, 0),
-            ("fix", r#"["review"]"#, "", Some("review.result == 'FAIL'"), 3),
-            ("pr", r#"["review"]"#, "", Some("review.result == 'PASS'"), 0),
-        ],
-    )?;
-
-    info!(count = 2, "default workflows seeded");
-    Ok(())
+    info!(synced, removed, errors = errors.len(), commit = ?commit_hash, "TOML workflow sync complete");
+    SyncResult { synced, removed, commit_hash, errors }
 }
 
 // ---------------------------------------------------------------------------

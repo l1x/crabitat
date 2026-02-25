@@ -6,7 +6,7 @@ import IssueList from '../../../components/IssueList.astro';
 import WorkflowList from '../../../components/WorkflowList.astro';
 import MissionPipeline from '../../../components/MissionPipeline.astro';
 import LanguageBar from '../../../components/LanguageBar.astro';
-import { fetchRepos, fetchRepoIssues, fetchWorkflows, fetchPromptFiles } from '../../../lib/api-client';
+import { fetchRepos, fetchRepoIssues, fetchWorkflows } from '../../../lib/api-client';
 import { mockIssues, mockMissions, mockAgents, mockMessages, getMissionsForRepo } from '../../../lib/mock-data';
 import type { RepoRecord, GitHubIssueRecord, WorkflowRecord } from '../../../lib/types';
 
@@ -26,9 +26,6 @@ try { repoIssues = await fetchRepoIssues(repo.repo_id); } catch {}
 let workflows: WorkflowRecord[] = [];
 try { workflows = await fetchWorkflows(); } catch {}
 
-let promptFiles: string[] = [];
-try { promptFiles = await fetchPromptFiles(); } catch {}
-
 const repoMissions = getMissionsForRepo(repo.repo_id);
 ---
 
@@ -41,7 +38,6 @@ const repoMissions = getMissionsForRepo(repo.repo_id);
     agentCount={mockAgents.length}
     messageCount={mockMessages.length}
     workflowCount={workflows.length}
-    promptCount={promptFiles.length}
   />
 
   <div class="content">

@@ -123,8 +123,17 @@ export interface WorkflowRecord {
   description: string;
   include: string[];
   version: string;
+  source: 'toml' | 'manual';
+  commit_hash: string | null;
   created_at_ms: number;
   steps: WorkflowStepRecord[];
+}
+
+export interface SyncResult {
+  synced: number;
+  removed: number;
+  commit_hash: string | null;
+  errors: string[];
 }
 
 export interface PromptFilePreview {

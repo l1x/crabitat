@@ -1,11 +1,12 @@
 ---
 import Layout from '../layouts/Layout.astro';
 import Sidebar from '../components/Sidebar.astro';
-import ContentHeader from '../components/ContentHeader.astro';
 import WorkflowList from '../components/WorkflowList.astro';
-import { fetchRepos, fetchWorkflows, fetchPromptFiles } from '../lib/api-client';
+import PromptBrowser from '../components/PromptBrowser.astro';
+import SkillList from '../components/SkillList.astro';
+import { fetchRepos, fetchWorkflows, fetchPromptFiles, fetchSettings, fetchSkills } from '../lib/api-client';
 import { mockIssues, mockMissions, mockAgents, mockMessages } from '../lib/mock-data';
-import type { WorkflowRecord } from '../lib/types';
+import type { SettingsRecord, SkillRecord, WorkflowRecord } from '../lib/types';
 
 let repos = [];
 try { repos = await fetchRepos(); } catch {}
@@ -15,6 +16,12 @@ try { workflows = await fetchWorkflows(); } catch {}
 
 let promptFiles: string[] = [];
 try { promptFiles = await fetchPromptFiles(); } catch {}
+
+let settings: SettingsRecord = { prompts_path: '' };
+try { settings = await fetchSettings(); } catch {}
+
+let skills: SkillRecord[] = [];
+try { skills = await fetchSkills(); } catch {}
 ---
 
 <Layout title="Workflows — Crabitat Console">
@@ -26,13 +33,311 @@ try { promptFiles = await fetchPromptFiles(); } catch {}
     agentCount={mockAgents.length}
     messageCount={mockMessages.length}
     workflowCount={workflows.length}
-    promptCount={promptFiles.length}
   />
 
   <div class="content">
-    <ContentHeader title="Workflows" />
+    <header class="content-header">
+      <div class="content-title-group">
+        <h1 class="content-title">Workflows</h1>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn--icon" id="open-settings-btn" title="Prompts repo settings">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
     <div class="section">
       <WorkflowList workflows={workflows} />
     </div>
+
+    <div class="section">
+      <PromptBrowser files={promptFiles} />
+    </div>
+
+    <div class="section">
+      <SkillList skills={skills} />
+    </div>
   </div>
 </Layout>
+
+<!-- Prompts Repo Settings Modal -->
+<dialog class="modal" id="settings-modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <span class="modal-title">Prompts Repo Settings</span>
+      <button class="modal-close" id="settings-modal-close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="settings-row">
+        <label class="settings-label">Prompts Path</label>
+        <div class="settings-value" id="prompts-path-display">
+          <code id="prompts-path-value">{settings.prompts_path || 'Not configured'}</code>
+          <button class="btn btn--sm" id="edit-prompts-path-btn">Edit</button>
+        </div>
+        <div class="settings-edit" id="prompts-path-edit" hidden>
+          <input type="text" class="form-input" id="prompts-path-input" value={settings.prompts_path} />
+          <button class="btn btn--primary btn--sm" id="save-prompts-path-btn">Save</button>
+          <button class="btn btn--sm" id="cancel-prompts-path-btn">Cancel</button>
+        </div>
+      </div>
+
+      <div class="settings-divider"></div>
+
+      <div class="settings-row">
+        <label class="settings-label">Sync</label>
+        <div class="sync-row">
+          <button class="btn btn--primary btn--sm" id="sync-workflows-btn">Sync Workflows</button>
+          <span class="sync-status" id="sync-status"></span>
+        </div>
+        <p class="settings-hint">Re-reads TOML workflow definitions from the prompts repo and updates the database.</p>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<script>
+  // --- Modal open/close ---
+  const settingsModal = document.getElementById('settings-modal') as HTMLDialogElement;
+  const openBtn = document.getElementById('open-settings-btn')!;
+  const closeBtn = document.getElementById('settings-modal-close')!;
+
+  openBtn.addEventListener('click', () => settingsModal.showModal());
+  closeBtn.addEventListener('click', () => settingsModal.close());
+  settingsModal.addEventListener('click', (e) => {
+    if (e.target === settingsModal) settingsModal.close();
+  });
+
+  // --- Prompts path edit ---
+  const editBtn = document.getElementById('edit-prompts-path-btn')!;
+  const saveBtn = document.getElementById('save-prompts-path-btn')!;
+  const cancelBtn = document.getElementById('cancel-prompts-path-btn')!;
+  const display = document.getElementById('prompts-path-display')!;
+  const editRow = document.getElementById('prompts-path-edit')!;
+  const input = document.getElementById('prompts-path-input') as HTMLInputElement;
+  const valueEl = document.getElementById('prompts-path-value')!;
+
+  editBtn.addEventListener('click', () => {
+    display.hidden = true;
+    editRow.hidden = false;
+    input.focus();
+  });
+
+  cancelBtn.addEventListener('click', () => {
+    editRow.hidden = true;
+    display.hidden = false;
+    input.value = valueEl.textContent || '';
+  });
+
+  saveBtn.addEventListener('click', async () => {
+    const newPath = input.value.trim();
+    if (!newPath) return;
+
+    saveBtn.textContent = 'Saving\u2026';
+    saveBtn.setAttribute('disabled', '');
+
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompts_path: newPath }),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      window.location.reload();
+    } catch {
+      saveBtn.textContent = 'Save';
+      saveBtn.removeAttribute('disabled');
+      alert('Failed to update settings');
+    }
+  });
+
+  // --- Sync workflows ---
+  const syncBtn = document.getElementById('sync-workflows-btn')!;
+  const syncStatus = document.getElementById('sync-status')!;
+
+  syncBtn.addEventListener('click', async () => {
+    syncBtn.textContent = 'Syncing\u2026';
+    syncBtn.setAttribute('disabled', '');
+    syncStatus.textContent = '';
+
+    try {
+      const res = await fetch('/api/workflows/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      const data = await res.json();
+      const parts = [`${data.synced} synced`];
+      if (data.removed > 0) parts.push(`${data.removed} removed`);
+      if (data.commit_hash) parts.push(`commit ${data.commit_hash.slice(0, 8)}`);
+      if (data.errors?.length > 0) parts.push(`${data.errors.length} errors`);
+      syncStatus.textContent = parts.join(', ');
+      syncStatus.className = 'sync-status' + (data.errors?.length > 0 ? ' sync-status--warn' : ' sync-status--ok');
+      syncBtn.textContent = 'Sync Workflows';
+      syncBtn.removeAttribute('disabled');
+      // Reload after a brief delay to show the message
+      setTimeout(() => window.location.reload(), 1500);
+    } catch {
+      syncBtn.textContent = 'Sync Workflows';
+      syncBtn.removeAttribute('disabled');
+      syncStatus.textContent = 'Sync failed';
+      syncStatus.className = 'sync-status sync-status--error';
+    }
+  });
+</script>
+
+<style>
+  .btn--icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px;
+    border-radius: var(--radius, 6px);
+    background: var(--panel, #fff);
+    border: 1px solid var(--line, #e5e7eb);
+    cursor: pointer;
+    color: var(--muted, #6b7280);
+    transition: color 0.15s, border-color 0.15s;
+  }
+
+  .btn--icon:hover {
+    color: var(--ink, #111);
+    border-color: var(--ink, #111);
+  }
+
+  /* Modal */
+  .modal {
+    border: none;
+    border-radius: var(--radius-lg, 12px);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    padding: 0;
+    max-width: 560px;
+    width: 90vw;
+  }
+
+  .modal::backdrop {
+    background: rgba(0, 0, 0, 0.4);
+  }
+
+  .modal-content {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--line, #e5e7eb);
+  }
+
+  .modal-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink, #111);
+  }
+
+  .modal-close {
+    background: none;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    color: var(--muted, #6b7280);
+    padding: 0 4px;
+    line-height: 1;
+  }
+
+  .modal-close:hover {
+    color: var(--ink, #111);
+  }
+
+  .modal-body {
+    padding: 20px;
+  }
+
+  /* Settings inside modal */
+  .settings-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .settings-label {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+
+  .settings-value {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .settings-value code {
+    font-size: 13px;
+    font-family: var(--font-mono, monospace);
+    background: var(--neutral-bg);
+    padding: 6px 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--line-light);
+    word-break: break-all;
+  }
+
+  .settings-edit {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .settings-edit .form-input {
+    flex: 1;
+  }
+
+  .settings-divider {
+    height: 1px;
+    background: var(--line-light, #f3f4f6);
+    margin: 16px 0;
+  }
+
+  .settings-hint {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 4px;
+    line-height: 1.4;
+  }
+
+  .btn--sm {
+    padding: 4px 12px;
+    font-size: 12px;
+  }
+
+  .sync-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .sync-status {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .sync-status--ok {
+    color: var(--good, #16a34a);
+  }
+
+  .sync-status--warn {
+    color: var(--warn, #d97706);
+  }
+
+  .sync-status--error {
+    color: var(--bad, #dc2626);
+  }
+</style>

@@ -1,4 +1,4 @@
-import type { StatusSnapshot, CrabRecord, ColonyRecord, GitHubIssueRecord, MissionRecord, PromptFilePreview, RepoRecord, SettingsRecord, SkillRecord, WorkflowRecord } from './types';
+import type { StatusSnapshot, CrabRecord, ColonyRecord, GitHubIssueRecord, MissionRecord, PromptFilePreview, RepoRecord, SettingsRecord, SkillRecord, SyncResult, WorkflowRecord } from './types';
 
 const CONTROL_PLANE_URL = import.meta.env.CONTROL_PLANE_URL || 'http://127.0.0.1:8800';
 
@@ -132,6 +132,14 @@ export async function removeFromQueue(colonyId: string, missionId: string): Prom
 export async function fetchWorkflows(): Promise<WorkflowRecord[]> {
   const res = await fetch(`${CONTROL_PLANE_URL}/v1/workflows`);
   if (!res.ok) throw new Error(`GET /v1/workflows failed: ${res.status}`);
+  return res.json();
+}
+
+export async function syncWorkflows(): Promise<SyncResult> {
+  const res = await fetch(`${CONTROL_PLANE_URL}/v1/workflows/sync`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw new Error(`POST /v1/workflows/sync failed: ${res.status}`);
   return res.json();
 }
 

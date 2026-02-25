@@ -49,12 +49,20 @@ function includeName(path: string): string {
                 <div class="wf-badges">
                   {wf.include.length > 0 ? (
                     wf.include.map((s) => (
-                      <span class={`domain-tag domain-tag--${includeName(s)}`}>{includeName(s)}</span>
+                      <button class="domain-tag domain-tag--clickable wf-prompt-link" data-path={s}>{includeName(s)}</button>
                     ))
                   ) : (
                     <span class="domain-tag domain-tag--any">any</span>
                   )}
                   <span class="wf-version">v{wf.version}</span>
+                  <span class={`source-tag source-tag--${wf.source}`}>
+                    {wf.source === 'toml' ? 'TOML' : 'Manual'}
+                  </span>
+                  {wf.commit_hash && (
+                    <span class="wf-commit" title={wf.commit_hash}>
+                      {wf.commit_hash.slice(0, 8)}
+                    </span>
+                  )}
                 </div>
               </div>
               {wf.description && (
@@ -73,6 +81,15 @@ function includeName(path: string): string {
                       <div class="wf-step-header">
                         <span class="wf-step-id">{step.step_id}</span>
                       </div>
+                      {step.prompt_file && (
+                        <button class="wf-step-prompt wf-prompt-link" data-path={step.prompt_file}>
+                          <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M10 1H4a1.5 1.5 0 00-1.5 1.5v11A1.5 1.5 0 004 15h8a1.5 1.5 0 001.5-1.5V5z"/>
+                            <polyline points="10 1 10 5 13 5"/>
+                          </svg>
+                          {step.prompt_file.split('/').pop()}
+                        </button>
+                      )}
                       {step.depends_on.length > 0 && (
                         <div class="wf-step-deps">
                           <svg class="wf-dep-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -101,7 +118,7 @@ function includeName(path: string): string {
                       {step.include.length > 0 && JSON.stringify(step.include) !== JSON.stringify(wf.include) && (
                         <div class="wf-step-include">
                           {step.include.map((s) => (
-                            <span class={`domain-tag domain-tag--${includeName(s)}`}>{includeName(s)}</span>
+                            <button class="domain-tag domain-tag--clickable wf-prompt-link" data-path={s}>{includeName(s)}</button>
                           ))}
                         </div>
                       )}
@@ -121,6 +138,56 @@ function includeName(path: string): string {
     )}
   </div>
 </div>
+
+<!-- Prompt preview modal -->
+<dialog class="modal modal--wide" id="prompt-preview-modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <span class="modal-title" id="prompt-modal-title">Prompt Preview</span>
+      <button class="modal-close" id="prompt-modal-close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <pre class="prompt-preview-content" id="prompt-modal-content">Loading...</pre>
+    </div>
+  </div>
+</dialog>
+
+<script>
+  function escapeHtml(text: string): string {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  const modal = document.getElementById('prompt-preview-modal') as HTMLDialogElement;
+  const modalTitle = document.getElementById('prompt-modal-title')!;
+  const modalContent = document.getElementById('prompt-modal-content')!;
+  const modalClose = document.getElementById('prompt-modal-close')!;
+
+  modalClose.addEventListener('click', () => modal.close());
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) modal.close();
+  });
+
+  document.querySelectorAll('.wf-prompt-link').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const path = (btn as HTMLElement).dataset.path;
+      if (!path) return;
+
+      modalTitle.textContent = path;
+      modalContent.textContent = 'Loading\u2026';
+      modal.showModal();
+
+      try {
+        const res = await fetch(`/api/prompt-files/preview?path=${encodeURIComponent(path)}`);
+        if (!res.ok) throw new Error(`${res.status}`);
+        const data = await res.json();
+        modalContent.innerHTML = escapeHtml(data.content);
+      } catch {
+        modalContent.textContent = 'Failed to load prompt file.';
+      }
+    });
+  });
+</script>
 
 <style>
   .wf-list {
@@ -169,6 +236,35 @@ function includeName(path: string): string {
     padding: 2px 8px;
     border-radius: 4px;
     letter-spacing: 0.02em;
+  }
+
+  .source-tag {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+
+  .source-tag--toml {
+    background: #dbeafe;
+    color: #1d4ed8;
+  }
+
+  .source-tag--manual {
+    background: #f3e8ff;
+    color: #7c3aed;
+  }
+
+  .wf-commit {
+    font-size: 11px;
+    font-family: var(--font-mono, monospace);
+    color: var(--muted);
+    background: var(--neutral-bg);
+    padding: 2px 6px;
+    border-radius: 3px;
+    cursor: default;
   }
 
   .wf-desc {
@@ -240,6 +336,28 @@ function includeName(path: string): string {
     color: var(--ink);
   }
 
+  .wf-step-prompt {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--primary, #2563eb);
+    background: none;
+    border: none;
+    padding: 0;
+    margin-top: 3px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  .wf-step-prompt:hover {
+    text-decoration: underline;
+  }
+
+  .wf-step-prompt svg {
+    opacity: 0.6;
+  }
+
   .wf-step-deps,
   .wf-step-cond,
   .wf-step-retry {
@@ -268,6 +386,17 @@ function includeName(path: string): string {
     flex-wrap: wrap;
     gap: 3px;
     margin-top: 4px;
+  }
+
+  .domain-tag--clickable {
+    cursor: pointer;
+    border: none;
+    font: inherit;
+  }
+
+  .domain-tag--clickable:hover {
+    opacity: 0.8;
+    text-decoration: underline;
   }
 
   .wf-dep-icon,
@@ -301,6 +430,72 @@ function includeName(path: string): string {
     top: -3px;
     border: 4px solid transparent;
     border-left: 5px solid var(--line);
+  }
+
+  /* Modal */
+  .modal {
+    border: none;
+    border-radius: var(--radius-lg, 12px);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    padding: 0;
+    max-width: 800px;
+    width: 90vw;
+    max-height: 80vh;
+  }
+
+  .modal::backdrop {
+    background: rgba(0, 0, 0, 0.4);
+  }
+
+  .modal-content {
+    display: flex;
+    flex-direction: column;
+    max-height: 80vh;
+  }
+
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--line, #e5e7eb);
+  }
+
+  .modal-title {
+    font-size: 14px;
+    font-weight: 600;
+    font-family: var(--font-mono, monospace);
+    color: var(--ink, #111);
+  }
+
+  .modal-close {
+    background: none;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    color: var(--muted, #6b7280);
+    padding: 0 4px;
+    line-height: 1;
+  }
+
+  .modal-close:hover {
+    color: var(--ink, #111);
+  }
+
+  .modal-body {
+    padding: 16px 20px;
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  .modal-body .prompt-preview-content {
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--ink, #111);
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
+    font-family: var(--font-mono, monospace);
   }
 
   /* Responsive */

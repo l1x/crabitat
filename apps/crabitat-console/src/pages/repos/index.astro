@@ -3,7 +3,7 @@ import Layout from '../../layouts/Layout.astro';
 import Sidebar from '../../components/Sidebar.astro';
 import ContentHeader from '../../components/ContentHeader.astro';
 import RepoList from '../../components/RepoList.astro';
-import { fetchRepos, fetchWorkflows, fetchPromptFiles } from '../../lib/api-client';
+import { fetchRepos, fetchWorkflows } from '../../lib/api-client';
 import { mockIssues, mockMissions, mockAgents, mockMessages } from '../../lib/mock-data';
 
 let repos = [];
@@ -12,8 +12,6 @@ try { repos = await fetchRepos(); } catch {}
 let workflows = [];
 try { workflows = await fetchWorkflows(); } catch {}
 
-let promptFiles: string[] = [];
-try { promptFiles = await fetchPromptFiles(); } catch {}
 ---
 
 <Layout title="Repos — Crabitat Console">
@@ -25,7 +23,6 @@ try { promptFiles = await fetchPromptFiles(); } catch {}
     agentCount={mockAgents.length}
     messageCount={mockMessages.length}
     workflowCount={workflows.length}
-    promptCount={promptFiles.length}
   />
 
   <div class="content">
