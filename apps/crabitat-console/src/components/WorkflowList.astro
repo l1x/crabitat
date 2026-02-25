@@ -147,15 +147,13 @@ function includeName(path: string): string {
       <button class="modal-close" id="prompt-modal-close">&times;</button>
     </div>
     <div class="modal-body">
-      <pre class="prompt-preview-content" id="prompt-modal-content">Loading...</pre>
+      <div class="prompt-preview-content prompt-prose" id="prompt-modal-content">Loading...</div>
     </div>
   </div>
 </dialog>
 
 <script>
-  function escapeHtml(text: string): string {
-    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  }
+  import { marked } from 'marked';
 
   const modal = document.getElementById('prompt-preview-modal') as HTMLDialogElement;
   const modalTitle = document.getElementById('prompt-modal-title')!;
@@ -174,16 +172,16 @@ function includeName(path: string): string {
       if (!path) return;
 
       modalTitle.textContent = path;
-      modalContent.textContent = 'Loading\u2026';
+      modalContent.innerHTML = '<p style="color:var(--muted)">Loading\u2026</p>';
       modal.showModal();
 
       try {
         const res = await fetch(`/api/prompt-files/preview?path=${encodeURIComponent(path)}`);
         if (!res.ok) throw new Error(`${res.status}`);
         const data = await res.json();
-        modalContent.innerHTML = escapeHtml(data.content);
+        modalContent.innerHTML = marked.parse(data.content) as string;
       } catch {
-        modalContent.textContent = 'Failed to load prompt file.';
+        modalContent.innerHTML = '<p style="color:var(--bad, #dc2626)">Failed to load prompt file.</p>';
       }
     });
   });
@@ -488,14 +486,115 @@ function includeName(path: string): string {
     flex: 1;
   }
 
-  .modal-body .prompt-preview-content {
-    font-size: 12px;
+  /* Prompt prose (rendered markdown) */
+  .prompt-prose {
+    font-size: 13px;
     line-height: 1.6;
     color: var(--ink, #111);
-    white-space: pre-wrap;
-    word-break: break-word;
-    margin: 0;
+  }
+
+  .prompt-prose :global(p) {
+    margin: 0 0 8px;
+  }
+
+  .prompt-prose :global(p:last-child) {
+    margin-bottom: 0;
+  }
+
+  .prompt-prose :global(h1),
+  .prompt-prose :global(h2),
+  .prompt-prose :global(h3),
+  .prompt-prose :global(h4) {
+    color: var(--ink, #111);
+    font-weight: 700;
+    margin: 16px 0 6px;
+  }
+
+  .prompt-prose :global(h1) { font-size: 17px; }
+  .prompt-prose :global(h2) { font-size: 15px; }
+  .prompt-prose :global(h3) { font-size: 14px; }
+  .prompt-prose :global(h4) { font-size: 13px; }
+
+  .prompt-prose :global(h1:first-child),
+  .prompt-prose :global(h2:first-child),
+  .prompt-prose :global(h3:first-child) {
+    margin-top: 0;
+  }
+
+  .prompt-prose :global(ul),
+  .prompt-prose :global(ol) {
+    margin: 4px 0 8px;
+    padding-left: 20px;
+  }
+
+  .prompt-prose :global(li) {
+    margin-bottom: 2px;
+  }
+
+  .prompt-prose :global(code) {
+    background: var(--neutral-bg, #f3f4f6);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 12px;
     font-family: var(--font-mono, monospace);
+  }
+
+  .prompt-prose :global(pre) {
+    background: var(--neutral-bg, #f3f4f6);
+    padding: 10px 12px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 6px 0 8px;
+  }
+
+  .prompt-prose :global(pre code) {
+    background: none;
+    padding: 0;
+  }
+
+  .prompt-prose :global(blockquote) {
+    border-left: 3px solid var(--line, #e5e7eb);
+    margin: 6px 0;
+    padding: 2px 12px;
+    color: var(--muted, #6b7280);
+  }
+
+  .prompt-prose :global(a) {
+    color: var(--primary, #2563eb);
+    text-decoration: none;
+  }
+
+  .prompt-prose :global(a:hover) {
+    text-decoration: underline;
+  }
+
+  .prompt-prose :global(hr) {
+    border: none;
+    border-top: 1px solid var(--line, #e5e7eb);
+    margin: 10px 0;
+  }
+
+  .prompt-prose :global(table) {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 6px 0 8px;
+    font-size: 12px;
+  }
+
+  .prompt-prose :global(th),
+  .prompt-prose :global(td) {
+    border: 1px solid var(--line, #e5e7eb);
+    padding: 4px 8px;
+    text-align: left;
+  }
+
+  .prompt-prose :global(th) {
+    background: var(--neutral-bg, #f3f4f6);
+    font-weight: 600;
+  }
+
+  .prompt-prose :global(strong) {
+    font-weight: 700;
   }
 
   /* Responsive */
