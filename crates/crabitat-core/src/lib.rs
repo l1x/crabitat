@@ -217,7 +217,7 @@ pub struct WorkflowMeta {
     pub description: String,
     pub version: String,
     #[serde(default)]
-    pub stack: Vec<String>,
+    pub include: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -229,7 +229,7 @@ pub struct WorkflowStep {
     pub condition: Option<String>,
     #[serde(default)]
     pub max_retries: u32,
-    pub stack: Option<Vec<String>>,
+    pub include: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

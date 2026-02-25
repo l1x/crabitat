@@ -114,14 +114,14 @@ export interface WorkflowStepRecord {
   condition: string | null;
   max_retries: number;
   position: number;
-  stack: string[];
+  include: string[];
 }
 
 export interface WorkflowRecord {
   workflow_id: string;
   name: string;
   description: string;
-  stack: string[];
+  include: string[];
   version: string;
   created_at_ms: number;
   steps: WorkflowStepRecord[];

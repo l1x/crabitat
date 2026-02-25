@@ -16,6 +16,10 @@ function stepColor(index: number): string {
 function stepNumber(step: WorkflowStepRecord): string {
   return String(step.position + 1);
 }
+
+function includeName(path: string): string {
+  return path.replace(/\.md$/, '').split('/').pop() || path;
+}
 ---
 
 <div class="data-panel">
@@ -43,9 +47,9 @@ function stepNumber(step: WorkflowStepRecord): string {
               <div class="wf-card-identity">
                 <h3 class="wf-name">{wf.name}</h3>
                 <div class="wf-badges">
-                  {wf.stack.length > 0 ? (
-                    wf.stack.map((s) => (
-                      <span class={`domain-tag domain-tag--${s}`}>{s}</span>
+                  {wf.include.length > 0 ? (
+                    wf.include.map((s) => (
+                      <span class={`domain-tag domain-tag--${includeName(s)}`}>{includeName(s)}</span>
                     ))
                   ) : (
                     <span class="domain-tag domain-tag--any">any</span>
@@ -94,10 +98,10 @@ function stepNumber(step: WorkflowStepRecord): string {
                           {step.max_retries} retries
                         </div>
                       )}
-                      {step.stack.length > 0 && JSON.stringify(step.stack) !== JSON.stringify(wf.stack) && (
-                        <div class="wf-step-stack">
-                          {step.stack.map((s) => (
-                            <span class={`domain-tag domain-tag--${s}`}>{s}</span>
+                      {step.include.length > 0 && JSON.stringify(step.include) !== JSON.stringify(wf.include) && (
+                        <div class="wf-step-include">
+                          {step.include.map((s) => (
+                            <span class={`domain-tag domain-tag--${includeName(s)}`}>{includeName(s)}</span>
                           ))}
                         </div>
                       )}
@@ -259,7 +263,7 @@ function stepNumber(step: WorkflowStepRecord): string {
     color: var(--muted);
   }
 
-  .wf-step-stack {
+  .wf-step-include {
     display: flex;
     flex-wrap: wrap;
     gap: 3px;

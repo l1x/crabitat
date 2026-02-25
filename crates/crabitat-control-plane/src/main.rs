@@ -808,7 +808,7 @@ struct WorkflowStepRecord {
     condition: Option<String>,
     max_retries: u32,
     position: i64,
-    stack: Vec<String>,
+    include: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -816,7 +816,7 @@ struct WorkflowRecord {
     workflow_id: String,
     name: String,
     description: String,
-    stack: Vec<String>,
+    include: Vec<String>,
     version: String,
     created_at_ms: u64,
     steps: Vec<WorkflowStepRecord>,
@@ -829,14 +829,14 @@ struct CreateWorkflowStepInput {
     depends_on: Option<Vec<String>>,
     condition: Option<String>,
     max_retries: Option<u32>,
-    stack: Option<Vec<String>>,
+    include: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
 struct CreateWorkflowRequest {
     name: String,
     description: Option<String>,
-    stack: Option<Vec<String>>,
+    include: Option<Vec<String>>,
     version: Option<String>,
     steps: Vec<CreateWorkflowStepInput>,
 }
@@ -845,7 +845,7 @@ struct CreateWorkflowRequest {
 struct UpdateWorkflowRequest {
     name: Option<String>,
     description: Option<String>,
-    stack: Option<Vec<String>>,
+    include: Option<Vec<String>>,
     version: Option<String>,
     steps: Option<Vec<CreateWorkflowStepInput>>,
 }
@@ -1048,7 +1048,7 @@ fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
           workflow_id TEXT PRIMARY KEY,
           name TEXT NOT NULL UNIQUE,
           description TEXT NOT NULL DEFAULT '',
-          stack TEXT NOT NULL DEFAULT 'any',
+          include TEXT NOT NULL DEFAULT '[]',
           version TEXT NOT NULL DEFAULT '1.0.0',
           created_at_ms INTEGER NOT NULL
         );
@@ -1080,12 +1080,18 @@ fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
         "ALTER TABLE missions ADD COLUMN github_issue_number INTEGER",
         "ALTER TABLE missions ADD COLUMN github_pr_number INTEGER",
         "ALTER TABLE repos ADD COLUMN language TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE workflow_steps ADD COLUMN stack TEXT NOT NULL DEFAULT '[]'",
+        "ALTER TABLE workflow_steps ADD COLUMN include TEXT NOT NULL DEFAULT '[]'",
+        "ALTER TABLE workflows RENAME COLUMN stack TO include",
+        "ALTER TABLE workflow_steps RENAME COLUMN stack TO include",
     ];
     for sql in migrations {
         match conn.execute(sql, []) {
             Ok(_) => {}
-            Err(e) if e.to_string().contains("duplicate column") => {}
+            Err(e)
+                if e.to_string().contains("duplicate column")
+                    || e.to_string().contains("no such column") =>
+            {
+            }
             Err(e) => return Err(e),
         }
     }
@@ -1093,10 +1099,10 @@ fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
     // Drop roles table (removed feature)
     let _ = conn.execute("DROP TABLE IF EXISTS roles", []);
 
-    // Migrate workflow stack from plain string to JSON array (idempotent)
+    // Migrate workflow include from plain string to JSON array (idempotent)
     // Only convert values that aren't already JSON arrays
     let _ = conn.execute(
-        "UPDATE workflows SET stack = '[\"' || stack || '\"]' WHERE stack NOT LIKE '[%'",
+        "UPDATE workflows SET include = '[\"' || include || '\"]' WHERE include NOT LIKE '[%'",
         [],
     );
 
@@ -1339,17 +1345,17 @@ async fn create_workflow(
 
     let workflow_id = ExternalId::new("wf").to_string();
     let now = now_ms();
-    let stack_json = serde_json::to_string(&request.stack.unwrap_or_default())
+    let include_json = serde_json::to_string(&request.include.unwrap_or_default())
         .unwrap_or_else(|_| "[]".to_string());
 
     let db = state.db.lock().await;
     db.execute(
-        "INSERT INTO workflows (workflow_id, name, description, stack, version, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO workflows (workflow_id, name, description, include, version, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             workflow_id,
             request.name,
             request.description.as_deref().unwrap_or(""),
-            stack_json,
+            include_json,
             request.version.as_deref().unwrap_or("1.0.0"),
             now as i64,
         ],
@@ -1375,13 +1381,13 @@ async fn update_workflow(
 
     let name = request.name.unwrap_or(existing.name);
     let description = request.description.unwrap_or(existing.description);
-    let stack = request.stack.unwrap_or(existing.stack);
-    let stack_json = serde_json::to_string(&stack).unwrap_or_else(|_| "[]".to_string());
+    let include = request.include.unwrap_or(existing.include);
+    let include_json = serde_json::to_string(&include).unwrap_or_else(|_| "[]".to_string());
     let version = request.version.unwrap_or(existing.version);
 
     db.execute(
-        "UPDATE workflows SET name = ?2, description = ?3, stack = ?4, version = ?5 WHERE workflow_id = ?1",
-        params![workflow_id, name, description, stack_json, version],
+        "UPDATE workflows SET name = ?2, description = ?3, include = ?4, version = ?5 WHERE workflow_id = ?1",
+        params![workflow_id, name, description, include_json, version],
     )?;
 
     if let Some(steps) = request.steps {
@@ -1715,11 +1721,11 @@ fn insert_workflow_steps(
     for (i, step) in steps.iter().enumerate() {
         let depends_on_json = serde_json::to_string(&step.depends_on.clone().unwrap_or_default())
             .unwrap_or_else(|_| "[]".to_string());
-        let stack_json = serde_json::to_string(&step.stack.clone().unwrap_or_default())
+        let include_json = serde_json::to_string(&step.include.clone().unwrap_or_default())
             .unwrap_or_else(|_| "[]".to_string());
 
         conn.execute(
-            "INSERT INTO workflow_steps (workflow_id, position, step_id, prompt_file, depends_on, condition, max_retries, stack) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO workflow_steps (workflow_id, position, step_id, prompt_file, depends_on, condition, max_retries, include) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 workflow_id,
                 i as i64,
@@ -1728,7 +1734,7 @@ fn insert_workflow_steps(
                 depends_on_json,
                 step.condition,
                 step.max_retries.unwrap_or(0) as i64,
-                stack_json,
+                include_json,
             ],
         )?;
     }
@@ -1961,13 +1967,12 @@ fn expand_workflow_into_tasks(
             .replace("{{context}}", "")
             .replace("{{worktree_path}}", &format!("burrows/mission-{mission_id}"));
 
-        // Resolve effective stack: step overrides workflow default
-        let effective_stack = step.stack.as_deref().unwrap_or(&manifest.workflow.stack);
-        for stack_name in effective_stack {
-            let stack_path = format!("stacks/{stack_name}.md");
-            if let Ok(stack_content) = registry.load_prompt_file(&stack_path) {
+        // Resolve effective include: step overrides workflow default
+        let effective_include = step.include.as_deref().unwrap_or(&manifest.workflow.include);
+        for include_path in effective_include {
+            if let Ok(content) = registry.load_prompt_file(include_path) {
                 rendered_prompt.push_str("\n\n---\n\n");
-                rendered_prompt.push_str(&stack_content);
+                rendered_prompt.push_str(&content);
             }
         }
 
@@ -3649,7 +3654,7 @@ fn map_run_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunRecord> {
 
 fn query_workflows(conn: &Connection) -> Result<Vec<WorkflowRecord>, ApiError> {
     let mut wf_stmt = conn.prepare(
-        "SELECT workflow_id, name, description, stack, version, created_at_ms FROM workflows ORDER BY name",
+        "SELECT workflow_id, name, description, include, version, created_at_ms FROM workflows ORDER BY name",
     )?;
     let workflows: Vec<(String, String, String, String, String, i64)> = wf_stmt
         .query_map([], |row| {
@@ -3659,14 +3664,14 @@ fn query_workflows(conn: &Connection) -> Result<Vec<WorkflowRecord>, ApiError> {
         .collect();
 
     let mut result = Vec::with_capacity(workflows.len());
-    for (wf_id, name, description, stack_raw, version, created_at_ms) in workflows {
-        let stack: Vec<String> = serde_json::from_str(&stack_raw).unwrap_or_default();
+    for (wf_id, name, description, include_raw, version, created_at_ms) in workflows {
+        let include: Vec<String> = serde_json::from_str(&include_raw).unwrap_or_default();
         let steps = query_workflow_steps(conn, &wf_id)?;
         result.push(WorkflowRecord {
             workflow_id: wf_id,
             name,
             description,
-            stack,
+            include,
             version,
             created_at_ms: created_at_ms as u64,
             steps,
@@ -3680,19 +3685,19 @@ fn fetch_workflow(
     workflow_id: &str,
 ) -> Result<Option<WorkflowRecord>, ApiError> {
     let mut stmt = conn.prepare(
-        "SELECT workflow_id, name, description, stack, version, created_at_ms FROM workflows WHERE workflow_id = ?1",
+        "SELECT workflow_id, name, description, include, version, created_at_ms FROM workflows WHERE workflow_id = ?1",
     )?;
     let mut rows = stmt.query(params![workflow_id])?;
     if let Some(row) = rows.next()? {
         let wf_id: String = row.get(0)?;
-        let stack_raw: String = row.get(3)?;
-        let stack: Vec<String> = serde_json::from_str(&stack_raw).unwrap_or_default();
+        let include_raw: String = row.get(3)?;
+        let include: Vec<String> = serde_json::from_str(&include_raw).unwrap_or_default();
         let steps = query_workflow_steps(conn, &wf_id)?;
         return Ok(Some(WorkflowRecord {
             workflow_id: wf_id,
             name: row.get(1)?,
             description: row.get(2)?,
-            stack,
+            include,
             version: row.get(4)?,
             created_at_ms: row.get::<_, i64>(5)? as u64,
             steps,
@@ -3706,13 +3711,13 @@ fn query_workflow_steps(
     workflow_id: &str,
 ) -> Result<Vec<WorkflowStepRecord>, ApiError> {
     let mut stmt = conn.prepare(
-        "SELECT step_id, prompt_file, depends_on, condition, max_retries, position, stack FROM workflow_steps WHERE workflow_id = ?1 ORDER BY position",
+        "SELECT step_id, prompt_file, depends_on, condition, max_retries, position, include FROM workflow_steps WHERE workflow_id = ?1 ORDER BY position",
     )?;
     let rows = stmt.query_map(params![workflow_id], |row| {
         let depends_on_raw: String = row.get(2)?;
         let depends_on: Vec<String> = serde_json::from_str(&depends_on_raw).unwrap_or_default();
-        let stack_raw: String = row.get(6)?;
-        let stack: Vec<String> = serde_json::from_str(&stack_raw).unwrap_or_default();
+        let include_raw: String = row.get(6)?;
+        let include: Vec<String> = serde_json::from_str(&include_raw).unwrap_or_default();
         Ok(WorkflowStepRecord {
             step_id: row.get(0)?,
             prompt_file: row.get(1)?,
@@ -3720,7 +3725,7 @@ fn query_workflow_steps(
             condition: row.get(3)?,
             max_retries: row.get::<_, i64>(4)? as u32,
             position: row.get(5)?,
-            stack,
+            include,
         })
     })?;
     Ok(rows.filter_map(Result::ok).collect())
@@ -3755,8 +3760,8 @@ fn seed_default_workflows(conn: &Connection) -> Result<()> {
     // Backend Rust workflow
     let backend_id = ExternalId::new("wf").to_string();
     conn.execute(
-        "INSERT INTO workflows (workflow_id, name, description, stack, version, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![backend_id, "Feature Plan & Implementation - Backend Rust", "End-to-end workflow for planning, implementing, testing, and reviewing backend Rust features", r#"["rust"]"#, "1.0.0", now],
+        "INSERT INTO workflows (workflow_id, name, description, include, version, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![backend_id, "Feature Plan & Implementation - Backend Rust", "End-to-end workflow for planning, implementing, testing, and reviewing backend Rust features", r#"["stacks/rust.md"]"#, "1.0.0", now],
     )?;
     seed_steps(
         conn,
@@ -3774,8 +3779,8 @@ fn seed_default_workflows(conn: &Connection) -> Result<()> {
     // Frontend Astro workflow
     let frontend_id = ExternalId::new("wf").to_string();
     conn.execute(
-        "INSERT INTO workflows (workflow_id, name, description, stack, version, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![frontend_id, "Feature Plan & Implementation - Frontend Astro", "End-to-end workflow for planning, implementing, testing, and reviewing frontend Astro features", r#"["astro"]"#, "1.0.0", now],
+        "INSERT INTO workflows (workflow_id, name, description, include, version, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![frontend_id, "Feature Plan & Implementation - Frontend Astro", "End-to-end workflow for planning, implementing, testing, and reviewing frontend Astro features", r#"["stacks/astro.md"]"#, "1.0.0", now],
     )?;
     seed_steps(
         conn,
