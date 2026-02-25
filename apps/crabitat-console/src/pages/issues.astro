@@ -4,9 +4,9 @@ import Sidebar from '../components/Sidebar.astro';
 import ContentHeader from '../components/ContentHeader.astro';
 import IssueList from '../components/IssueList.astro';
 import type { IssueWithRepo } from '../components/IssueList.astro';
-import { fetchRepos, fetchRepoIssues, fetchWorkflows, fetchMissions } from '../lib/api-client';
+import { fetchRepos, fetchRepoIssues, fetchWorkflows, fetchMissions, fetchColonies } from '../lib/api-client';
 import { mockAgents, mockMessages } from '../lib/mock-data';
-import type { RepoRecord, MissionRecord, WorkflowRecord } from '../lib/types';
+import type { RepoRecord, MissionRecord, ColonyRecord, WorkflowRecord } from '../lib/types';
 
 let repos: RepoRecord[] = [];
 try { repos = await fetchRepos(); } catch {}
@@ -16,6 +16,9 @@ try { workflows = await fetchWorkflows(); } catch {}
 
 let missions: MissionRecord[] = [];
 try { missions = await fetchMissions(); } catch {}
+
+let colonies: ColonyRecord[] = [];
+try { colonies = await fetchColonies(); } catch {}
 
 // Fetch real issues from GitHub for each registered repo
 const allIssues: IssueWithRepo[] = [];
@@ -44,7 +47,7 @@ for (const repo of repos) {
   <div class="content">
     <ContentHeader title="Issues" />
     <div class="section">
-      <IssueList issues={allIssues} repos={repos} />
+      <IssueList issues={allIssues} repos={repos} colonies={colonies} workflows={workflows} />
     </div>
   </div>
 </Layout>

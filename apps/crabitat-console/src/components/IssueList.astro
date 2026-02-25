@@ -1,6 +1,6 @@
 ---
 import { marked } from 'marked';
-import type { GitHubIssueRecord, RepoRecord } from '../lib/types';
+import type { GitHubIssueRecord, RepoRecord, ColonyRecord, WorkflowRecord } from '../lib/types';
 
 marked.setOptions({ breaks: true });
 
@@ -11,11 +11,13 @@ export interface IssueWithRepo extends GitHubIssueRecord {
 interface Props {
   issues: IssueWithRepo[];
   repos: RepoRecord[];
+  colonies: ColonyRecord[];
+  workflows: WorkflowRecord[];
   showRepoFilter?: boolean;
   repoId?: string;
 }
 
-const { issues, repos, showRepoFilter = true, repoId } = Astro.props;
+const { issues, repos, colonies, workflows, showRepoFilter = true, repoId } = Astro.props;
 ---
 
 {showRepoFilter && (
@@ -102,17 +104,33 @@ const { issues, repos, showRepoFilter = true, repoId } = Astro.props;
       <div class="launch-repo-ref" id="launch-repo-ref"></div>
 
       <div class="form-group">
-        <label class="form-label">Workflow</label>
-        <select class="form-select" id="launch-workflow">
-          <option value="tdd-task" selected>TDD Task (Plan → Test → Implement → Review)</option>
+        <label class="form-label" for="launch-colony">Colony</label>
+        <select class="form-select" id="launch-colony">
+          {colonies.map((c) => (
+            <option value={c.colony_id}>{c.name}</option>
+          ))}
+          <option value="__new__">Create new&hellip;</option>
         </select>
       </div>
 
-      <p class="form-hint">Agents will be matched automatically by the scheduler based on domain and role capabilities.</p>
+      <div class="form-group" id="launch-new-colony-group" hidden>
+        <label class="form-label" for="launch-new-colony-name">New colony name</label>
+        <input type="text" class="form-input" id="launch-new-colony-name" placeholder="my-colony" />
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="launch-workflow">Workflow (optional)</label>
+        <select class="form-select" id="launch-workflow">
+          <option value="">None</option>
+          {workflows.map((wf) => (
+            <option value={wf.name}>{wf.name}</option>
+          ))}
+        </select>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn" id="launch-cancel">Cancel</button>
-      <button class="btn btn--primary" id="launch-execute">Execute</button>
+      <button class="btn btn--primary" id="launch-execute">Create</button>
     </div>
   </div>
 </dialog>
@@ -126,12 +144,23 @@ const { issues, repos, showRepoFilter = true, repoId } = Astro.props;
   const repoRef = document.getElementById('launch-repo-ref')!;
   const closeBtn = document.getElementById('launch-modal-close')!;
   const cancelBtn = document.getElementById('launch-cancel')!;
-  const executeBtn = document.getElementById('launch-execute')!;
+  const executeBtn = document.getElementById('launch-execute') as HTMLButtonElement;
   const repoSelect = document.getElementById('repo-select') as HTMLSelectElement | null;
   const issueList = document.getElementById('issue-list')!;
   const issueCount = document.getElementById('issue-count')!;
   const refreshBtn = document.getElementById('refresh-issues-btn') as HTMLButtonElement | null;
   const dataPanel = document.querySelector<HTMLElement>('.data-panel[data-repo-id]');
+  const colonySelect = document.getElementById('launch-colony') as HTMLSelectElement;
+  const newColonyGroup = document.getElementById('launch-new-colony-group')!;
+  const newColonyInput = document.getElementById('launch-new-colony-name') as HTMLInputElement;
+  const workflowSelect = document.getElementById('launch-workflow') as HTMLSelectElement;
+
+  let currentIssueNumber: number | null = null;
+  let currentRepoId: string | null = null;
+
+  colonySelect.addEventListener('change', () => {
+    newColonyGroup.hidden = colonySelect.value !== '__new__';
+  });
 
   // Repo filter
   repoSelect?.addEventListener('change', () => {
@@ -166,7 +195,7 @@ const { issues, repos, showRepoFilter = true, repoId } = Astro.props;
       }> = await res.json();
 
       issueList.innerHTML = issues.map((issue) => `
-        <div class="issue-card" data-issue-number="${issue.number}">
+        <div class="issue-card" data-issue-number="${issue.number}" data-repo-id="${repoId}">
           <div class="issue-card-header">
             <div class="issue-card-title">
               <span class="issue-number">#${issue.number}</span>
@@ -177,6 +206,7 @@ const { issues, repos, showRepoFilter = true, repoId } = Astro.props;
               : `<button class="btn btn--primary btn--sm launch-mission-btn"
                   data-issue-number="${issue.number}"
                   data-issue-title="${issue.title.replace(/"/g, '&quot;')}"
+                  data-repo-id="${repoId}"
                 >Create Mission</button>`}
           </div>
           <div class="issue-card-body issue-prose">${marked.parse(issue.body || '')}</div>
@@ -198,13 +228,26 @@ const { issues, repos, showRepoFilter = true, repoId } = Astro.props;
   });
 
   // Launch modal
+  function resetModal() {
+    colonySelect.selectedIndex = 0;
+    newColonyGroup.hidden = true;
+    newColonyInput.value = '';
+    workflowSelect.selectedIndex = 0;
+    executeBtn.textContent = 'Create';
+    executeBtn.disabled = false;
+    currentIssueNumber = null;
+    currentRepoId = null;
+  }
+
   function bindLaunchButtons() {
     document.querySelectorAll<HTMLButtonElement>('.launch-mission-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const num = btn.dataset.issueNumber;
+        resetModal();
+        currentIssueNumber = Number(btn.dataset.issueNumber);
+        currentRepoId = btn.dataset.repoId || null;
         const title = btn.dataset.issueTitle;
         const repoName = btn.dataset.repoName;
-        issueRef.textContent = `#${num} — ${title}`;
+        issueRef.textContent = `#${currentIssueNumber} — ${title}`;
         repoRef.textContent = repoName || '';
         modal.showModal();
       });
@@ -212,17 +255,66 @@ const { issues, repos, showRepoFilter = true, repoId } = Astro.props;
   }
   bindLaunchButtons();
 
-  closeBtn.addEventListener('click', () => modal.close());
-  cancelBtn.addEventListener('click', () => modal.close());
+  closeBtn.addEventListener('click', () => { modal.close(); resetModal(); });
+  cancelBtn.addEventListener('click', () => { modal.close(); resetModal(); });
   modal.addEventListener('click', (e) => {
-    if (e.target === modal) modal.close();
+    if (e.target === modal) { modal.close(); resetModal(); }
   });
 
-  executeBtn.addEventListener('click', () => {
-    executeBtn.textContent = 'Launching...';
-    setTimeout(() => {
-      executeBtn.textContent = 'Execute';
+  executeBtn.addEventListener('click', async () => {
+    if (!currentIssueNumber) return;
+
+    executeBtn.textContent = 'Creating...';
+    executeBtn.disabled = true;
+
+    try {
+      let colonyId = colonySelect.value;
+
+      // Create colony if needed
+      if (colonyId === '__new__') {
+        const name = newColonyInput.value.trim();
+        if (!name) {
+          alert('Colony name is required.');
+          executeBtn.textContent = 'Create';
+          executeBtn.disabled = false;
+          return;
+        }
+        const colonyRes = await fetch('/api/colonies', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name }),
+        });
+        if (!colonyRes.ok) {
+          const err = await colonyRes.json().catch(() => ({ error: 'Unknown error' }));
+          throw new Error(err.error || `Failed to create colony: ${colonyRes.status}`);
+        }
+        const colony = await colonyRes.json();
+        colonyId = colony.colony_id;
+      }
+
+      // Queue the issue as a mission
+      const body: Record<string, unknown> = { issue_number: currentIssueNumber };
+      const workflow = workflowSelect.value;
+      if (workflow) body.workflow = workflow;
+
+      const res = await fetch(`/api/colonies/${colonyId}/queue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(err.error || `Failed to queue issue: ${res.status}`);
+      }
+
       modal.close();
-    }, 800);
+      resetModal();
+      window.location.reload();
+    } catch (e: unknown) {
+      executeBtn.textContent = 'Create';
+      executeBtn.disabled = false;
+      alert(`Error: ${e instanceof Error ? e.message : e}`);
+    }
   });
 </script>
