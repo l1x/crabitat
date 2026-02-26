@@ -1,40 +1,39 @@
 ---
-import type { MissionRecord, TaskRecord, ColonyRecord } from '../lib/types';
+import type { MissionRecord, TaskRecord, RepoRecord } from '../lib/types';
 import { timeAgo } from '../lib/format';
+import StepPipeline from './StepPipeline.astro';
+import type { PipelineStep } from './StepPipeline.astro';
 
 interface Props {
   missions: MissionRecord[];
   tasks: TaskRecord[];
-  colonies: ColonyRecord[];
+  repos: RepoRecord[];
 }
 
-const { missions, tasks, colonies } = Astro.props;
-
-function taskIcon(status: string): string {
-  switch (status) {
-    case 'completed': return '&#10003;';
-    case 'running': return '&#9654;';
-    case 'failed': return '&#10007;';
-    case 'blocked': return '&#9632;';
-    case 'assigned': return '&#9654;';
-    default: return '&#8226;';
-  }
-}
+const { missions, tasks, repos } = Astro.props;
 
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
   return text.slice(0, max) + '\u2026';
 }
 
-function colonyName(colonyId: string): string {
-  const colony = colonies.find((c) => c.colony_id === colonyId);
-  return colony?.name || colonyId.slice(0, 8);
+function repoName(repoId: string): string {
+  const repo = repos.find((r) => r.repo_id === repoId);
+  return repo?.full_name || repoId.slice(0, 8);
 }
 
 function tasksForMission(missionId: string): TaskRecord[] {
   return tasks
     .filter((t) => t.mission_id === missionId)
     .sort((a, b) => a.created_at_ms - b.created_at_ms);
+}
+
+function tasksToSteps(mTasks: TaskRecord[]): PipelineStep[] {
+  return mTasks.map((task, i) => ({
+    label: task.step_id || task.title,
+    position: i,
+    status: task.status,
+  }));
 }
 ---
 
@@ -64,7 +63,7 @@ function tasksForMission(missionId: string): TaskRecord[] {
                   <span class="mission-title-text">{truncate(mission.prompt, 80)}</span>
                 </div>
                 <div class="mission-card-meta">
-                  <span>{colonyName(mission.colony_id)}</span>
+                  <span>{repoName(mission.repo_id)}</span>
                   {mission.workflow_name && (
                     <code class="branch-name">{mission.workflow_name}</code>
                   )}
@@ -79,21 +78,7 @@ function tasksForMission(missionId: string): TaskRecord[] {
               </div>
 
               {mTasks.length > 0 && (
-                <div class="pipeline">
-                  {mTasks.map((task, i) => (
-                    <>
-                      <div class={`pipeline-step pipeline-step--${task.status}`}>
-                        <div class="pipeline-step-icon" set:html={taskIcon(task.status)} />
-                        <div class="pipeline-step-info">
-                          <div class="pipeline-step-name">{task.title}</div>
-                        </div>
-                      </div>
-                      {i < mTasks.length - 1 && (
-                        <div class={`pipeline-connector ${task.status === 'completed' ? 'pipeline-connector--done' : ''}`} />
-                      )}
-                    </>
-                  ))}
-                </div>
+                <StepPipeline steps={tasksToSteps(mTasks)} />
               )}
             </div>
           );

@@ -7,11 +7,11 @@ use axum::{
     },
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{delete, get, patch, post},
+    routing::{delete, get, post},
 };
 use clap::{Parser, Subcommand};
 use crabitat_core::{
-    BurrowMode, Colony, Mission, MissionId, MissionStatus, RunId, RunMetrics, RunStatus, TaskId,
+    BurrowMode, Mission, MissionId, MissionStatus, RunId, RunMetrics, RunStatus, TaskId,
     TaskStatus, WorkflowManifest, evaluate_condition, now_ms,
 };
 use crabitat_protocol::{Envelope, MessageKind};
@@ -30,6 +30,9 @@ use tokio::sync::{Mutex, broadcast, mpsc};
 use tower_http::cors::CorsLayer;
 use tracing::info;
 use uuid::Uuid;
+
+/// Issues cache TTL: 5 minutes.
+const ISSUES_CACHE_TTL_MS: u64 = 5 * 60 * 1000;
 
 #[derive(Debug, Parser)]
 #[command(name = "crabitat-control-plane", about = "Crabitat control-plane service")]
@@ -497,7 +500,6 @@ struct AppState {
 enum ConsoleEvent {
     Snapshot(StatusSnapshot),
     CrabUpdated { crab: CrabRecord },
-    ColonyCreated { colony: ColonyRecord },
     MissionCreated { mission: MissionRecord },
     MissionUpdated { mission: MissionRecord },
     TaskCreated { task: TaskRecord },
@@ -579,15 +581,6 @@ impl IntoResponse for ApiError {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize)]
-struct ColonyRecord {
-    colony_id: String,
-    name: String,
-    description: String,
-    repo: Option<String>,
-    created_at_ms: u64,
-}
-
-#[derive(Debug, Clone, Serialize)]
 struct RepoRecord {
     repo_id: String,
     owner: String,
@@ -602,7 +595,7 @@ struct RepoRecord {
 #[derive(Debug, Clone, Serialize)]
 struct CrabRecord {
     crab_id: String,
-    colony_id: String,
+    repo_id: String,
     name: String,
     state: CrabState,
     current_task_id: Option<String>,
@@ -613,7 +606,7 @@ struct CrabRecord {
 #[derive(Debug, Clone, Serialize)]
 struct MissionRecord {
     mission_id: String,
-    colony_id: String,
+    repo_id: String,
     prompt: String,
     workflow_name: Option<String>,
     status: MissionStatus,
@@ -665,6 +658,7 @@ struct StatusSummary {
     failed_runs: usize,
     total_tokens: u64,
     avg_end_to_end_ms: Option<u64>,
+    cached_issue_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -672,11 +666,11 @@ struct StatusSnapshot {
     generated_at_ms: u64,
     summary: StatusSummary,
     repos: Vec<RepoRecord>,
-    colonies: Vec<ColonyRecord>,
     crabs: Vec<CrabRecord>,
     missions: Vec<MissionRecord>,
     tasks: Vec<TaskRecord>,
     runs: Vec<RunRecord>,
+    repo_issue_counts: HashMap<String, i64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -684,23 +678,16 @@ struct StatusSnapshot {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
-struct CreateColonyRequest {
-    name: String,
-    description: Option<String>,
-    repo: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
 struct RegisterCrabRequest {
     crab_id: String,
-    colony_id: String,
+    repo_id: String,
     name: String,
     state: Option<CrabState>,
 }
 
 #[derive(Debug, Deserialize)]
 struct CreateMissionRequest {
-    colony_id: String,
+    repo_id: String,
     prompt: String,
     workflow: Option<String>,
 }
@@ -759,13 +746,6 @@ struct CompleteRunRequest {
 }
 
 #[derive(Debug, Deserialize)]
-struct UpdateColonyRequest {
-    repo: Option<String>,
-    name: Option<String>,
-    description: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
 struct CreateRepoRequest {
     owner: String,
     name: String,
@@ -794,6 +774,12 @@ struct GitHubIssueRecord {
 struct QueueIssueRequest {
     issue_number: i64,
     workflow: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ListIssuesQuery {
+    #[serde(default)]
+    refresh: Option<bool>,
 }
 
 // ---------------------------------------------------------------------------
@@ -926,14 +912,12 @@ async fn serve(port: u16, db_path: &StdPath, prompts_path: &StdPath) -> Result<(
 fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
-        .route("/v1/colonies", post(create_colony).get(list_colonies))
-        .route("/v1/colonies/{colony_id}", patch(update_colony))
-        .route("/v1/colonies/{colony_id}/issues", get(list_colony_issues))
-        .route("/v1/colonies/{colony_id}/queue", get(list_queue).post(queue_issue))
-        .route("/v1/colonies/{colony_id}/queue/{mission_id}", delete(remove_from_queue))
         .route("/v1/repos", post(create_repo).get(list_repos))
-        .route("/v1/repos/{repo_id}", get(get_repo).patch(update_repo).delete(delete_repo))
+        .route("/v1/repos/{repo_id}", get(get_repo).delete(delete_repo))
+        .route("/v1/repos/{repo_id}/update", post(update_repo))
         .route("/v1/repos/{repo_id}/issues", get(list_repo_issues))
+        .route("/v1/repos/{repo_id}/queue", get(list_queue).post(queue_issue))
+        .route("/v1/repos/{repo_id}/queue/{mission_id}", delete(remove_from_queue))
         .route("/v1/crabs", get(list_crabs))
         .route("/v1/crabs/register", post(register_crab))
         .route("/v1/missions", post(create_mission).get(list_missions))
@@ -946,11 +930,12 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/workflows/sync", post(sync_workflows))
         .route(
             "/v1/workflows/{workflow_id}",
-            get(get_workflow).patch(update_workflow).delete(delete_workflow),
+            get(get_workflow).delete(delete_workflow),
         )
         .route("/v1/prompt-files", get(list_prompt_files))
         .route("/v1/prompt-files/preview", get(preview_prompt_file))
-        .route("/v1/settings", get(get_settings).patch(patch_settings))
+        .route("/v1/workflows/{workflow_id}/update", post(update_workflow))
+        .route("/v1/settings", get(get_settings).post(patch_settings))
         .route("/v1/repos/{repo_id}/languages", get(get_repo_languages))
         .route("/v1/skills", get(list_skills))
         .route("/v1/status", get(get_status))
@@ -970,28 +955,31 @@ fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
         PRAGMA journal_mode = WAL;
         PRAGMA foreign_keys = ON;
 
-        CREATE TABLE IF NOT EXISTS colonies (
-          colony_id TEXT PRIMARY KEY,
+        CREATE TABLE IF NOT EXISTS repos (
+          repo_id TEXT PRIMARY KEY,
+          owner TEXT NOT NULL,
           name TEXT NOT NULL,
-          description TEXT NOT NULL DEFAULT '',
-          repo TEXT,
-          created_at_ms INTEGER NOT NULL
+          default_branch TEXT NOT NULL DEFAULT 'main',
+          language TEXT NOT NULL DEFAULT '',
+          local_path TEXT NOT NULL,
+          created_at_ms INTEGER NOT NULL,
+          UNIQUE(owner, name)
         );
 
         CREATE TABLE IF NOT EXISTS crabs (
           crab_id TEXT PRIMARY KEY,
-          colony_id TEXT NOT NULL,
+          repo_id TEXT NOT NULL,
           name TEXT NOT NULL,
           state TEXT NOT NULL,
           current_task_id TEXT,
           current_run_id TEXT,
           updated_at_ms INTEGER NOT NULL,
-          FOREIGN KEY(colony_id) REFERENCES colonies(colony_id)
+          FOREIGN KEY(repo_id) REFERENCES repos(repo_id)
         );
 
         CREATE TABLE IF NOT EXISTS missions (
           mission_id TEXT PRIMARY KEY,
-          colony_id TEXT NOT NULL,
+          repo_id TEXT NOT NULL,
           prompt TEXT NOT NULL,
           workflow_name TEXT,
           status TEXT NOT NULL DEFAULT 'pending',
@@ -1000,7 +988,7 @@ fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
           github_issue_number INTEGER,
           github_pr_number INTEGER,
           created_at_ms INTEGER NOT NULL,
-          FOREIGN KEY(colony_id) REFERENCES colonies(colony_id)
+          FOREIGN KEY(repo_id) REFERENCES repos(repo_id)
         );
 
         CREATE TABLE IF NOT EXISTS tasks (
@@ -1021,17 +1009,6 @@ fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
           task_id TEXT NOT NULL,
           depends_on_task_id TEXT NOT NULL,
           PRIMARY KEY (task_id, depends_on_task_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS repos (
-          repo_id TEXT PRIMARY KEY,
-          owner TEXT NOT NULL,
-          name TEXT NOT NULL,
-          default_branch TEXT NOT NULL DEFAULT 'main',
-          language TEXT NOT NULL DEFAULT '',
-          local_path TEXT NOT NULL,
-          created_at_ms INTEGER NOT NULL,
-          UNIQUE(owner, name)
         );
 
         CREATE TABLE IF NOT EXISTS runs (
@@ -1083,12 +1060,23 @@ fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
           key TEXT PRIMARY KEY,
           value TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS github_issues_cache (
+          repo_id       TEXT    NOT NULL,
+          number        INTEGER NOT NULL,
+          title         TEXT    NOT NULL,
+          body          TEXT    NOT NULL DEFAULT '',
+          labels        TEXT    NOT NULL DEFAULT '[]',
+          state         TEXT    NOT NULL DEFAULT 'OPEN',
+          fetched_at_ms INTEGER NOT NULL,
+          PRIMARY KEY (repo_id, number),
+          FOREIGN KEY(repo_id) REFERENCES repos(repo_id) ON DELETE CASCADE
+        );
         ",
     )?;
 
     // Migrations: add columns to existing tables (safe to re-run)
     let migrations = [
-        "ALTER TABLE colonies ADD COLUMN repo TEXT",
         "ALTER TABLE missions ADD COLUMN workflow_name TEXT",
         "ALTER TABLE missions ADD COLUMN queue_position INTEGER",
         "ALTER TABLE missions ADD COLUMN github_issue_number INTEGER",
@@ -1099,6 +1087,8 @@ fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
         "ALTER TABLE workflow_steps RENAME COLUMN stack TO include",
         "ALTER TABLE workflows ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'",
         "ALTER TABLE workflows ADD COLUMN commit_hash TEXT",
+        "ALTER TABLE missions RENAME COLUMN colony_id TO repo_id",
+        "ALTER TABLE crabs RENAME COLUMN colony_id TO repo_id",
     ];
     for sql in migrations {
         match conn.execute(sql, []) {
@@ -1788,64 +1778,29 @@ fn insert_workflow_steps(
     Ok(())
 }
 
-async fn create_colony(
-    State(state): State<AppState>,
-    Json(request): Json<CreateColonyRequest>,
-) -> Result<Json<ColonyRecord>, ApiError> {
-    info!(name = %request.name, "db: creating colony");
-    if request.name.trim().is_empty() {
-        return Err(ApiError::bad_request("name is required"));
-    }
-
-    let mut colony = Colony::new(request.name, request.description.unwrap_or_default());
-    colony.repo = request.repo.clone();
-    let row = ColonyRecord {
-        colony_id: colony.id.to_string(),
-        name: colony.name,
-        description: colony.description,
-        repo: colony.repo,
-        created_at_ms: colony.created_at_ms,
-    };
-
-    let db = state.db.lock().await;
-    db.execute(
-        "INSERT INTO colonies (colony_id, name, description, repo, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![row.colony_id, row.name, row.description, row.repo, row.created_at_ms],
-    )?;
-
-    emit_console_event(&state.console_tx, ConsoleEvent::ColonyCreated { colony: row.clone() });
-    Ok(Json(row))
-}
-
-async fn list_colonies(State(state): State<AppState>) -> Result<Json<Vec<ColonyRecord>>, ApiError> {
-    info!("db: listing colonies");
-    let db = state.db.lock().await;
-    Ok(Json(query_colonies(&db)?))
-}
-
 async fn register_crab(
     State(state): State<AppState>,
     Json(request): Json<RegisterCrabRequest>,
 ) -> Result<Json<CrabRecord>, ApiError> {
     info!(crab_id = %request.crab_id, name = %request.name, "db: registering crab");
     if request.crab_id.trim().is_empty()
-        || request.colony_id.trim().is_empty()
+        || request.repo_id.trim().is_empty()
         || request.name.trim().is_empty()
     {
-        return Err(ApiError::bad_request("crab_id, colony_id, and name are required"));
+        return Err(ApiError::bad_request("crab_id, repo_id, and name are required"));
     }
 
     let (crab, assignments) = {
         let mut db = state.db.lock().await;
         let tx = db.transaction().map_err(ApiError::from)?;
 
-        let colony_exists: i64 = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM colonies WHERE colony_id = ?1)",
-            params![request.colony_id],
+        let repo_exists: i64 = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM repos WHERE repo_id = ?1)",
+            params![request.repo_id],
             |row| row.get(0),
         )?;
-        if colony_exists == 0 {
-            return Err(ApiError::not_found("colony_id not found"));
+        if repo_exists == 0 {
+            return Err(ApiError::not_found("repo_id not found"));
         }
 
         let updated_at_ms = now_ms();
@@ -1853,17 +1808,17 @@ async fn register_crab(
 
         tx.execute(
             "
-            INSERT INTO crabs (crab_id, colony_id, name, state, current_task_id, current_run_id, updated_at_ms)
+            INSERT INTO crabs (crab_id, repo_id, name, state, current_task_id, current_run_id, updated_at_ms)
             VALUES (?1, ?2, ?3, ?4, NULL, NULL, ?5)
             ON CONFLICT(crab_id) DO UPDATE SET
-              colony_id=excluded.colony_id,
+              repo_id=excluded.repo_id,
               name=excluded.name,
               state=excluded.state,
               updated_at_ms=excluded.updated_at_ms
             ",
             params![
                 request.crab_id,
-                request.colony_id,
+                request.repo_id,
                 request.name,
                 crab_state.as_str(),
                 updated_at_ms
@@ -1894,12 +1849,12 @@ async fn create_mission(
     State(state): State<AppState>,
     Json(request): Json<CreateMissionRequest>,
 ) -> Result<Json<MissionRecord>, ApiError> {
-    info!(colony_id = %request.colony_id, workflow = ?request.workflow, "db: creating mission");
+    info!(repo_id = %request.repo_id, workflow = ?request.workflow, "db: creating mission");
     if request.prompt.trim().is_empty() {
         return Err(ApiError::bad_request("prompt is required"));
     }
-    if request.colony_id.trim().is_empty() {
-        return Err(ApiError::bad_request("colony_id is required"));
+    if request.repo_id.trim().is_empty() {
+        return Err(ApiError::bad_request("repo_id is required"));
     }
 
     let (row, assignments) = {
@@ -1907,19 +1862,19 @@ async fn create_mission(
         let wf = state.workflows.read().unwrap();
         let tx = db.transaction().map_err(ApiError::from)?;
 
-        let colony_exists: i64 = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM colonies WHERE colony_id = ?1)",
-            params![request.colony_id],
+        let repo_exists: i64 = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM repos WHERE repo_id = ?1)",
+            params![request.repo_id],
             |row| row.get(0),
         )?;
-        if colony_exists == 0 {
-            return Err(ApiError::not_found("colony_id not found"));
+        if repo_exists == 0 {
+            return Err(ApiError::not_found("repo_id not found"));
         }
 
         let mission = Mission::new(&request.prompt);
         let row = MissionRecord {
             mission_id: mission.id.to_string(),
-            colony_id: request.colony_id,
+            repo_id: request.repo_id,
             prompt: mission.prompt,
             workflow_name: request.workflow.clone(),
             status: MissionStatus::Pending,
@@ -1931,10 +1886,10 @@ async fn create_mission(
         };
 
         tx.execute(
-            "INSERT INTO missions (mission_id, colony_id, prompt, workflow_name, status, worktree_path, queue_position, github_issue_number, github_pr_number, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT INTO missions (mission_id, repo_id, prompt, workflow_name, status, worktree_path, queue_position, github_issue_number, github_pr_number, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 row.mission_id,
-                row.colony_id,
+                row.repo_id,
                 row.prompt,
                 row.workflow_name,
                 mission_status_to_db(row.status),
@@ -2791,8 +2746,8 @@ fn update_mission_status(
                 ConsoleEvent::MissionUpdated { mission: mission.clone() },
             );
 
-            // Try to activate next mission in this colony's queue
-            activate_next_mission_in_colony(conn, &mission.colony_id, workflows, console_tx)?;
+            // Try to activate next mission in this repo's queue
+            activate_next_mission_in_repo(conn, &mission.repo_id, workflows, console_tx)?;
         }
     }
     Ok(())
@@ -2907,9 +2862,80 @@ async fn delete_repo(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
+// ---------------------------------------------------------------------------
+// Issue cache helpers
+// ---------------------------------------------------------------------------
+
+fn read_cached_issues(conn: &Connection, repo_id: &str) -> Option<(Vec<GhIssue>, u64)> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT number, title, body, labels, state, fetched_at_ms \
+             FROM github_issues_cache WHERE repo_id = ?1 ORDER BY number",
+        )
+        .ok()?;
+
+    let rows: Vec<(GhIssue, u64)> = stmt
+        .query_map(params![repo_id], |row| {
+            let labels_json: String = row.get(3)?;
+            let labels: Vec<String> =
+                serde_json::from_str(&labels_json).unwrap_or_default();
+            Ok((
+                GhIssue {
+                    number: row.get(0)?,
+                    title: row.get(1)?,
+                    body: row.get(2)?,
+                    labels,
+                    state: row.get(4)?,
+                },
+                row.get::<_, u64>(5)?,
+            ))
+        })
+        .ok()?
+        .filter_map(Result::ok)
+        .collect();
+
+    if rows.is_empty() {
+        return None;
+    }
+
+    let fetched_at_ms = rows.iter().map(|(_, ts)| *ts).min().unwrap_or(0);
+    let issues = rows.into_iter().map(|(issue, _)| issue).collect();
+    Some((issues, fetched_at_ms))
+}
+
+fn write_issues_cache(
+    conn: &Connection,
+    repo_id: &str,
+    issues: &[GhIssue],
+) -> Result<(), ApiError> {
+    let now = now_ms();
+    conn.execute(
+        "DELETE FROM github_issues_cache WHERE repo_id = ?1",
+        params![repo_id],
+    )?;
+    let mut stmt = conn.prepare(
+        "INSERT INTO github_issues_cache (repo_id, number, title, body, labels, state, fetched_at_ms) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+    )?;
+    for issue in issues {
+        let labels_json = serde_json::to_string(&issue.labels).unwrap_or_else(|_| "[]".to_string());
+        stmt.execute(params![
+            repo_id,
+            issue.number,
+            issue.title,
+            issue.body,
+            labels_json,
+            issue.state,
+            now
+        ])?;
+    }
+    Ok(())
+}
+
 async fn list_repo_issues(
     State(state): State<AppState>,
     Path(repo_id): Path<String>,
+    Query(query): Query<ListIssuesQuery>,
 ) -> Result<Json<Vec<GitHubIssueRecord>>, ApiError> {
     info!(repo_id = %repo_id, "db+github: listing repo issues");
     let repo = {
@@ -2917,102 +2943,64 @@ async fn list_repo_issues(
         fetch_repo(&db, &repo_id)?.ok_or_else(|| ApiError::not_found("repo not found"))?
     };
 
+    let force_refresh = query.refresh.unwrap_or(false);
     let full_name = format!("{}/{}", repo.owner, repo.name);
-    let issues = state.github.list_issues(&full_name).await?;
 
-    let records: Vec<GitHubIssueRecord> = issues
-        .into_iter()
-        .map(|issue| GitHubIssueRecord {
-            already_queued: false,
-            number: issue.number,
-            title: issue.title,
-            body: issue.body,
-            labels: issue.labels,
-            state: issue.state,
-        })
-        .collect();
-
-    Ok(Json(records))
-}
-
-// ---------------------------------------------------------------------------
-// Colony-GitHub binding
-// ---------------------------------------------------------------------------
-
-async fn update_colony(
-    State(state): State<AppState>,
-    Path(colony_id): Path<String>,
-    Json(request): Json<UpdateColonyRequest>,
-) -> Result<Json<ColonyRecord>, ApiError> {
-    info!(colony_id = %colony_id, "db: updating colony");
-    let db = state.db.lock().await;
-
-    // Verify colony exists
-    let existing = query_colonies(&db)?
-        .into_iter()
-        .find(|c| c.colony_id == colony_id)
-        .ok_or_else(|| ApiError::not_found("colony not found"))?;
-
-    // Validate repo format if provided
-    if let Some(ref repo) = request.repo
-        && !repo.is_empty()
-        && repo.matches('/').count() != 1
-    {
-        return Err(ApiError::bad_request("repo must be in 'owner/repo' format"));
-    }
-
-    let name = request.name.unwrap_or(existing.name);
-    let description = request.description.unwrap_or(existing.description);
-    let repo = if request.repo.is_some() { request.repo } else { existing.repo };
-
-    db.execute(
-        "UPDATE colonies SET name = ?2, description = ?3, repo = ?4 WHERE colony_id = ?1",
-        params![colony_id, name, description, repo],
-    )?;
-
-    let updated =
-        ColonyRecord { colony_id, name, description, repo, created_at_ms: existing.created_at_ms };
-    Ok(Json(updated))
-}
-
-async fn list_colony_issues(
-    State(state): State<AppState>,
-    Path(colony_id): Path<String>,
-) -> Result<Json<Vec<GitHubIssueRecord>>, ApiError> {
-    info!(colony_id = %colony_id, "db+github: listing colony issues");
-    let (repo, queued_issues) = {
+    // Try cache first (unless force refresh)
+    let issues = if !force_refresh {
         let db = state.db.lock().await;
-
-        let repo: Option<String> = db
-            .query_row(
-                "SELECT repo FROM colonies WHERE colony_id = ?1",
-                params![colony_id],
-                |row| row.get(0),
-            )
-            .map_err(|_| ApiError::not_found("colony not found"))?;
-
-        let repo = repo.ok_or_else(|| ApiError::bad_request("colony has no repo configured"))?;
-
-        let mut stmt = db.prepare(
-            "SELECT github_issue_number FROM missions WHERE colony_id = ?1 AND github_issue_number IS NOT NULL",
-        )?;
-        let queued_issues: Vec<i64> =
-            stmt.query_map(params![colony_id], |row| row.get(0))?.filter_map(Result::ok).collect();
-
-        (repo, queued_issues)
+        if let Some((cached, fetched_at)) = read_cached_issues(&db, &repo_id) {
+            let age = now_ms().saturating_sub(fetched_at);
+            if age < ISSUES_CACHE_TTL_MS {
+                info!(repo_id = %repo_id, age_ms = age, "serving issues from cache");
+                cached
+            } else {
+                drop(db);
+                let fresh = state.github.list_issues(&full_name).await?;
+                let db = state.db.lock().await;
+                write_issues_cache(&db, &repo_id, &fresh)?;
+                fresh
+            }
+        } else {
+            drop(db);
+            let fresh = state.github.list_issues(&full_name).await?;
+            let db = state.db.lock().await;
+            write_issues_cache(&db, &repo_id, &fresh)?;
+            fresh
+        }
+    } else {
+        info!(repo_id = %repo_id, "force-refreshing issues from GitHub");
+        let fresh = state.github.list_issues(&full_name).await?;
+        let db = state.db.lock().await;
+        write_issues_cache(&db, &repo_id, &fresh)?;
+        fresh
     };
 
-    let issues = state.github.list_issues(&repo).await?;
+    // Build already_queued set from active missions
+    let queued_numbers: std::collections::HashSet<i64> = {
+        let db = state.db.lock().await;
+        let mut stmt = db.prepare(
+            "SELECT DISTINCT github_issue_number FROM missions \
+             WHERE repo_id = ?1 AND github_issue_number IS NOT NULL \
+             AND status NOT IN ('completed', 'failed')",
+        )?;
+        stmt.query_map(params![repo_id], |row| row.get::<_, i64>(0))?
+            .filter_map(Result::ok)
+            .collect()
+    };
 
     let records: Vec<GitHubIssueRecord> = issues
         .into_iter()
-        .map(|issue| GitHubIssueRecord {
-            already_queued: queued_issues.contains(&issue.number),
-            number: issue.number,
-            title: issue.title,
-            body: issue.body,
-            labels: issue.labels,
-            state: issue.state,
+        .map(|issue| {
+            let already_queued = queued_numbers.contains(&issue.number);
+            GitHubIssueRecord {
+                already_queued,
+                number: issue.number,
+                title: issue.title,
+                body: issue.body,
+                labels: issue.labels,
+                state: issue.state,
+            }
         })
         .collect();
 
@@ -3025,25 +3013,25 @@ async fn list_colony_issues(
 
 async fn queue_issue(
     State(state): State<AppState>,
-    Path(colony_id): Path<String>,
+    Path(repo_id): Path<String>,
     Json(request): Json<QueueIssueRequest>,
 ) -> Result<Json<MissionRecord>, ApiError> {
-    info!(colony_id = %colony_id, issue_number = request.issue_number, "db+github: queuing issue");
-    // Phase 1: Validate colony and get repo (brief lock)
-    let repo = {
+    info!(repo_id = %repo_id, issue_number = request.issue_number, "db+github: queuing issue");
+    // Phase 1: Validate repo and get full_name (brief lock)
+    let full_name = {
         let db = state.db.lock().await;
-        let repo: Option<String> = db
+        let (owner, name): (String, String) = db
             .query_row(
-                "SELECT repo FROM colonies WHERE colony_id = ?1",
-                params![colony_id],
-                |row| row.get(0),
+                "SELECT owner, name FROM repos WHERE repo_id = ?1",
+                params![repo_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
-            .map_err(|_| ApiError::not_found("colony not found"))?;
-        repo.ok_or_else(|| ApiError::bad_request("colony has no repo configured"))?
+            .map_err(|_| ApiError::not_found("repo not found"))?;
+        format!("{owner}/{name}")
     };
 
     // Phase 2: Fetch issue details from GitHub (no lock held)
-    let detail = state.github.get_issue(&repo, request.issue_number).await?;
+    let detail = state.github.get_issue(&full_name, request.issue_number).await?;
 
     // Phase 3: All DB work in a single transaction
     let (row, assignments) = {
@@ -3053,19 +3041,19 @@ async fn queue_issue(
 
         // Check if issue is already queued
         let already_queued: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM missions WHERE colony_id = ?1 AND github_issue_number = ?2",
-            params![colony_id, request.issue_number],
+            "SELECT COUNT(*) FROM missions WHERE repo_id = ?1 AND github_issue_number = ?2",
+            params![repo_id, request.issue_number],
             |row| row.get(0),
         )?;
         if already_queued > 0 {
-            return Err(ApiError::bad_request("issue is already queued in this colony"));
+            return Err(ApiError::bad_request("issue is already queued in this repo"));
         }
 
         // Compute queue position
         let max_pos: Option<i64> = tx
             .query_row(
-                "SELECT MAX(queue_position) FROM missions WHERE colony_id = ?1",
-                params![colony_id],
+                "SELECT MAX(queue_position) FROM missions WHERE repo_id = ?1",
+                params![repo_id],
                 |row| row.get(0),
             )
             .unwrap_or(None);
@@ -3073,11 +3061,11 @@ async fn queue_issue(
 
         let workflow_name = request.workflow.unwrap_or_else(|| "dev-task".to_string());
         let prompt =
-            format!("{}#{}: {}\n\n{}", repo, request.issue_number, detail.title, detail.body);
+            format!("{}#{}: {}\n\n{}", full_name, request.issue_number, detail.title, detail.body);
         let mission = Mission::new(&prompt);
         let row = MissionRecord {
             mission_id: mission.id.to_string(),
-            colony_id: colony_id.clone(),
+            repo_id: repo_id.clone(),
             prompt,
             workflow_name: Some(workflow_name),
             status: MissionStatus::Pending,
@@ -3089,10 +3077,10 @@ async fn queue_issue(
         };
 
         tx.execute(
-            "INSERT INTO missions (mission_id, colony_id, prompt, workflow_name, status, worktree_path, queue_position, github_issue_number, github_pr_number, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT INTO missions (mission_id, repo_id, prompt, workflow_name, status, worktree_path, queue_position, github_issue_number, github_pr_number, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 row.mission_id,
-                row.colony_id,
+                row.repo_id,
                 row.prompt,
                 row.workflow_name,
                 mission_status_to_db(row.status),
@@ -3109,7 +3097,7 @@ async fn queue_issue(
             ConsoleEvent::MissionCreated { mission: row.clone() },
         );
 
-        activate_next_mission_in_colony(&tx, &colony_id, &wf, &state.console_tx)?;
+        activate_next_mission_in_repo(&tx, &repo_id, &wf, &state.console_tx)?;
 
         let assignments = run_scheduler_tick_db(&tx, &state.console_tx)?;
         tx.commit().map_err(ApiError::from)?;
@@ -3122,18 +3110,18 @@ async fn queue_issue(
 
 async fn list_queue(
     State(state): State<AppState>,
-    Path(colony_id): Path<String>,
+    Path(repo_id): Path<String>,
 ) -> Result<Json<Vec<MissionRecord>>, ApiError> {
-    info!(colony_id = %colony_id, "db: listing queue");
+    info!(repo_id = %repo_id, "db: listing queue");
     let db = state.db.lock().await;
 
     let mut stmt = db.prepare(
-        "SELECT mission_id, colony_id, prompt, workflow_name, status, worktree_path, queue_position, github_issue_number, github_pr_number, created_at_ms FROM missions WHERE colony_id = ?1 AND queue_position IS NOT NULL ORDER BY queue_position ASC",
+        "SELECT mission_id, repo_id, prompt, workflow_name, status, worktree_path, queue_position, github_issue_number, github_pr_number, created_at_ms FROM missions WHERE repo_id = ?1 AND queue_position IS NOT NULL ORDER BY queue_position ASC",
     )?;
-    let rows = stmt.query_map(params![colony_id], |row| {
+    let rows = stmt.query_map(params![repo_id], |row| {
         Ok(MissionRecord {
             mission_id: row.get(0)?,
-            colony_id: row.get(1)?,
+            repo_id: row.get(1)?,
             prompt: row.get(2)?,
             workflow_name: row.get(3)?,
             status: mission_status_from_db(&row.get::<_, String>(4)?),
@@ -3150,17 +3138,17 @@ async fn list_queue(
 
 async fn remove_from_queue(
     State(state): State<AppState>,
-    Path((colony_id, mission_id)): Path<(String, String)>,
+    Path((repo_id, mission_id)): Path<(String, String)>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    info!(colony_id = %colony_id, mission_id = %mission_id, "db: removing from queue");
+    info!(repo_id = %repo_id, mission_id = %mission_id, "db: removing from queue");
     let mut db = state.db.lock().await;
     let tx = db.transaction().map_err(ApiError::from)?;
 
     // Only allow removing pending missions
     let status: String = tx
         .query_row(
-            "SELECT status FROM missions WHERE mission_id = ?1 AND colony_id = ?2 AND queue_position IS NOT NULL",
-            params![mission_id, colony_id],
+            "SELECT status FROM missions WHERE mission_id = ?1 AND repo_id = ?2 AND queue_position IS NOT NULL",
+            params![mission_id, repo_id],
             |row| row.get(0),
         )
         .map_err(|_| ApiError::not_found("mission not found in queue"))?;
@@ -3179,33 +3167,25 @@ async fn remove_from_queue(
 // Sequential Mission Activation
 // ---------------------------------------------------------------------------
 
-fn activate_next_mission_in_colony(
+fn activate_next_mission_in_repo(
     conn: &Connection,
-    colony_id: &str,
+    repo_id: &str,
     workflows: &WorkflowRegistry,
     console_tx: &broadcast::Sender<String>,
 ) -> Result<(), ApiError> {
-    // Check: any mission in this colony with status = 'running'?
-    let running_count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM missions WHERE colony_id = ?1 AND status = 'running' AND queue_position IS NOT NULL",
-        params![colony_id],
-        |row| row.get(0),
+    // Find ALL pending queued missions for this repo
+    let mut stmt = conn.prepare(
+        "SELECT mission_id, workflow_name, prompt FROM missions WHERE repo_id = ?1 AND status = 'pending' AND queue_position IS NOT NULL ORDER BY queue_position ASC",
     )?;
 
-    if running_count > 0 {
-        return Ok(()); // One at a time
-    }
+    let pending: Vec<(String, Option<String>, String)> = stmt
+        .query_map(params![repo_id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?
+        .filter_map(Result::ok)
+        .collect();
 
-    // Find next pending queued mission
-    let next: Option<(String, Option<String>, String)> = conn
-        .query_row(
-            "SELECT mission_id, workflow_name, prompt FROM missions WHERE colony_id = ?1 AND status = 'pending' AND queue_position IS NOT NULL ORDER BY queue_position ASC LIMIT 1",
-            params![colony_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .ok();
-
-    if let Some((mission_id, workflow_name, mission_prompt)) = next {
+    for (mission_id, workflow_name, mission_prompt) in pending {
         let worktree_path = format!("burrows/mission-{mission_id}");
         conn.execute(
             "UPDATE missions SET status = ?2, worktree_path = ?3 WHERE mission_id = ?1",
@@ -3386,7 +3366,6 @@ async fn get_status(State(state): State<AppState>) -> Result<Json<StatusSnapshot
 
 fn build_status_snapshot(conn: &Connection) -> Result<StatusSnapshot, ApiError> {
     let repos = query_repos(conn)?;
-    let colonies = query_colonies(conn)?;
     let crabs = query_crabs(conn)?;
     let missions = query_missions(conn)?;
     let tasks = query_tasks(conn)?;
@@ -3403,6 +3382,14 @@ fn build_status_snapshot(conn: &Connection) -> Result<StatusSnapshot, ApiError> 
         Some(sum / completed_runs.len() as u64)
     };
 
+    let cached_issue_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM github_issues_cache WHERE state = 'OPEN'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
     let summary = StatusSummary {
         total_crabs: crabs.len(),
         busy_crabs: crabs.iter().filter(|crab| matches!(crab.state, CrabState::Busy)).count(),
@@ -3418,17 +3405,29 @@ fn build_status_snapshot(conn: &Connection) -> Result<StatusSnapshot, ApiError> 
         failed_runs: runs.iter().filter(|run| matches!(run.status, RunStatus::Failed)).count(),
         total_tokens: runs.iter().map(|run| u64::from(run.metrics.total_tokens)).sum(),
         avg_end_to_end_ms,
+        cached_issue_count,
     };
+
+    let mut repo_issue_counts: HashMap<String, i64> = HashMap::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT repo_id, COUNT(*) FROM github_issues_cache WHERE state = 'OPEN' GROUP BY repo_id",
+        )?;
+        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?;
+        for row in rows.flatten() {
+            repo_issue_counts.insert(row.0, row.1);
+        }
+    }
 
     Ok(StatusSnapshot {
         generated_at_ms: now_ms(),
         summary,
         repos,
-        colonies,
         crabs,
         missions,
         tasks,
         runs,
+        repo_issue_counts,
     })
 }
 
@@ -3481,30 +3480,14 @@ fn fetch_repo(conn: &Connection, repo_id: &str) -> Result<Option<RepoRecord>, Ap
     Ok(None)
 }
 
-fn query_colonies(conn: &Connection) -> Result<Vec<ColonyRecord>, ApiError> {
-    let mut stmt = conn.prepare(
-        "SELECT colony_id, name, description, repo, created_at_ms FROM colonies ORDER BY created_at_ms DESC",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok(ColonyRecord {
-            colony_id: row.get(0)?,
-            name: row.get(1)?,
-            description: row.get(2)?,
-            repo: row.get(3)?,
-            created_at_ms: row.get::<_, i64>(4)? as u64,
-        })
-    })?;
-    Ok(rows.filter_map(Result::ok).collect())
-}
-
 fn query_crabs(conn: &Connection) -> Result<Vec<CrabRecord>, ApiError> {
     let mut stmt = conn.prepare(
-        "SELECT crab_id, colony_id, name, state, current_task_id, current_run_id, updated_at_ms FROM crabs ORDER BY crab_id",
+        "SELECT crab_id, repo_id, name, state, current_task_id, current_run_id, updated_at_ms FROM crabs ORDER BY crab_id",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(CrabRecord {
             crab_id: row.get(0)?,
-            colony_id: row.get(1)?,
+            repo_id: row.get(1)?,
             name: row.get(2)?,
             state: CrabState::from_str(&row.get::<_, String>(3)?),
             current_task_id: row.get(4)?,
@@ -3517,12 +3500,12 @@ fn query_crabs(conn: &Connection) -> Result<Vec<CrabRecord>, ApiError> {
 
 fn query_missions(conn: &Connection) -> Result<Vec<MissionRecord>, ApiError> {
     let mut stmt = conn.prepare(
-        "SELECT mission_id, colony_id, prompt, workflow_name, status, worktree_path, queue_position, github_issue_number, github_pr_number, created_at_ms FROM missions ORDER BY created_at_ms DESC",
+        "SELECT mission_id, repo_id, prompt, workflow_name, status, worktree_path, queue_position, github_issue_number, github_pr_number, created_at_ms FROM missions ORDER BY created_at_ms DESC",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(MissionRecord {
             mission_id: row.get(0)?,
-            colony_id: row.get(1)?,
+            repo_id: row.get(1)?,
             prompt: row.get(2)?,
             workflow_name: row.get(3)?,
             status: mission_status_from_db(&row.get::<_, String>(4)?),
@@ -3538,13 +3521,13 @@ fn query_missions(conn: &Connection) -> Result<Vec<MissionRecord>, ApiError> {
 
 fn fetch_mission(conn: &Connection, mission_id: &str) -> Result<Option<MissionRecord>, ApiError> {
     let mut stmt = conn.prepare(
-        "SELECT mission_id, colony_id, prompt, workflow_name, status, worktree_path, queue_position, github_issue_number, github_pr_number, created_at_ms FROM missions WHERE mission_id = ?1",
+        "SELECT mission_id, repo_id, prompt, workflow_name, status, worktree_path, queue_position, github_issue_number, github_pr_number, created_at_ms FROM missions WHERE mission_id = ?1",
     )?;
     let mut rows = stmt.query(params![mission_id])?;
     if let Some(row) = rows.next()? {
         return Ok(Some(MissionRecord {
             mission_id: row.get(0)?,
-            colony_id: row.get(1)?,
+            repo_id: row.get(1)?,
             prompt: row.get(2)?,
             workflow_name: row.get(3)?,
             status: mission_status_from_db(&row.get::<_, String>(4)?),
@@ -3603,7 +3586,7 @@ fn query_runs(conn: &Connection) -> Result<Vec<RunRecord>, ApiError> {
 fn fetch_crab(conn: &Connection, crab_id: &str) -> Result<Option<CrabRecord>, ApiError> {
     let mut stmt = conn.prepare(
         "
-        SELECT crab_id, colony_id, name, state, current_task_id, current_run_id, updated_at_ms
+        SELECT crab_id, repo_id, name, state, current_task_id, current_run_id, updated_at_ms
         FROM crabs WHERE crab_id = ?1
         ",
     )?;
@@ -3612,7 +3595,7 @@ fn fetch_crab(conn: &Connection, crab_id: &str) -> Result<Option<CrabRecord>, Ap
     if let Some(row) = rows.next()? {
         return Ok(Some(CrabRecord {
             crab_id: row.get(0)?,
-            colony_id: row.get(1)?,
+            repo_id: row.get(1)?,
             name: row.get(2)?,
             state: CrabState::from_str(&row.get::<_, String>(3)?),
             current_task_id: row.get(4)?,
@@ -4077,10 +4060,10 @@ async fn poll_merge_wait_tasks(state: &AppState) -> Result<(), ApiError> {
         let db = state.db.lock().await;
         let mut stmt = db.prepare(
             "
-            SELECT t.task_id, t.mission_id, m.github_pr_number, c.repo
+            SELECT t.task_id, t.mission_id, m.github_pr_number, r.owner || '/' || r.name
             FROM tasks t
             JOIN missions m ON t.mission_id = m.mission_id
-            JOIN colonies c ON m.colony_id = c.colony_id
+            JOIN repos r ON m.repo_id = r.repo_id
             WHERE t.step_id = 'merge-wait' AND t.status = 'queued'
             ",
         )?;
@@ -4206,10 +4189,16 @@ mod tests {
         }
     }
 
-    async fn setup_colony(state: &AppState) -> ColonyRecord {
-        create_colony(
+    async fn setup_repo(state: &AppState) -> RepoRecord {
+        create_repo(
             State(state.clone()),
-            Json(CreateColonyRequest { name: "test-colony".into(), description: None, repo: None }),
+            Json(CreateRepoRequest {
+                owner: "test".into(),
+                name: "repo".into(),
+                default_branch: Some("main".into()),
+                language: None,
+                local_path: "/tmp/test".into(),
+            }),
         )
         .await
         .unwrap()
@@ -4219,13 +4208,13 @@ mod tests {
     #[tokio::test]
     async fn register_and_list_crabs() {
         let state = test_state();
-        let colony = setup_colony(&state).await;
+        let repo = setup_repo(&state).await;
 
         let crab = register_crab(
             State(state.clone()),
             Json(RegisterCrabRequest {
                 crab_id: "crab-1".into(),
-                colony_id: colony.colony_id.clone(),
+                repo_id: repo.repo_id.clone(),
                 name: "Alice".into(),
                 state: None,
             }),
@@ -4236,7 +4225,7 @@ mod tests {
 
         assert_eq!(crab.crab_id, "crab-1");
         assert_eq!(crab.name, "Alice");
-        assert_eq!(crab.colony_id, colony.colony_id);
+        assert_eq!(crab.repo_id, repo.repo_id);
         assert!(matches!(crab.state, CrabState::Idle));
 
         let crabs = list_crabs(State(state.clone())).await.unwrap().0;
@@ -4246,12 +4235,12 @@ mod tests {
     #[tokio::test]
     async fn create_mission_and_task() {
         let state = test_state();
-        let colony = setup_colony(&state).await;
+        let repo = setup_repo(&state).await;
 
         let mission = create_mission(
             State(state.clone()),
             Json(CreateMissionRequest {
-                colony_id: colony.colony_id.clone(),
+                repo_id: repo.repo_id.clone(),
                 prompt: "Implement feature X".into(),
                 workflow: None,
             }),
@@ -4261,13 +4250,13 @@ mod tests {
         .0;
 
         assert!(!mission.mission_id.is_empty());
-        assert_eq!(mission.colony_id, colony.colony_id);
+        assert_eq!(mission.repo_id, repo.repo_id);
 
         register_crab(
             State(state.clone()),
             Json(RegisterCrabRequest {
                 crab_id: "crab-1".into(),
-                colony_id: colony.colony_id.clone(),
+                repo_id: repo.repo_id.clone(),
                 name: "Alice".into(),
                 state: None,
             }),
@@ -4295,13 +4284,13 @@ mod tests {
     #[tokio::test]
     async fn full_run_lifecycle() {
         let state = test_state();
-        let colony = setup_colony(&state).await;
+        let repo = setup_repo(&state).await;
 
         register_crab(
             State(state.clone()),
             Json(RegisterCrabRequest {
                 crab_id: "crab-1".into(),
-                colony_id: colony.colony_id.clone(),
+                repo_id: repo.repo_id.clone(),
                 name: "Alice".into(),
                 state: None,
             }),
@@ -4312,7 +4301,7 @@ mod tests {
         let mission = create_mission(
             State(state.clone()),
             Json(CreateMissionRequest {
-                colony_id: colony.colony_id.clone(),
+                repo_id: repo.repo_id.clone(),
                 prompt: "Build feature".into(),
                 workflow: None,
             }),
@@ -4415,13 +4404,13 @@ mod tests {
     #[tokio::test]
     async fn status_snapshot_totals() {
         let state = test_state();
-        let colony = setup_colony(&state).await;
+        let repo = setup_repo(&state).await;
 
         register_crab(
             State(state.clone()),
             Json(RegisterCrabRequest {
                 crab_id: "crab-1".into(),
-                colony_id: colony.colony_id.clone(),
+                repo_id: repo.repo_id.clone(),
                 name: "Alice".into(),
                 state: None,
             }),
@@ -4433,7 +4422,7 @@ mod tests {
             State(state.clone()),
             Json(RegisterCrabRequest {
                 crab_id: "crab-2".into(),
-                colony_id: colony.colony_id.clone(),
+                repo_id: repo.repo_id.clone(),
                 name: "Bob".into(),
                 state: None,
             }),
@@ -4444,7 +4433,7 @@ mod tests {
         let mission = create_mission(
             State(state.clone()),
             Json(CreateMissionRequest {
-                colony_id: colony.colony_id.clone(),
+                repo_id: repo.repo_id.clone(),
                 prompt: "Test mission".into(),
                 workflow: None,
             }),
@@ -4513,18 +4502,17 @@ mod tests {
         assert_eq!(snapshot.summary.failed_runs, 0);
         assert_eq!(snapshot.summary.total_tokens, 800);
         assert_eq!(snapshot.summary.avg_end_to_end_ms, Some(4000));
-        assert_eq!(snapshot.colonies.len(), 1);
     }
 
     #[tokio::test]
     async fn get_mission_by_id() {
         let state = test_state();
-        let colony = setup_colony(&state).await;
+        let repo = setup_repo(&state).await;
 
         let mission = create_mission(
             State(state.clone()),
             Json(CreateMissionRequest {
-                colony_id: colony.colony_id.clone(),
+                repo_id: repo.repo_id.clone(),
                 prompt: "Implement feature Y".into(),
                 workflow: None,
             }),
@@ -4537,7 +4525,7 @@ mod tests {
             get_mission(State(state.clone()), Path(mission.mission_id.clone())).await.unwrap().0;
 
         assert_eq!(fetched.mission_id, mission.mission_id);
-        assert_eq!(fetched.colony_id, colony.colony_id);
+        assert_eq!(fetched.repo_id, repo.repo_id);
         assert_eq!(fetched.prompt, "Implement feature Y");
     }
 

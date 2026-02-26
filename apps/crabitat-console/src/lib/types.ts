@@ -9,17 +9,9 @@ export interface RepoRecord {
   created_at_ms: number;
 }
 
-export interface ColonyRecord {
-  colony_id: string;
-  name: string;
-  description: string;
-  repo: string | null;
-  created_at_ms: number;
-}
-
 export interface CrabRecord {
   crab_id: string;
-  colony_id: string;
+  repo_id: string;
   name: string;
   state: 'idle' | 'busy' | 'offline';
   current_task_id: string | null;
@@ -29,7 +21,7 @@ export interface CrabRecord {
 
 export interface MissionRecord {
   mission_id: string;
-  colony_id: string;
+  repo_id: string;
   prompt: string;
   workflow_name: string | null;
   status: 'pending' | 'running' | 'completed' | 'failed';
@@ -54,6 +46,7 @@ export interface TaskRecord {
   mission_id: string;
   title: string;
   assigned_crab_id: string | null;
+  step_id: string | null;
   status: 'queued' | 'assigned' | 'running' | 'blocked' | 'completed' | 'failed';
   created_at_ms: number;
   updated_at_ms: number;
@@ -94,17 +87,18 @@ export interface StatusSummary {
   failed_runs: number;
   total_tokens: number;
   avg_end_to_end_ms: number | null;
+  cached_issue_count: number;
 }
 
 export interface StatusSnapshot {
   generated_at_ms: number;
   summary: StatusSummary;
   repos: RepoRecord[];
-  colonies: ColonyRecord[];
   crabs: CrabRecord[];
   missions: MissionRecord[];
   tasks: TaskRecord[];
   runs: RunRecord[];
+  repo_issue_counts: Record<string, number>;
 }
 
 export interface WorkflowStepRecord {
@@ -155,8 +149,7 @@ export interface SkillRecord {
 export type ConsoleEvent =
   | { type: 'snapshot' } & StatusSnapshot
   | { type: 'crab_updated'; crab: CrabRecord }
-  | { type: 'colony_created'; colony: ColonyRecord }
-  | { type: 'mission_created'; mission: MissionRecord }
+| { type: 'mission_created'; mission: MissionRecord }
   | { type: 'mission_updated'; mission: MissionRecord }
   | { type: 'task_created'; task: TaskRecord }
   | { type: 'task_updated'; task: TaskRecord }

@@ -1,12 +1,22 @@
 ---
-import type { RepoRecord } from '../lib/types';
+import type { RepoRecord, MissionRecord } from '../lib/types';
 import AddRepoModal from './AddRepoModal.astro';
 
 interface Props {
   repos: RepoRecord[];
+  missions?: MissionRecord[];
+  repoIssueCounts?: Record<string, number>;
 }
 
-const { repos } = Astro.props;
+const { repos, missions = [], repoIssueCounts = {} } = Astro.props;
+
+function issueCount(repoId: string): number {
+  return repoIssueCounts[repoId] ?? 0;
+}
+
+function missionCount(repoId: string): number {
+  return missions.filter((m) => m.repo_id === repoId).length;
+}
 ---
 
 <div class="repo-list-header">
@@ -40,8 +50,8 @@ const { repos } = Astro.props;
           {repo.language && <span>&middot; {repo.language}</span>}
         </div>
         <div class="repo-card-stats">
-          <span class="repo-card-stat">0 issues</span>
-          <span class="repo-card-stat">0 missions</span>
+          <span class="repo-card-stat">{issueCount(repo.repo_id)} issues</span>
+          <span class="repo-card-stat">{missionCount(repo.repo_id)} missions</span>
         </div>
       </a>
     ))}
@@ -51,8 +61,8 @@ const { repos } = Astro.props;
 <script>
   const addBtn = document.getElementById('repo-list-add-btn')!;
   addBtn.addEventListener('click', () => {
-    if (typeof window.openAddRepoModal === 'function') {
-      window.openAddRepoModal();
+    if (typeof (window as any).openAddRepoModal === 'function') {
+      (window as any).openAddRepoModal();
     }
   });
 
