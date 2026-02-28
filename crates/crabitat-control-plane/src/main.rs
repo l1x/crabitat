@@ -1614,6 +1614,14 @@ fn assemble_workflows(registry: &mut WorkflowRegistry, repo_stacks: Vec<Vec<Stri
             let manifest = &registry.manifests[base_name];
             let name = assembled_name(base_name, combo);
 
+            // Merge: base workflow includes + resolved stack includes, deduplicated
+            let mut merged_includes = manifest.workflow.include.clone();
+            for inc in &resolved_includes {
+                if !merged_includes.contains(inc) {
+                    merged_includes.push(inc.clone());
+                }
+            }
+
             let assembled = WorkflowManifest {
                 workflow: crabitat_core::WorkflowMeta {
                     name: name.clone(),
@@ -1623,12 +1631,12 @@ fn assemble_workflows(registry: &mut WorkflowRegistry, repo_stacks: Vec<Vec<Stri
                         combo.join("+")
                     ),
                     version: manifest.workflow.version.clone(),
-                    include: resolved_includes.clone(),
+                    include: merged_includes.clone(),
                 },
                 steps: manifest.steps.clone(),
             };
 
-            info!(name = %name, includes = ?resolved_includes, "assembled workflow");
+            info!(name = %name, includes = ?merged_includes, "assembled workflow");
             registry.manifests.insert(name, assembled);
         }
     }

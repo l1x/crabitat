@@ -53,7 +53,7 @@ Without this, operators manually invoke agents per-issue, copy-paste context, an
 2. SQLite is sufficient for the control-plane database at the expected scale (tens of repos, hundreds of missions).
 3. GitHub is the source of truth for issues; no other issue trackers are supported in v1.
 4. Agents (crabs) are long-running processes that connect to the control-plane over WebSocket on the same machine.
-5. The prompts repo is a git repository (or submodule) on the local filesystem.
+5. The prompts repo (`agent-prompts`) is a **read-only** git submodule. Crabitat never modifies it — it reads TOML workflows and prompt files, then assembles and stores its own workflow variants in the local database.
 6. The `gh` CLI or a `GITHUB_TOKEN` environment variable provides GitHub API access.
 
 ---
@@ -97,10 +97,10 @@ The system fetches and caches open issues from GitHub for onboarded repositories
 
 ### FR-3: Workflow System
 
-Operators define, sync, and manage multi-step agent workflows.
+The prompts repo (`agent-prompts`) is a read-only external dependency containing generic workflows, stack prompts, and PM prompts. Crabitat reads from it but never writes to it. All Crabitat-specific state (assembled workflows, sync records) lives in the local database.
 
-- FR-3.1: Load workflow definitions from TOML files in the prompts repo.
-  - Acceptance: On startup and on POST `/v1/workflows/sync`, all `workflows/*.toml` files are parsed into `WorkflowManifest` structs and stored in an in-memory registry.
+- FR-3.1: Load workflow definitions from TOML files in the read-only prompts repo.
+  - Acceptance: On startup and on POST `/v1/workflows/sync`, all `workflows/*.toml` files are parsed into `WorkflowManifest` structs and stored in an in-memory registry. The prompts repo is not modified.
 
 - FR-3.2: Each workflow manifest defines metadata (name, description, version, default include list) and an ordered list of steps, where each step has a prompt file, optional dependencies, optional condition, max retries, and optional include override.
   - Acceptance: A TOML file with `[workflow]` and `[[steps]]` sections loads correctly. Step dependencies expressed as `depends_on = ["step_id"]`.
@@ -116,19 +116,19 @@ Operators define, sync, and manage multi-step agent workflows.
 
 ### FR-4: Assembled Workflows (Stack Composition)
 
-The system automatically composes base workflows with repo-specific stack prompts.
+The system automatically composes base workflows with repo-specific stack prompts. The prompts repo provides the building blocks (generic workflows and stack/PM prompt files); Crabitat is the assembler that combines them per-repo and stores the results in its own database.
 
-- FR-4.1: Discover available stacks by scanning `prompts/stacks/*.md` and `prompts/pm/*.md` in the prompts repo.
+- FR-4.1: Discover available stacks by scanning `prompts/stacks/*.md` and `prompts/pm/*.md` in the read-only prompts repo.
   - Acceptance: GET `/v1/stacks` returns `[{ name, path }]` for all discovered stack prompts, sorted by name.
 
 - FR-4.2: Build a stack map that resolves short names (e.g., "rust") to relative prompt paths (e.g., "prompts/stacks/rust.md").
   - Acceptance: `WorkflowRegistry.stack_map` is populated on load and used by `resolve_stacks()`.
 
-- FR-4.3: For each unique stack combination across all repos, assemble a variant of every base workflow with the resolved stack includes.
-  - Acceptance: A repo with stacks `["rust", "mise", "github-issue"]` produces assembled workflows like `develop-feature/github-issue+mise+rust` (sorted alphabetically, joined with `+`).
+- FR-4.3: For each unique stack combination across all repos, assemble a variant of every base workflow by merging the base workflow's existing includes with the resolved stack includes (deduplicated).
+  - Acceptance: A repo with stacks `["rust", "mise"]` and a base workflow that already includes `["prompts/pm/github-issue.md"]` produces `develop-feature/mise+rust` with includes `["prompts/pm/github-issue.md", "prompts/stacks/mise.md", "prompts/stacks/rust.md"]`. If a stack duplicates an existing base include, it is not added twice.
 
-- FR-4.4: Assembled workflows use the resolved stack file paths as their `include` list, which the existing task expansion logic appends to each step's rendered prompt.
-  - Acceptance: `expand_workflow_into_tasks()` at `step.include.as_deref().unwrap_or(&manifest.workflow.include)` naturally uses the assembled includes.
+- FR-4.4: Assembled workflows inherit steps from the base workflow unchanged and use the merged include list, which the existing task expansion logic appends to each step's rendered prompt.
+  - Acceptance: `expand_workflow_into_tasks()` at `step.include.as_deref().unwrap_or(&manifest.workflow.include)` naturally uses the assembled includes. Prompt files are read from the prompts repo at task expansion time.
 
 - FR-4.5: Re-assemble on startup, on workflow sync, and when any repo's stacks change.
   - Acceptance: Creating/updating a repo with stacks triggers `assemble_workflows()` followed by DB sync.
