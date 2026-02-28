@@ -1,0 +1,349 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 1300" font-family="'SF Mono', 'Fira Code', 'Consolas', monospace">
+  <defs>
+    <style>
+      .title { font-size: 18px; font-weight: 700; fill: #1a1a2e; }
+      .layer-label { font-size: 13px; font-weight: 700; fill: #fff; letter-spacing: 0.08em; }
+      .box-title { font-size: 12px; font-weight: 700; fill: #1a1a2e; }
+      .box-sub { font-size: 10px; fill: #555; }
+      .box-path { font-size: 9px; fill: #888; font-style: italic; }
+      .db-col { font-size: 9px; fill: #4a5568; }
+      .db-table { font-size: 11px; font-weight: 700; fill: #1a1a2e; }
+      .note { font-size: 10px; fill: #888; font-style: italic; }
+      .ext-label { font-size: 11px; font-weight: 600; fill: #7c3aed; }
+      .ext-sub { font-size: 9px; fill: #6b7280; }
+      .type-name { font-size: 10px; font-weight: 600; fill: #be185d; }
+      .type-field { font-size: 9px; fill: #6b7280; }
+      .type-file { font-size: 9px; fill: #9d174d; font-style: italic; }
+    </style>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#94a3b8"/>
+    </marker>
+    <marker id="arrow-db" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#d97706"/>
+    </marker>
+    <marker id="arrow-ext" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#7c3aed"/>
+    </marker>
+    <marker id="arrow-type" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#be185d"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1480" height="1300" rx="12" fill="#f8fafc"/>
+
+  <!-- Title -->
+  <text x="740" y="32" text-anchor="middle" class="title">Crabitat Architecture — UI / Control Plane / Database / Agents</text>
+
+  <!-- ================================================================== -->
+  <!-- UI LAYER                                                           -->
+  <!-- ================================================================== -->
+  <rect x="20" y="50" width="1440" height="215" rx="8" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1.5"/>
+  <rect x="20" y="50" width="180" height="28" rx="8" fill="#3b82f6"/>
+  <text x="110" y="68" text-anchor="middle" class="layer-label">ASTRO CONSOLE</text>
+  <text x="1450" y="68" text-anchor="end" class="box-path">apps/crabitat-console  :4321</text>
+
+  <!-- Repos page -->
+  <rect x="40" y="90" width="180" height="80" rx="6" fill="#fff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="130" y="112" text-anchor="middle" class="box-title">Repos</text>
+  <text x="130" y="127" text-anchor="middle" class="box-sub">repos/index.astro</text>
+  <text x="130" y="141" text-anchor="middle" class="box-sub">repos/[owner]/[name].astro</text>
+  <text x="130" y="158" text-anchor="middle" class="box-path">RepoList, AddRepoModal</text>
+
+  <!-- Workflows page -->
+  <rect x="240" y="90" width="180" height="80" rx="6" fill="#fff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="330" y="112" text-anchor="middle" class="box-title">Workflows</text>
+  <text x="330" y="127" text-anchor="middle" class="box-sub">workflows.astro</text>
+  <text x="330" y="141" text-anchor="middle" class="box-path">WorkflowList</text>
+  <text x="330" y="158" text-anchor="middle" class="box-path">PromptBrowser</text>
+
+  <!-- Issues page -->
+  <rect x="440" y="90" width="180" height="80" rx="6" fill="#fff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="530" y="112" text-anchor="middle" class="box-title">Issues</text>
+  <text x="530" y="127" text-anchor="middle" class="box-sub">issues.astro</text>
+  <text x="530" y="141" text-anchor="middle" class="box-path">IssueList, IssueQueue</text>
+  <text x="530" y="158" text-anchor="middle" class="box-path">CreateMissionModal</text>
+
+  <!-- Missions page -->
+  <rect x="640" y="90" width="180" height="80" rx="6" fill="#fff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="730" y="112" text-anchor="middle" class="box-title">Missions</text>
+  <text x="730" y="127" text-anchor="middle" class="box-sub">missions.astro</text>
+  <text x="730" y="141" text-anchor="middle" class="box-path">MissionPipeline</text>
+  <text x="730" y="158" text-anchor="middle" class="box-path">MissionTable</text>
+
+  <!-- Agents page -->
+  <rect x="840" y="90" width="180" height="80" rx="6" fill="#fff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="930" y="112" text-anchor="middle" class="box-title">Agents</text>
+  <text x="930" y="127" text-anchor="middle" class="box-sub">agents.astro</text>
+  <text x="930" y="141" text-anchor="middle" class="box-path">CrabGrid</text>
+
+  <!-- Messages page -->
+  <rect x="1040" y="90" width="180" height="80" rx="6" fill="#fff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="1130" y="112" text-anchor="middle" class="box-title">Messages</text>
+  <text x="1130" y="127" text-anchor="middle" class="box-sub">messages.astro</text>
+  <text x="1130" y="141" text-anchor="middle" class="box-path">MessageLog</text>
+  <text x="1130" y="158" text-anchor="middle" class="note">(mock data)</text>
+
+  <!-- Client scripts -->
+  <rect x="1240" y="90" width="200" height="80" rx="6" fill="#fff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="1340" y="112" text-anchor="middle" class="box-title">Client Scripts</text>
+  <text x="1340" y="127" text-anchor="middle" class="box-sub">ws-client.ts  store.ts</text>
+  <text x="1340" y="141" text-anchor="middle" class="box-sub">modal.ts  queue.ts</text>
+  <text x="1340" y="158" text-anchor="middle" class="box-sub">render.ts  search.ts</text>
+
+  <!-- UI API proxy layer -->
+  <rect x="40" y="185" width="1400" height="65" rx="6" fill="#dbeafe" stroke="#93c5fd" stroke-width="1"/>
+  <text x="60" y="207" class="box-title">Astro API Routes (proxy to control-plane :8800)</text>
+  <text x="60" y="222" class="box-path">api/repos   api/workflows   api/workflows/sync   api/prompt-files   api/prompt-files/preview   api/settings   api/skills   api/missions</text>
+  <text x="60" y="237" class="box-path">api/repos/[id]/issues   api/repos/[id]/languages   api/repos/[id]/queue   api/github/repos (gh CLI)   api/fs/browse (local FS)</text>
+
+  <!-- ================================================================== -->
+  <!-- BACKEND LAYER                                                      -->
+  <!-- ================================================================== -->
+  <rect x="20" y="285" width="1440" height="300" rx="8" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1.5"/>
+  <rect x="20" y="285" width="210" height="28" rx="8" fill="#16a34a"/>
+  <text x="125" y="303" text-anchor="middle" class="layer-label">CONTROL PLANE</text>
+  <text x="1450" y="303" text-anchor="end" class="box-path">crates/crabitat-control-plane  :8800</text>
+
+  <!-- Arrows from UI to Backend -->
+  <line x1="130" y1="252" x2="130" y2="285" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arrow)" stroke-dasharray="4,3"/>
+  <line x1="330" y1="252" x2="420" y2="325" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arrow)" stroke-dasharray="4,3"/>
+  <line x1="530" y1="252" x2="640" y2="325" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arrow)" stroke-dasharray="4,3"/>
+  <line x1="730" y1="252" x2="920" y2="325" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arrow)" stroke-dasharray="4,3"/>
+  <line x1="930" y1="252" x2="1200" y2="325" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arrow)" stroke-dasharray="4,3"/>
+
+  <!-- Repos endpoints -->
+  <rect x="40" y="325" width="240" height="110" rx="6" fill="#fff" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="160" y="345" text-anchor="middle" class="box-title">Repos</text>
+  <text x="55" y="362" class="box-sub">POST /v1/repos → create_repo</text>
+  <text x="55" y="376" class="box-sub">GET  /v1/repos → list_repos</text>
+  <text x="55" y="390" class="box-sub">GET  /v1/repos/:id → get_repo</text>
+  <text x="55" y="404" class="box-sub">POST /v1/repos/:id/update</text>
+  <text x="55" y="418" class="box-sub">DEL  /v1/repos/:id</text>
+
+  <!-- Workflows + Prompts endpoints -->
+  <rect x="300" y="325" width="280" height="110" rx="6" fill="#fff" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="440" y="345" text-anchor="middle" class="box-title">Workflows + Prompts</text>
+  <text x="315" y="362" class="box-sub">GET  /v1/workflows → list_db_workflows</text>
+  <text x="315" y="376" class="box-sub">POST /v1/workflows → create_workflow</text>
+  <text x="315" y="390" class="box-sub">POST /v1/workflows/:id/update</text>
+  <text x="315" y="404" class="box-sub">POST /v1/workflows/sync → sync TOML→DB</text>
+  <text x="315" y="418" class="box-sub">GET  /v1/prompt-files  /preview</text>
+
+  <!-- Issues + Queue endpoints -->
+  <rect x="600" y="325" width="280" height="110" rx="6" fill="#fff" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="740" y="345" text-anchor="middle" class="box-title">Issues + Queue</text>
+  <text x="615" y="362" class="box-sub">GET  /v1/repos/:id/issues → cache/GitHub</text>
+  <text x="615" y="376" class="box-sub">GET  /v1/repos/:id/queue</text>
+  <text x="615" y="390" class="box-sub">POST /v1/repos/:id/queue</text>
+  <text x="615" y="404" class="box-sub">DEL  /v1/repos/:id/queue/:mid</text>
+  <text x="615" y="418" class="box-sub">GET  /v1/repos/:id/languages</text>
+
+  <!-- Missions + Tasks + Runs endpoints -->
+  <rect x="900" y="325" width="280" height="110" rx="6" fill="#fff" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="1040" y="345" text-anchor="middle" class="box-title">Missions + Tasks + Runs</text>
+  <text x="915" y="362" class="box-sub">POST /v1/missions → create_mission</text>
+  <text x="915" y="376" class="box-sub">GET  /v1/missions → list_missions</text>
+  <text x="915" y="390" class="box-sub">GET  /v1/missions/:id → get_mission</text>
+  <text x="915" y="404" class="box-sub">POST /v1/tasks → create_task</text>
+  <text x="915" y="418" class="box-sub">POST /v1/runs/{start,update,complete}</text>
+
+  <!-- Crabs endpoints -->
+  <rect x="1200" y="325" width="240" height="95" rx="6" fill="#fff" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="1320" y="345" text-anchor="middle" class="box-title">Crabs (Agents)</text>
+  <text x="1215" y="362" class="box-sub">POST /v1/crabs/register</text>
+  <text x="1215" y="376" class="box-sub">GET  /v1/crabs → list_crabs</text>
+  <text x="1215" y="390" class="box-sub">GET  /v1/skills → list_skills</text>
+  <text x="1215" y="404" class="box-sub">WS  /v1/ws/crab/:id</text>
+
+  <!-- Cross-cutting -->
+  <rect x="40" y="450" width="1360" height="48" rx="6" fill="#f0fdf4" stroke="#86efac" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="60" y="470" class="box-title">Cross-cutting</text>
+  <text x="60" y="486" class="box-sub">GET /healthz    GET /v1/status (snapshot)    GET/POST /v1/settings    WS /v1/ws/console (broadcast)    AppState: SQLite + CrabChannels + WorkflowRegistry + GitHubClient</text>
+
+  <!-- Workflow Engine -->
+  <rect x="40" y="512" width="1360" height="52" rx="6" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1.5"/>
+  <text x="60" y="534" class="box-title">Workflow Engine (expand_workflow_into_tasks)</text>
+  <text x="60" y="550" class="box-sub">Loads TOML manifest → resolves include paths → renders prompt templates → creates DAG of tasks   |   WorkflowRegistry from .agent-prompts/workflows/</text>
+
+  <!-- ================================================================== -->
+  <!-- DATABASE LAYER                                                     -->
+  <!-- ================================================================== -->
+  <rect x="20" y="600" width="1440" height="255" rx="8" fill="#fefce8" stroke="#fde68a" stroke-width="1.5"/>
+  <rect x="20" y="600" width="190" height="28" rx="8" fill="#d97706"/>
+  <text x="115" y="618" text-anchor="middle" class="layer-label">SQLITE (WAL)</text>
+  <text x="1450" y="618" text-anchor="end" class="box-path">var/crabitat-control-plane.db</text>
+
+  <!-- Arrow from Backend to DB -->
+  <line x1="740" y1="566" x2="740" y2="600" stroke="#d97706" stroke-width="1.2" marker-end="url(#arrow-db)" stroke-dasharray="4,3"/>
+
+  <!-- repos table -->
+  <rect x="40" y="640" width="175" height="80" rx="6" fill="#fff" stroke="#d97706" stroke-width="1.5"/>
+  <text x="128" y="658" text-anchor="middle" class="db-table">repos</text>
+  <text x="55" y="674" class="db-col">owner, name</text>
+  <text x="55" y="688" class="db-col">default_branch, language</text>
+  <text x="55" y="702" class="db-col">local_path, created_at_ms</text>
+
+  <!-- crabs table -->
+  <rect x="230" y="640" width="175" height="80" rx="6" fill="#fff" stroke="#d97706" stroke-width="1.5"/>
+  <text x="318" y="658" text-anchor="middle" class="db-table">crabs</text>
+  <text x="245" y="674" class="db-col">crab_id, repo_id, name</text>
+  <text x="245" y="688" class="db-col">state: idle|busy|offline</text>
+  <text x="245" y="702" class="db-col">current_task_id, run_id</text>
+
+  <!-- missions table -->
+  <rect x="420" y="640" width="195" height="80" rx="6" fill="#fff" stroke="#d97706" stroke-width="1.5"/>
+  <text x="518" y="658" text-anchor="middle" class="db-table">missions</text>
+  <text x="435" y="674" class="db-col">mission_id, repo_id, prompt</text>
+  <text x="435" y="688" class="db-col">workflow_name, status</text>
+  <text x="435" y="702" class="db-col">github_issue_number, pr_number</text>
+
+  <!-- tasks + task_deps tables -->
+  <rect x="630" y="640" width="195" height="80" rx="6" fill="#fff" stroke="#d97706" stroke-width="1.5"/>
+  <text x="728" y="658" text-anchor="middle" class="db-table">tasks + task_deps</text>
+  <text x="645" y="674" class="db-col">task_id, mission_id, title</text>
+  <text x="645" y="688" class="db-col">assigned_crab_id, status</text>
+  <text x="645" y="702" class="db-col">step_id, prompt, context</text>
+
+  <!-- runs table -->
+  <rect x="840" y="640" width="195" height="80" rx="6" fill="#fff" stroke="#d97706" stroke-width="1.5"/>
+  <text x="938" y="658" text-anchor="middle" class="db-table">runs</text>
+  <text x="855" y="674" class="db-col">run_id, task_id, crab_id</text>
+  <text x="855" y="688" class="db-col">status, burrow_path, summary</text>
+  <text x="855" y="702" class="db-col">metrics: tokens, durations</text>
+
+  <!-- workflows + steps tables -->
+  <rect x="1050" y="640" width="195" height="80" rx="6" fill="#fff" stroke="#d97706" stroke-width="1.5"/>
+  <text x="1148" y="658" text-anchor="middle" class="db-table">workflows + steps</text>
+  <text x="1065" y="674" class="db-col">workflow_id, name, version</text>
+  <text x="1065" y="688" class="db-col">steps: position, step_id</text>
+  <text x="1065" y="702" class="db-col">prompt_file, depends_on, retries</text>
+
+  <!-- settings table -->
+  <rect x="1260" y="640" width="180" height="55" rx="6" fill="#fff" stroke="#d97706" stroke-width="1.5"/>
+  <text x="1350" y="658" text-anchor="middle" class="db-table">settings</text>
+  <text x="1275" y="674" class="db-col">key, value</text>
+  <text x="1275" y="688" class="db-col">(global configuration)</text>
+
+  <!-- github_issues_cache table -->
+  <rect x="40" y="735" width="230" height="65" rx="6" fill="#fff" stroke="#d97706" stroke-width="1.5"/>
+  <text x="155" y="753" text-anchor="middle" class="db-table">github_issues_cache</text>
+  <text x="55" y="769" class="db-col">repo_id, number (PK)</text>
+  <text x="55" y="783" class="db-col">title, body, labels, state, fetched_at_ms</text>
+
+  <!-- FK arrows -->
+  <text x="60" y="835" class="note">FK: missions.repo_id → repos | tasks.mission_id → missions | runs.task_id → tasks | github_issues_cache.repo_id → repos (CASCADE) | task_deps: task_id → depends_on_task_id</text>
+
+  <!-- ================================================================== -->
+  <!-- SHARED TYPES LAYER                                                 -->
+  <!-- ================================================================== -->
+  <rect x="20" y="870" width="1440" height="120" rx="8" fill="#fdf2f8" stroke="#f9a8d4" stroke-width="1.5"/>
+  <rect x="20" y="870" width="280" height="28" rx="8" fill="#be185d"/>
+  <text x="160" y="888" text-anchor="middle" class="layer-label">SHARED TYPES (Rust ↔ TS)</text>
+  <text x="1450" y="888" text-anchor="end" class="type-file">manual sync — no codegen</text>
+
+  <!-- Rust source -->
+  <text x="60" y="912" class="type-file">Rust: #[derive(Serialize)] structs → serde JSON</text>
+  <text x="60" y="926" class="type-file">crates/crabitat-control-plane/src/main.rs</text>
+
+  <!-- TS source -->
+  <text x="60" y="946" class="type-file">TypeScript: export interface declarations</text>
+  <text x="60" y="960" class="type-file">apps/crabitat-console/src/lib/types.ts</text>
+
+  <!-- Type group: Status -->
+  <rect x="430" y="900" width="200" height="80" rx="5" fill="#fff" stroke="#f472b6" stroke-width="1"/>
+  <text x="530" y="917" text-anchor="middle" class="type-name">StatusSnapshot</text>
+  <text x="530" y="932" text-anchor="middle" class="type-field">StatusSummary</text>
+  <text x="530" y="945" text-anchor="middle" class="type-field">  cached_issue_count</text>
+  <text x="530" y="958" text-anchor="middle" class="type-field">  total_crabs, busy_crabs</text>
+  <text x="530" y="971" text-anchor="middle" class="type-field">  running_runs, total_tokens ...</text>
+
+  <!-- Type group: Records -->
+  <rect x="650" y="900" width="200" height="80" rx="5" fill="#fff" stroke="#f472b6" stroke-width="1"/>
+  <text x="750" y="917" text-anchor="middle" class="type-name">Domain Records</text>
+  <text x="750" y="932" text-anchor="middle" class="type-field">RepoRecord</text>
+  <text x="750" y="945" text-anchor="middle" class="type-field">CrabRecord</text>
+  <text x="750" y="958" text-anchor="middle" class="type-field">MissionRecord</text>
+  <text x="750" y="971" text-anchor="middle" class="type-field">TaskRecord, RunRecord</text>
+
+  <!-- Type group: GitHub + Workflows -->
+  <rect x="870" y="900" width="200" height="80" rx="5" fill="#fff" stroke="#f472b6" stroke-width="1"/>
+  <text x="970" y="917" text-anchor="middle" class="type-name">GitHub + Workflows</text>
+  <text x="970" y="932" text-anchor="middle" class="type-field">GitHubIssueRecord</text>
+  <text x="970" y="945" text-anchor="middle" class="type-field">  already_queued flag</text>
+  <text x="970" y="958" text-anchor="middle" class="type-field">WorkflowRecord</text>
+  <text x="970" y="971" text-anchor="middle" class="type-field">WorkflowStepRecord</text>
+
+  <!-- Type group: Events -->
+  <rect x="1090" y="900" width="200" height="80" rx="5" fill="#fff" stroke="#f472b6" stroke-width="1"/>
+  <text x="1190" y="917" text-anchor="middle" class="type-name">WebSocket Events</text>
+  <text x="1190" y="932" text-anchor="middle" class="type-field">ConsoleEvent (union)</text>
+  <text x="1190" y="945" text-anchor="middle" class="type-field">  snapshot | crab_updated</text>
+  <text x="1190" y="958" text-anchor="middle" class="type-field">  mission_created | run_*</text>
+  <text x="1190" y="971" text-anchor="middle" class="type-field">  repo_created | repo_deleted</text>
+
+  <!-- Arrows: Rust structs → JSON → TS interfaces -->
+  <line x1="410" y1="925" x2="430" y2="925" stroke="#be185d" stroke-width="1.2" marker-end="url(#arrow-type)"/>
+  <text x="380" y="930" text-anchor="middle" class="type-file">JSON</text>
+
+  <!-- ================================================================== -->
+  <!-- EXTERNAL / AGENTS LAYER                                            -->
+  <!-- ================================================================== -->
+  <rect x="20" y="1005" width="1440" height="225" rx="8" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1.5"/>
+  <rect x="20" y="1005" width="220" height="28" rx="8" fill="#7c3aed"/>
+  <text x="130" y="1023" text-anchor="middle" class="layer-label">AGENTS + EXTERNAL</text>
+
+  <!-- Crab Agent -->
+  <rect x="40" y="1045" width="400" height="130" rx="6" fill="#fff" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="240" y="1067" text-anchor="middle" class="box-title">Crab Agent (crabitat-crab)</text>
+  <text x="55" y="1085" class="box-sub">1. POST /v1/crabs/register → get crab_id</text>
+  <text x="55" y="1099" class="box-sub">2. WS /v1/ws/crab/:id → receive TaskAssigned</text>
+  <text x="55" y="1113" class="box-sub">3. git worktree add burrows/&lt;task&gt; → write CLAUDE.md</text>
+  <text x="55" y="1127" class="box-sub">4. claude -p "&lt;task_title&gt;" --output-format json</text>
+  <text x="55" y="1141" class="box-sub">5. POST /v1/runs/complete → status, summary, token metrics</text>
+  <text x="55" y="1155" class="box-sub">6. git worktree remove → cleanup</text>
+  <text x="55" y="1169" class="box-path">Heartbeat every 30s  |  crab_prompt.md template  |  Burrow = isolated worktree</text>
+
+  <!-- Arrow from Crab to Control Plane -->
+  <line x1="240" y1="1045" x2="240" y2="566" stroke="#7c3aed" stroke-width="1.2" marker-end="url(#arrow-ext)" stroke-dasharray="4,3"/>
+  <text x="250" y="770" class="ext-sub">WS + HTTP</text>
+
+  <!-- GitHub integration -->
+  <rect x="480" y="1045" width="320" height="100" rx="6" fill="#fff" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="640" y="1067" text-anchor="middle" class="box-title">GitHub Integration</text>
+  <text x="495" y="1085" class="box-sub">GitHubClient (GraphQL if GITHUB_TOKEN set)</text>
+  <text x="495" y="1099" class="box-sub">Fallback: gh CLI (gh issue list --json)</text>
+  <text x="495" y="1113" class="box-sub">Fetches: issues, labels, state, body</text>
+  <text x="495" y="1127" class="box-sub">Cached in github_issues_cache (5 min TTL)</text>
+  <text x="495" y="1141" class="box-path">Issues queued → Missions → Tasks → Runs</text>
+
+  <!-- Arrow from GitHub to Control Plane -->
+  <line x1="640" y1="1045" x2="640" y2="566" stroke="#7c3aed" stroke-width="1.2" marker-end="url(#arrow-ext)" stroke-dasharray="4,3"/>
+  <text x="650" y="770" class="ext-sub">GraphQL / CLI</text>
+
+  <!-- Claude Code -->
+  <rect x="840" y="1045" width="270" height="75" rx="6" fill="#fff" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="975" y="1067" text-anchor="middle" class="box-title">Claude Code (LLM)</text>
+  <text x="855" y="1085" class="box-sub">claude -p &lt;prompt&gt; --output-format json</text>
+  <text x="855" y="1099" class="box-sub">Returns: {result, usage: {tokens}}</text>
+  <text x="855" y="1113" class="box-sub">Executed inside burrow worktree</text>
+
+  <!-- File System -->
+  <rect x="1150" y="1045" width="290" height="100" rx="6" fill="#fff" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="1295" y="1067" text-anchor="middle" class="box-title">File System</text>
+  <text x="1165" y="1085" class="box-sub">.agent-prompts/workflows/ → TOML manifests</text>
+  <text x="1165" y="1099" class="box-sub">.agent-prompts/prompts/ → prompt templates</text>
+  <text x="1165" y="1113" class="box-sub">burrows/&lt;task_id&gt;/ → git worktrees</text>
+  <text x="1165" y="1127" class="box-sub">var/crabitat-control-plane.db → SQLite</text>
+  <text x="1165" y="1141" class="box-path">api/fs/browse serves local directory listing</text>
+
+  <!-- Protocol box -->
+  <rect x="40" y="1195" width="1400" height="65" rx="6" fill="#ede9fe" stroke="#a78bfa" stroke-width="1"/>
+  <text x="60" y="1217" class="box-title">Protocol (crabitat-protocol) — Envelope-based messaging</text>
+  <text x="60" y="1233" class="box-sub">Envelope { message_id, mission_id, task_id, run_id, from, to, kind, sent_at_ms }</text>
+  <text x="60" y="1249" class="box-sub">Kinds: TaskAssigned  TaskProgress  RunUpdate  RunComplete  Heartbeat   |   crabitat-core: shared domain types (Mission, Task, Run, Status enums, Metrics)</text>
+
+  <!-- Version note -->
+  <text x="1450" y="1290" text-anchor="end" class="note">Updated 2026-02-26 — adds shared types layer, github_issues_cache table, issue cache with TTL</text>
+
+</svg>
