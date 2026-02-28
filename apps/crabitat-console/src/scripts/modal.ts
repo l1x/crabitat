@@ -27,10 +27,10 @@ if (form && dialog) {
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const formData = new FormData(form);
-    const colony_id = formData.get('colony_id') as string;
+    const repo_id = formData.get('repo_id') as string;
     const prompt = formData.get('prompt') as string;
 
-    if (!colony_id || !prompt) return;
+    if (!repo_id || !prompt) return;
 
     const submitBtn = form.querySelector<HTMLButtonElement>('[type="submit"]');
     if (submitBtn) {
@@ -42,7 +42,7 @@ if (form && dialog) {
       const res = await fetch('/api/missions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ colony_id, prompt }),
+        body: JSON.stringify({ repo_id, prompt }),
       });
 
       if (!res.ok) {

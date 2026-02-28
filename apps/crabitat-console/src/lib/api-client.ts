@@ -1,4 +1,9 @@
-import type { StatusSnapshot, CrabRecord, ColonyRecord, GitHubIssueRecord, MissionRecord, PromptFilePreview, RepoRecord, SettingsRecord, SkillRecord, SyncResult, TaskRecord, WorkflowRecord } from './types';
+import type { StatusSnapshot, CrabRecord, GitHubIssueRecord, MissionRecord, PromptFilePreview, RepoRecord, SettingsRecord, SkillRecord, SyncResult, TaskRecord, WorkflowRecord } from './types';
+
+export interface StackEntry {
+  name: string;
+  path: string;
+}
 
 const CONTROL_PLANE_URL = import.meta.env.CONTROL_PLANE_URL || 'http://127.0.0.1:8800';
 
@@ -43,28 +48,9 @@ export async function fetchCrabs(): Promise<CrabRecord[]> {
   return res.json();
 }
 
-export async function fetchColonies(): Promise<ColonyRecord[]> {
-  const res = await fetch(`${CONTROL_PLANE_URL}/v1/colonies`);
-  if (!res.ok) throw new Error(`GET /v1/colonies failed: ${res.status}`);
-  return res.json();
-}
-
-export async function createColony(body: {
-  name: string;
-  description?: string;
-}): Promise<ColonyRecord> {
-  const res = await fetch(`${CONTROL_PLANE_URL}/v1/colonies`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`POST /v1/colonies failed: ${res.status}`);
-  return res.json();
-}
-
 export async function registerCrab(body: {
   crab_id: string;
-  colony_id: string;
+  repo_id: string;
   name: string;
   state?: 'idle' | 'busy' | 'offline';
 }): Promise<CrabRecord> {
@@ -77,53 +63,34 @@ export async function registerCrab(body: {
   return res.json();
 }
 
-export async function updateColony(
-  colonyId: string,
-  body: { repo?: string; name?: string; description?: string },
-): Promise<ColonyRecord> {
-  const res = await fetch(`${CONTROL_PLANE_URL}/v1/colonies/${colonyId}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`PATCH /v1/colonies/${colonyId} failed: ${res.status}`);
-  return res.json();
-}
-
 export async function fetchRepoIssues(repoId: string): Promise<GitHubIssueRecord[]> {
   const res = await fetch(`${CONTROL_PLANE_URL}/v1/repos/${repoId}/issues`);
   if (!res.ok) throw new Error(`GET /v1/repos/${repoId}/issues failed: ${res.status}`);
   return res.json();
 }
 
-export async function fetchIssues(colonyId: string): Promise<GitHubIssueRecord[]> {
-  const res = await fetch(`${CONTROL_PLANE_URL}/v1/colonies/${colonyId}/issues`);
-  if (!res.ok) throw new Error(`GET /v1/colonies/${colonyId}/issues failed: ${res.status}`);
-  return res.json();
-}
-
 export async function queueIssue(
-  colonyId: string,
+  repoId: string,
   issueNumber: number,
   workflow?: string,
 ): Promise<MissionRecord> {
-  const res = await fetch(`${CONTROL_PLANE_URL}/v1/colonies/${colonyId}/queue`, {
+  const res = await fetch(`${CONTROL_PLANE_URL}/v1/repos/${repoId}/queue`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ issue_number: issueNumber, workflow }),
   });
-  if (!res.ok) throw new Error(`POST /v1/colonies/${colonyId}/queue failed: ${res.status}`);
+  if (!res.ok) throw new Error(`POST /v1/repos/${repoId}/queue failed: ${res.status}`);
   return res.json();
 }
 
-export async function fetchQueue(colonyId: string): Promise<MissionRecord[]> {
-  const res = await fetch(`${CONTROL_PLANE_URL}/v1/colonies/${colonyId}/queue`);
-  if (!res.ok) throw new Error(`GET /v1/colonies/${colonyId}/queue failed: ${res.status}`);
+export async function fetchQueue(repoId: string): Promise<MissionRecord[]> {
+  const res = await fetch(`${CONTROL_PLANE_URL}/v1/repos/${repoId}/queue`);
+  if (!res.ok) throw new Error(`GET /v1/repos/${repoId}/queue failed: ${res.status}`);
   return res.json();
 }
 
-export async function removeFromQueue(colonyId: string, missionId: string): Promise<void> {
-  const res = await fetch(`${CONTROL_PLANE_URL}/v1/colonies/${colonyId}/queue/${missionId}`, {
+export async function removeFromQueue(repoId: string, missionId: string): Promise<void> {
+  const res = await fetch(`${CONTROL_PLANE_URL}/v1/repos/${repoId}/queue/${missionId}`, {
     method: 'DELETE',
   });
   if (!res.ok) throw new Error(`DELETE queue/${missionId} failed: ${res.status}`);
@@ -163,11 +130,11 @@ export async function fetchSettings(): Promise<SettingsRecord> {
 
 export async function updateSettings(body: Partial<SettingsRecord>): Promise<SettingsRecord> {
   const res = await fetch(`${CONTROL_PLANE_URL}/v1/settings`, {
-    method: 'PATCH',
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`PATCH /v1/settings failed: ${res.status}`);
+  if (!res.ok) throw new Error(`POST /v1/settings failed: ${res.status}`);
   return res.json();
 }
 
@@ -190,7 +157,7 @@ export async function fetchMissions(): Promise<MissionRecord[]> {
 }
 
 export async function createMission(body: {
-  colony_id: string;
+  repo_id: string;
   prompt: string;
   workflow?: string;
 }): Promise<MissionRecord> {
@@ -206,5 +173,21 @@ export async function createMission(body: {
 export async function fetchTasks(): Promise<TaskRecord[]> {
   const res = await fetch(`${CONTROL_PLANE_URL}/v1/tasks`);
   if (!res.ok) throw new Error(`GET /v1/tasks failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchStacks(): Promise<StackEntry[]> {
+  const res = await fetch(`${CONTROL_PLANE_URL}/v1/stacks`);
+  if (!res.ok) throw new Error(`GET /v1/stacks failed: ${res.status}`);
+  return res.json();
+}
+
+export async function updateRepoStacks(repoId: string, stacks: string[]): Promise<RepoRecord> {
+  const res = await fetch(`${CONTROL_PLANE_URL}/v1/repos/${repoId}/update`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ stacks }),
+  });
+  if (!res.ok) throw new Error(`POST /v1/repos/${repoId}/update failed: ${res.status}`);
   return res.json();
 }

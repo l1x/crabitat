@@ -121,9 +121,9 @@ export const mockRepos: MockRepo[] = [
 export const mockIssues: MockIssue[] = [
   {
     number: 3,
-    title: 'Add /colonies/:colony_id detail view',
+    title: 'Add /repos/:repo_id detail view',
     labels: ['enhancement'],
-    body: 'Currently the console only shows a list of colonies. We need a detail view that shows all crabs, missions, and tasks for a single colony.',
+    body: 'Currently the console only shows a list of repos. We need a detail view that shows all crabs, missions, and tasks for a single repo.',
     state: 'open',
     created_at: '2026-02-18T10:30:00Z',
     repo_id: 'r1',
@@ -243,10 +243,10 @@ export const mockMissions: MockMission[] = [
   {
     mission_id: 'm1',
     repo_id: 'r1',
-    title: 'Add /colonies/:colony_id detail view',
+    title: 'Add /repos/:repo_id detail view',
     github_issue_number: 3,
     status: 'running',
-    branch: 'feat/colony-detail-view',
+    branch: 'feat/repo-detail-view',
     pr_number: null,
     created_at_ms: now - 3_600_000,
     pipeline: [
@@ -254,13 +254,13 @@ export const mockMissions: MockMission[] = [
         step: 'plan', role: 'plan',
         status: 'completed', agent: 'atlas',
         tokens: 4200, wall_clock_ms: 45_000,
-        summary: 'Created implementation plan with 3 components: ColonyDetail.astro, colony API route, and sidebar link.',
+        summary: 'Created implementation plan with 3 components: RepoDetail.astro, repo API route, and sidebar link.',
       },
       {
         step: 'test', role: 'code',
         status: 'completed', agent: 'builder',
         tokens: 3100, wall_clock_ms: 38_000,
-        summary: 'Wrote 6 test cases covering colony detail rendering, API response handling, and error states.',
+        summary: 'Wrote 6 test cases covering repo detail rendering, API response handling, and error states.',
       },
       {
         step: 'implement', role: 'code',
@@ -338,7 +338,7 @@ export const mockMessages: MockMessage[] = [
     from: 'builder',
     to: 'doc-search',
     mission_id: 'm1',
-    body: 'What is the current structure of the colony API routes?',
+    body: 'What is the current structure of the repo API routes?',
     created_at_ms: now - 3_500_000,
   },
   {
@@ -346,7 +346,7 @@ export const mockMessages: MockMessage[] = [
     from: 'doc-search',
     to: 'builder',
     mission_id: 'm1',
-    body: 'Colony routes are in crabitat-control-plane/src/routes/colonies.rs. Endpoints: GET /v1/colonies, GET /v1/colonies/:id, POST /v1/colonies, PATCH /v1/colonies/:id. The detail endpoint returns ColonyRecord with nested crab count.',
+    body: 'Repo routes are in crabitat-control-plane/src/main.rs. Endpoints: GET /v1/repos, GET /v1/repos/:id, POST /v1/repos, POST /v1/repos/:id/update. The detail endpoint returns RepoRecord with nested crab count.',
     created_at_ms: now - 3_498_000,
   },
   {

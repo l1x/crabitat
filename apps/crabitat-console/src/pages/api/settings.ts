@@ -11,10 +11,10 @@ export const GET: APIRoute = async () => {
   });
 };
 
-export const PATCH: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request }) => {
   const body = await request.json();
   const res = await fetch(`${CONTROL_PLANE_URL}/v1/settings`, {
-    method: 'PATCH',
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });

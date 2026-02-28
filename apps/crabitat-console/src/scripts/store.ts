@@ -1,8 +1,7 @@
-import type { StatusSnapshot, StatusSummary, RepoRecord, ColonyRecord, CrabRecord, MissionRecord, TaskRecord, RunRecord } from '../lib/types';
+import type { StatusSnapshot, StatusSummary, RepoRecord, CrabRecord, MissionRecord, TaskRecord, RunRecord } from '../lib/types';
 
 class ConsoleStore extends EventTarget {
   repos: RepoRecord[] = [];
-  colonies: ColonyRecord[] = [];
   crabs: CrabRecord[] = [];
   missions: MissionRecord[] = [];
   tasks: TaskRecord[] = [];
@@ -16,11 +15,11 @@ class ConsoleStore extends EventTarget {
     failed_runs: 0,
     total_tokens: 0,
     avg_end_to_end_ms: null,
+    cached_issue_count: 0,
   };
 
   init(snapshot: StatusSnapshot) {
     this.repos = snapshot.repos ?? [];
-    this.colonies = snapshot.colonies;
     this.crabs = snapshot.crabs;
     this.missions = snapshot.missions;
     this.tasks = snapshot.tasks;
@@ -49,14 +48,6 @@ class ConsoleStore extends EventTarget {
     this.repos = this.repos.filter((r) => r.repo_id !== repoId);
     this.recompute();
     this.dispatch('repo_deleted');
-  }
-
-  addColony(colony: ColonyRecord) {
-    const idx = this.colonies.findIndex((c) => c.colony_id === colony.colony_id);
-    if (idx >= 0) this.colonies[idx] = colony;
-    else this.colonies.unshift(colony);
-    this.recompute();
-    this.dispatch('colony_created');
   }
 
   updateCrab(crab: CrabRecord) {
@@ -120,6 +111,7 @@ class ConsoleStore extends EventTarget {
       failed_runs: this.runs.filter((r) => r.status === 'failed').length,
       total_tokens: this.runs.reduce((sum, r) => sum + r.metrics.total_tokens, 0),
       avg_end_to_end_ms: completedRuns.length > 0 ? Math.round(totalE2e / completedRuns.length) : null,
+      cached_issue_count: this.summary.cached_issue_count,
     };
   }
 

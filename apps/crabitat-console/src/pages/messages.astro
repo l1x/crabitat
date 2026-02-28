@@ -3,25 +3,29 @@ import Layout from '../layouts/Layout.astro';
 import Sidebar from '../components/Sidebar.astro';
 import ContentHeader from '../components/ContentHeader.astro';
 import MessageLog from '../components/MessageLog.astro';
-import { fetchRepos, fetchWorkflows } from '../lib/api-client';
-import { mockIssues, mockMissions, mockAgents, mockMessages } from '../lib/mock-data';
+import { fetchStatus, fetchWorkflows } from '../lib/api-client';
+import { mockMessages } from '../lib/mock-data';
+import type { StatusSnapshot, WorkflowRecord } from '../lib/types';
 
-let repos = [];
-try { repos = await fetchRepos(); } catch {}
+let status: StatusSnapshot | null = null;
+try { status = await fetchStatus(); } catch {}
 
-let workflows = [];
+let workflows: WorkflowRecord[] = [];
 try { workflows = await fetchWorkflows(); } catch {}
 
+const repos = status?.repos ?? [];
+const missions = status?.missions ?? [];
+const crabs = status?.crabs ?? [];
 ---
 
 <Layout title="Messages — Crabitat Console">
   <Sidebar
     activePage="/messages"
     repoCount={repos.length}
-    issueCount={mockIssues.length}
-    missionCount={mockMissions.length}
-    agentCount={mockAgents.length}
-    messageCount={mockMessages.length}
+    issueCount={status?.summary.cached_issue_count ?? 0}
+    missionCount={missions.length}
+    agentCount={crabs.length}
+    messageCount={0}
     workflowCount={workflows.length}
   />
 

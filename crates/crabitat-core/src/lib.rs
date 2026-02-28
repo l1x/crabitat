@@ -6,29 +6,6 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct ColonyId(pub Uuid);
-
-impl ColonyId {
-    #[must_use]
-    pub fn new() -> Self {
-        Self(Uuid::new_v4())
-    }
-}
-
-impl Default for ColonyId {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl fmt::Display for ColonyId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
 pub struct MissionId(pub Uuid);
 
 impl MissionId {
@@ -98,13 +75,6 @@ impl fmt::Display for RunId {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ColonyRole {
-    Chief,
-    Crab,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum BurrowMode {
     Worktree,
     ExternalRepo,
@@ -139,28 +109,6 @@ pub enum RunStatus {
     Blocked,
     Completed,
     Failed,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Colony {
-    pub id: ColonyId,
-    pub name: String,
-    pub description: String,
-    pub repo: Option<String>,
-    pub created_at_ms: u64,
-}
-
-impl Colony {
-    #[must_use]
-    pub fn new(name: impl Into<String>, description: impl Into<String>) -> Self {
-        Self {
-            id: ColonyId::new(),
-            name: name.into(),
-            description: description.into(),
-            repo: None,
-            created_at_ms: now_ms(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -292,13 +240,6 @@ pub fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn colony_id_is_unique() {
-        let a = ColonyId::new();
-        let b = ColonyId::new();
-        assert_ne!(a, b);
-    }
 
     #[test]
     fn mission_id_is_unique() {

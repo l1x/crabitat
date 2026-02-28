@@ -1,6 +1,6 @@
 import { store } from './store';
 import { formatMs, formatTokens, timeAgo } from '../lib/format';
-import type { RepoRecord, ColonyRecord, CrabRecord, MissionRecord, TaskRecord, RunRecord } from '../lib/types';
+import type { RepoRecord, CrabRecord, MissionRecord, TaskRecord, RunRecord } from '../lib/types';
 
 // ---- Metric updates ----
 
@@ -27,7 +27,6 @@ function setMetric(name: string, value: string) {
 
 function updateCounts() {
   setCount('repos', store.repos.length);
-  setCount('colonies', store.colonies.length);
   setCount('crabs', store.crabs.length);
   setCount('missions', store.missions.length);
   setCount('tasks', store.tasks.length);
@@ -110,50 +109,6 @@ function repoCardInnerHtml(repo: RepoRecord): string {
   `;
 }
 
-// ---- Colony ----
-
-export function renderColonyCreated(colony: ColonyRecord) {
-  updateMetrics();
-  updateCounts();
-
-  // Add to overview colony container
-  const overviewContainer = document.getElementById('overview-colony-container');
-  if (overviewContainer) {
-    const card = createColonyCard(colony, true);
-    overviewContainer.prepend(card);
-  }
-
-  // Add to detail colony container
-  const detailContainer = document.getElementById('colony-container');
-  if (detailContainer) {
-    const card = createColonyCard(colony, false);
-    detailContainer.prepend(card);
-  }
-}
-
-function createColonyCard(colony: ColonyRecord, compact: boolean): HTMLDivElement {
-  const card = document.createElement('div');
-  card.className = 'card';
-  card.dataset.id = colony.colony_id;
-  if (!compact) {
-    card.dataset.searchable = `${colony.name} ${colony.colony_id} ${colony.description}`;
-    card.dataset.createdAtMs = String(colony.created_at_ms);
-  }
-
-  let html = `
-    <div class="card-title">${esc(colony.name)}</div>
-    <div class="card-meta">${esc(colony.colony_id.slice(0, 8))} &middot; ${esc(colony.description || 'No description')}</div>
-  `;
-  if (compact) {
-    html += `<div class="card-meta">0 crabs</div>`;
-  } else {
-    html += `<div class="card-meta">0 crabs &middot; 0 missions</div>`;
-    html += `<div class="card-meta">Created ${timeAgo(colony.created_at_ms)}</div>`;
-  }
-  card.innerHTML = html;
-  return card;
-}
-
 // ---- Crab ----
 
 export function renderCrabUpdated(crab: CrabRecord) {
@@ -182,7 +137,7 @@ function updateOrPrependCrabCard(containerId: string, crab: CrabRecord) {
     card.dataset.id = crab.crab_id;
     card.dataset.state = crab.state;
     if (containerId !== 'overview-crab-container') {
-      card.dataset.searchable = `${crab.name} ${crab.crab_id} ${crab.role}`;
+      card.dataset.searchable = `${crab.name} ${crab.crab_id}`;
       card.dataset.updatedAtMs = String(crab.updated_at_ms);
     }
     card.innerHTML = crabCardInnerHtml(crab, containerId === 'overview-crab-container');
@@ -196,10 +151,10 @@ function crabCardInnerHtml(crab: CrabRecord, compact: boolean): string {
       ${esc(crab.name)}
       <span class="badge badge--${crab.state}">${crab.state}</span>
     </div>
-    <div class="card-meta">${esc(crab.role)} &middot; ${esc(compact ? crab.crab_id.slice(0, 12) : crab.crab_id)}</div>
+    <div class="card-meta">${esc(compact ? crab.crab_id.slice(0, 12) : crab.crab_id)}</div>
   `;
   if (!compact) {
-    html += `<div class="card-meta">Colony: ${esc(crab.colony_id.slice(0, 8))} &middot; Updated ${timeAgo(crab.updated_at_ms)}</div>`;
+    html += `<div class="card-meta">Repo: ${esc(crab.repo_id.slice(0, 8))} &middot; Updated ${timeAgo(crab.updated_at_ms)}</div>`;
     if (crab.current_task_id) {
       html += `<div class="card-detail">Task: <code>${esc(crab.current_task_id.slice(0, 8))}</code></div>`;
     }
@@ -236,7 +191,7 @@ function renderMissionRow(mission: MissionRecord) {
   const status = mission.status || 'pending';
   const html = `
     <td><code>${esc(mission.mission_id.slice(0, 8))}</code></td>
-    <td><code>${esc(mission.colony_id.slice(0, 8))}</code></td>
+    <td><code>${esc(mission.repo_id.slice(0, 8))}</code></td>
     <td>${esc(prompt)}</td>
     <td><span class="badge badge--${status}">${status}</span></td>
     <td>${mission.queue_position != null ? '#' + mission.queue_position : '\u2014'}</td>
@@ -250,7 +205,7 @@ function renderMissionRow(mission: MissionRecord) {
   } else {
     const tr = document.createElement('tr');
     tr.dataset.id = mission.mission_id;
-    tr.dataset.searchable = `${mission.mission_id} ${mission.colony_id} ${mission.prompt}`;
+    tr.dataset.searchable = `${mission.mission_id} ${mission.repo_id} ${mission.prompt}`;
     tr.dataset.createdAtMs = String(mission.created_at_ms);
     tr.dataset.status = status;
     tr.innerHTML = html;

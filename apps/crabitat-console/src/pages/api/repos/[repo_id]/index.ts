@@ -15,3 +15,20 @@ export const DELETE: APIRoute = async ({ params }) => {
     headers: { 'Content-Type': 'application/json' },
   });
 };
+
+export const POST: APIRoute = async ({ params, request }) => {
+  const { repo_id } = params;
+  const body = await request.json();
+
+  const res = await fetch(`${CONTROL_PLANE_URL}/v1/repos/${repo_id}/update`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  const data = await res.json();
+  return new Response(JSON.stringify(data), {
+    status: res.status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};

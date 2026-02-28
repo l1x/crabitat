@@ -48,7 +48,7 @@ function workflowToSteps(wf: WorkflowRecord): PipelineStep[] {
                 <div class="wf-badges">
                   <span class="wf-version">v{wf.version}</span>
                   <span class={`source-tag source-tag--${wf.source}`}>
-                    {wf.source === 'toml' ? 'TOML' : 'Manual'}
+                    {wf.source === 'toml' ? 'TOML' : wf.source === 'assembled' ? 'ASSEMBLED' : 'Manual'}
                   </span>
                   {wf.commit_hash && (
                     <span class="wf-commit" title={wf.commit_hash}>
@@ -184,6 +184,11 @@ function workflowToSteps(wf: WorkflowRecord): PipelineStep[] {
   .source-tag--manual {
     background: #f3e8ff;
     color: #7c3aed;
+  }
+
+  .source-tag--assembled {
+    background: #dcfce7;
+    color: #16a34a;
   }
 
   .wf-commit {

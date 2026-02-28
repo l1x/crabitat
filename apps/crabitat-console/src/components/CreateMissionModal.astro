@@ -1,12 +1,12 @@
 ---
-import type { ColonyRecord, WorkflowRecord } from '../lib/types';
+import type { RepoRecord, WorkflowRecord } from '../lib/types';
 
 interface Props {
-  colonies: ColonyRecord[];
+  repos: RepoRecord[];
   workflows: WorkflowRecord[];
 }
 
-const { colonies, workflows } = Astro.props;
+const { repos, workflows } = Astro.props;
 ---
 
 <dialog class="modal modal--wide" id="create-mission-modal">
@@ -17,18 +17,12 @@ const { colonies, workflows } = Astro.props;
     </div>
     <div class="modal-body">
       <div class="form-group">
-        <label class="form-label" for="mission-colony">Colony</label>
-        <select class="form-input" id="mission-colony">
-          {colonies.map((c) => (
-            <option value={c.colony_id}>{c.name}</option>
+        <label class="form-label" for="mission-repo">Repository</label>
+        <select class="form-input" id="mission-repo">
+          {repos.map((r) => (
+            <option value={r.repo_id}>{r.full_name}</option>
           ))}
-          <option value="__new__">Create new&hellip;</option>
         </select>
-      </div>
-
-      <div class="form-group" id="new-colony-group" hidden>
-        <label class="form-label" for="new-colony-name">New colony name</label>
-        <input type="text" class="form-input" id="new-colony-name" placeholder="my-colony" />
       </div>
 
       <div class="form-group">
@@ -58,28 +52,52 @@ const { colonies, workflows } = Astro.props;
   </div>
 </dialog>
 
+<script id="create-mission-repos-json" type="application/json" set:html={JSON.stringify(repos.map((r) => ({ repo_id: r.repo_id, stacks: r.stacks ?? [] })))} />
+<script id="create-mission-workflows-json" type="application/json" set:html={JSON.stringify(workflows.map((wf) => ({ name: wf.name, source: wf.source })))} />
+
 <script>
   const modal = document.getElementById('create-mission-modal') as HTMLDialogElement;
   const closeBtn = document.getElementById('create-mission-close')!;
   const cancelBtn = document.getElementById('create-mission-cancel')!;
   const submitBtn = document.getElementById('create-mission-submit') as HTMLButtonElement;
 
-  const colonySelect = document.getElementById('mission-colony') as HTMLSelectElement;
-  const newColonyGroup = document.getElementById('new-colony-group')!;
-  const newColonyInput = document.getElementById('new-colony-name') as HTMLInputElement;
+  const repoSelect = document.getElementById('mission-repo') as HTMLSelectElement;
   const promptInput = document.getElementById('mission-prompt') as HTMLTextAreaElement;
   const workflowSelect = document.getElementById('mission-workflow') as HTMLSelectElement;
 
-  colonySelect.addEventListener('change', () => {
-    newColonyGroup.hidden = colonySelect.value !== '__new__';
-  });
+  interface RepoMeta { repo_id: string; stacks: string[]; }
+  interface WfMeta { name: string; source: string; }
+
+  const repoMetas: RepoMeta[] = JSON.parse(document.getElementById('create-mission-repos-json')?.textContent || '[]');
+  const allWorkflows: WfMeta[] = JSON.parse(document.getElementById('create-mission-workflows-json')?.textContent || '[]');
+
+  function filterWorkflows() {
+    const repoId = repoSelect.value;
+    const repoMeta = repoMetas.find((r) => r.repo_id === repoId);
+    const stacks = repoMeta?.stacks ?? [];
+
+    // Compute expected assembled suffix
+    const sorted = [...stacks].sort();
+    const suffix = sorted.join('+');
+
+    // Filter: show assembled workflows matching this repo's stacks, plus base workflows as fallback
+    const filtered = allWorkflows.filter((wf) => {
+      if (!wf.name.includes('/')) return true; // base workflow
+      if (stacks.length === 0) return false; // no stacks → hide assembled
+      return wf.name.endsWith('/' + suffix);
+    });
+
+    // Rebuild options
+    workflowSelect.innerHTML = '<option value="">None</option>' +
+      filtered.map((wf) => `<option value="${wf.name}">${wf.name}</option>`).join('');
+  }
+
+  repoSelect.addEventListener('change', filterWorkflows);
 
   function resetModal() {
-    colonySelect.selectedIndex = 0;
-    newColonyGroup.hidden = true;
-    newColonyInput.value = '';
+    repoSelect.selectedIndex = 0;
     promptInput.value = '';
-    workflowSelect.selectedIndex = 0;
+    filterWorkflows();
     submitBtn.textContent = 'Create';
     submitBtn.disabled = false;
   }
@@ -97,34 +115,17 @@ const { colonies, workflows } = Astro.props;
       return;
     }
 
+    const repoId = repoSelect.value;
+    if (!repoId) {
+      alert('Repository is required.');
+      return;
+    }
+
     submitBtn.textContent = 'Creating...';
     submitBtn.disabled = true;
 
     try {
-      let colonyId = colonySelect.value;
-
-      if (colonyId === '__new__') {
-        const name = newColonyInput.value.trim();
-        if (!name) {
-          alert('Colony name is required.');
-          submitBtn.textContent = 'Create';
-          submitBtn.disabled = false;
-          return;
-        }
-        const colonyRes = await fetch('/api/colonies', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name }),
-        });
-        if (!colonyRes.ok) {
-          const err = await colonyRes.json().catch(() => ({ error: 'Unknown error' }));
-          throw new Error(err.error || `Failed to create colony: ${colonyRes.status}`);
-        }
-        const colony = await colonyRes.json();
-        colonyId = colony.colony_id;
-      }
-
-      const body: Record<string, string> = { colony_id: colonyId, prompt };
+      const body: Record<string, string> = { repo_id: repoId, prompt };
       const workflow = workflowSelect.value;
       if (workflow) body.workflow = workflow;
 

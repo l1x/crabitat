@@ -56,7 +56,6 @@ function setupSort(selectId: string, containerId: string) {
 }
 
 // Initialize all search/filter/sort on load
-setupSearch('search-colonies', 'colony-container');
 setupSearch('search-crabs', 'crab-container');
 setupSearch('search-missions', 'mission-container');
 setupSearch('search-tasks', 'task-container');

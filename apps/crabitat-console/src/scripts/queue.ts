@@ -1,9 +1,9 @@
-import { fetchIssues, fetchQueue, queueIssue, removeFromQueue } from '../lib/api-client';
+import { fetchQueue, queueIssue, removeFromQueue, fetchRepoIssues } from '../lib/api-client';
 import { store } from './store';
 import type { GitHubIssueRecord, MissionRecord } from '../lib/types';
 
-function getSelectedColonyId(): string | null {
-  const select = document.getElementById('queue-colony-select') as HTMLSelectElement | null;
+function getSelectedRepoId(): string | null {
+  const select = document.getElementById('queue-repo-select') as HTMLSelectElement | null;
   return select?.value ?? null;
 }
 
@@ -36,13 +36,13 @@ function renderIssues(issues: GitHubIssueRecord[]) {
   // Bind queue buttons
   container.querySelectorAll<HTMLButtonElement>('[data-queue-issue]').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      const colonyId = getSelectedColonyId();
-      if (!colonyId) return;
+      const repoId = getSelectedRepoId();
+      if (!repoId) return;
       const issueNum = Number(btn.dataset.queueIssue);
       btn.disabled = true;
       btn.textContent = 'Queuing...';
       try {
-        await queueIssue(colonyId, issueNum);
+        await queueIssue(repoId, issueNum);
         await refreshAll();
       } catch (err) {
         btn.textContent = 'Error';
@@ -83,13 +83,13 @@ function renderQueue(missions: MissionRecord[]) {
   // Bind remove buttons
   container.querySelectorAll<HTMLButtonElement>('[data-remove-mission]').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      const colonyId = getSelectedColonyId();
-      if (!colonyId) return;
+      const repoId = getSelectedRepoId();
+      if (!repoId) return;
       const missionId = btn.dataset.removeMission!;
       btn.disabled = true;
       btn.textContent = 'Removing...';
       try {
-        await removeFromQueue(colonyId, missionId);
+        await removeFromQueue(repoId, missionId);
         await refreshAll();
       } catch (err) {
         btn.textContent = 'Error';
@@ -100,11 +100,11 @@ function renderQueue(missions: MissionRecord[]) {
 }
 
 async function refreshAll() {
-  const colonyId = getSelectedColonyId();
-  if (!colonyId) return;
+  const repoId = getSelectedRepoId();
+  if (!repoId) return;
 
   try {
-    const [issues, queue] = await Promise.all([fetchIssues(colonyId), fetchQueue(colonyId)]);
+    const [issues, queue] = await Promise.all([fetchRepoIssues(repoId), fetchQueue(repoId)]);
     renderIssues(issues);
     renderQueue(queue);
   } catch (err) {
@@ -123,15 +123,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const refreshBtn = document.getElementById('queue-refresh-btn');
   refreshBtn?.addEventListener('click', refreshAll);
 
-  const select = document.getElementById('queue-colony-select');
+  const select = document.getElementById('queue-repo-select');
   select?.addEventListener('change', refreshAll);
 
   // Auto-refresh on mission events
   store.addEventListener('mission_created', () => refreshAll());
   store.addEventListener('mission_updated', () => refreshAll());
 
-  // Auto-load if a colony is already selected
-  if (getSelectedColonyId()) {
+  // Auto-load if a repo is already selected
+  if (getSelectedRepoId()) {
     refreshAll();
   }
 });

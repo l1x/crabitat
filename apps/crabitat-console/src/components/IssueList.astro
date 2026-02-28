@@ -1,6 +1,6 @@
 ---
 import { marked } from 'marked';
-import type { GitHubIssueRecord, RepoRecord, ColonyRecord, WorkflowRecord } from '../lib/types';
+import type { GitHubIssueRecord, RepoRecord, WorkflowRecord } from '../lib/types';
 
 marked.setOptions({ breaks: true });
 
@@ -11,13 +11,12 @@ export interface IssueWithRepo extends GitHubIssueRecord {
 interface Props {
   issues: IssueWithRepo[];
   repos: RepoRecord[];
-  colonies: ColonyRecord[];
   workflows: WorkflowRecord[];
   showRepoFilter?: boolean;
   repoId?: string;
 }
 
-const { issues, repos, colonies, workflows, showRepoFilter = true, repoId } = Astro.props;
+const { issues, repos, workflows, showRepoFilter = true, repoId } = Astro.props;
 
 function truncateBody(body: string, max: number): string {
   const trimmed = body.trim();
@@ -26,7 +25,7 @@ function truncateBody(body: string, max: number): string {
 }
 
 // Build a lookup for JS to reference issue data by number
-const issueDataMap: Record<number, { title: string; body: string; repoId: string; repoName: string; labels: string[]; state: string }> = {};
+const issueDataMap: Record<number, { title: string; body: string; repoId: string; repoName: string; labels: string[]; state: string; stacks: string[] }> = {};
 for (const issue of issues) {
   const repo = repos.find((r) => r.repo_id === issue.repo_id);
   issueDataMap[issue.number] = {
@@ -36,11 +35,13 @@ for (const issue of issues) {
     repoName: repo?.full_name || '',
     labels: issue.labels,
     state: issue.state,
+    stacks: repo?.stacks ?? [],
   };
 }
 ---
 
 <script id="issue-data-json" type="application/json" set:html={JSON.stringify(issueDataMap)} />
+<script id="issue-workflows-json" type="application/json" set:html={JSON.stringify(workflows.map((wf) => ({ name: wf.name, source: wf.source })))} />
 
 {showRepoFilter && (
   <div class="repo-filter">
@@ -133,21 +134,6 @@ for (const issue of issues) {
       <div class="launch-repo-ref" id="launch-repo-ref"></div>
 
       <div class="form-group">
-        <label class="form-label" for="launch-colony">Colony</label>
-        <select class="form-select" id="launch-colony">
-          {colonies.map((c) => (
-            <option value={c.colony_id}>{c.name}</option>
-          ))}
-          <option value="__new__">Create new&hellip;</option>
-        </select>
-      </div>
-
-      <div class="form-group" id="launch-new-colony-group" hidden>
-        <label class="form-label" for="launch-new-colony-name">New colony name</label>
-        <input type="text" class="form-input" id="launch-new-colony-name" placeholder="my-colony" />
-      </div>
-
-      <div class="form-group">
         <label class="form-label" for="launch-workflow">Workflow (optional)</label>
         <select class="form-select" id="launch-workflow">
           <option value="">None</option>
@@ -184,8 +170,21 @@ for (const issue of issues) {
 
   // Load issue data from JSON instead of data attributes
   const issueDataEl = document.getElementById('issue-data-json');
-  const issueDataMap: Record<number, { title: string; body: string; repoId: string; repoName: string; labels: string[]; state: string }> =
+  const issueDataMap: Record<number, { title: string; body: string; repoId: string; repoName: string; labels: string[]; state: string; stacks: string[] }> =
     issueDataEl ? JSON.parse(issueDataEl.textContent || '{}') : {};
+
+  interface WfMeta { name: string; source: string; }
+  const allWorkflows: WfMeta[] = JSON.parse(document.getElementById('issue-workflows-json')?.textContent || '[]');
+
+  function filterWorkflowsForStacks(stacks: string[]): WfMeta[] {
+    const sorted = [...stacks].sort();
+    const suffix = sorted.join('+');
+    return allWorkflows.filter((wf) => {
+      if (!wf.name.includes('/')) return true;
+      if (stacks.length === 0) return false;
+      return wf.name.endsWith('/' + suffix);
+    });
+  }
 
   const modal = document.getElementById('launch-modal') as HTMLDialogElement;
   const issueRef = document.getElementById('launch-issue-ref')!;
@@ -198,9 +197,6 @@ for (const issue of issues) {
   const issueCount = document.getElementById('issue-count')!;
   const refreshBtn = document.getElementById('refresh-issues-btn') as HTMLButtonElement | null;
   const dataPanel = document.querySelector<HTMLElement>('.data-panel[data-repo-id]');
-  const colonySelect = document.getElementById('launch-colony') as HTMLSelectElement;
-  const newColonyGroup = document.getElementById('launch-new-colony-group')!;
-  const newColonyInput = document.getElementById('launch-new-colony-name') as HTMLInputElement;
   const workflowSelect = document.getElementById('launch-workflow') as HTMLSelectElement;
 
   const detailModal = document.getElementById('issue-detail-modal') as HTMLDialogElement;
@@ -236,10 +232,6 @@ for (const issue of issues) {
 
   let currentIssueNumber: number | null = null;
 
-  colonySelect.addEventListener('change', () => {
-    newColonyGroup.hidden = colonySelect.value !== '__new__';
-  });
-
   // Repo filter
   repoSelect?.addEventListener('change', () => {
     const val = repoSelect.value;
@@ -261,7 +253,7 @@ for (const issue of issues) {
     refreshBtn.disabled = true;
 
     try {
-      const res = await fetch(`/api/repos/${repoId}/issues`);
+      const res = await fetch(`/api/repos/${repoId}/issues?refresh=true`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const issues: Array<{
         number: number;
@@ -273,6 +265,8 @@ for (const issue of issues) {
       }> = await res.json();
 
       // Update the data map with refreshed issues
+      // Preserve stacks from the existing data for this repo
+      const existingStacks = Object.values(issueDataMap).find((d) => d.repoId === repoId)?.stacks ?? [];
       for (const issue of issues) {
         issueDataMap[issue.number] = {
           title: issue.title,
@@ -281,6 +275,7 @@ for (const issue of issues) {
           repoName: '',
           labels: issue.labels,
           state: issue.state,
+          stacks: existingStacks,
         };
       }
 
@@ -325,9 +320,6 @@ for (const issue of issues) {
 
   // Launch modal
   function resetModal() {
-    colonySelect.selectedIndex = 0;
-    newColonyGroup.hidden = true;
-    newColonyInput.value = '';
     workflowSelect.selectedIndex = 0;
     executeBtn.textContent = 'Create';
     executeBtn.disabled = false;
@@ -343,6 +335,13 @@ for (const issue of issues) {
         currentIssueNumber = num;
         issueRef.textContent = `#${num} — ${data?.title || ''}`;
         repoRef.textContent = data?.repoName || '';
+
+        // Filter workflows based on repo stacks
+        const stacks = data?.stacks ?? [];
+        const filtered = filterWorkflowsForStacks(stacks);
+        workflowSelect.innerHTML = '<option value="">None</option>' +
+          filtered.map((wf) => `<option value="${wf.name}">${wf.name}</option>`).join('');
+
         modal.showModal();
       });
     });
@@ -358,48 +357,30 @@ for (const issue of issues) {
   executeBtn.addEventListener('click', async () => {
     if (!currentIssueNumber) return;
 
+    const data = issueDataMap[currentIssueNumber];
+    if (!data?.repoId) {
+      alert('Cannot determine repository for this issue.');
+      return;
+    }
+
     executeBtn.textContent = 'Creating...';
     executeBtn.disabled = true;
 
     try {
-      let colonyId = colonySelect.value;
-
-      // Create colony if needed
-      if (colonyId === '__new__') {
-        const name = newColonyInput.value.trim();
-        if (!name) {
-          alert('Colony name is required.');
-          executeBtn.textContent = 'Create';
-          executeBtn.disabled = false;
-          return;
-        }
-        const colonyRes = await fetch('/api/colonies', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name }),
-        });
-        if (!colonyRes.ok) {
-          const err = await colonyRes.json().catch(() => ({ error: 'Unknown error' }));
-          throw new Error(err.error || `Failed to create colony: ${colonyRes.status}`);
-        }
-        const colony = await colonyRes.json();
-        colonyId = colony.colony_id;
-      }
-
       // Queue the issue as a mission
       const body: Record<string, unknown> = { issue_number: currentIssueNumber };
       const workflow = workflowSelect.value;
       if (workflow) body.workflow = workflow;
 
-      const res = await fetch(`/api/colonies/${colonyId}/queue`, {
+      const res = await fetch(`/api/repos/${data.repoId}/queue`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(err.error || `Failed to queue issue: ${res.status}`);
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.error || `Failed to queue issue: ${res.status}`);
       }
 
       modal.close();

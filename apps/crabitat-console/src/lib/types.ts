@@ -6,6 +6,7 @@ export interface RepoRecord {
   default_branch: string;
   language: string;
   local_path: string;
+  stacks: string[];
   created_at_ms: number;
 }
 
@@ -117,7 +118,7 @@ export interface WorkflowRecord {
   description: string;
   include: string[];
   version: string;
-  source: 'toml' | 'manual';
+  source: 'toml' | 'manual' | 'assembled';
   commit_hash: string | null;
   created_at_ms: number;
   steps: WorkflowStepRecord[];

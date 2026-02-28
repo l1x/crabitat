@@ -63,6 +63,8 @@ type CrabChannels = Arc<Mutex<HashMap<String, mpsc::UnboundedSender<String>>>>;
 struct WorkflowRegistry {
     manifests: HashMap<String, WorkflowManifest>,
     prompts_path: PathBuf,
+    /// Maps short stack names (e.g. "rust") to relative prompt paths (e.g. "prompts/stacks/rust.md")
+    stack_map: HashMap<String, String>,
 }
 
 impl WorkflowRegistry {
@@ -106,7 +108,27 @@ impl WorkflowRegistry {
             }
         }
 
-        Self { manifests, prompts_path: prompts_path.to_path_buf() }
+        // Build stack_map from prompts/stacks/*.md and prompts/pm/*.md
+        let mut stack_map = HashMap::new();
+        for subdir in &["prompts/stacks", "prompts/pm"] {
+            let dir = prompts_path.join(subdir);
+            if dir.is_dir() {
+                if let Ok(entries) = fs::read_dir(&dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.extension().and_then(|e| e.to_str()) == Some("md") {
+                            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                                let relative = format!("{subdir}/{stem}.md");
+                                info!(name = stem, path = %relative, "discovered stack prompt");
+                                stack_map.insert(stem.to_string(), relative);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Self { manifests, prompts_path: prompts_path.to_path_buf(), stack_map }
     }
 
     fn get(&self, name: &str) -> Option<&WorkflowManifest> {
@@ -118,6 +140,14 @@ impl WorkflowRegistry {
         fs::read_to_string(&path).map_err(|e| {
             ApiError::internal(format!("failed to read prompt file {}: {e}", path.display()))
         })
+    }
+
+    /// Resolve short stack names to prompt file paths using the stack_map.
+    fn resolve_stacks(&self, names: &[String]) -> Vec<String> {
+        names
+            .iter()
+            .filter_map(|name| self.stack_map.get(name).cloned())
+            .collect()
     }
 }
 
@@ -589,6 +619,7 @@ struct RepoRecord {
     default_branch: String,
     language: String,
     local_path: String,
+    stacks: Vec<String>,
     created_at_ms: u64,
 }
 
@@ -752,12 +783,14 @@ struct CreateRepoRequest {
     default_branch: Option<String>,
     language: Option<String>,
     local_path: String,
+    stacks: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
 struct UpdateRepoRequest {
     default_branch: Option<String>,
     local_path: Option<String>,
+    stacks: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -867,7 +900,14 @@ async fn serve(port: u16, db_path: &StdPath, prompts_path: &StdPath) -> Result<(
     let workflows = WorkflowRegistry::load(prompts_path);
     info!(count = workflows.manifests.len(), "workflow registry loaded");
 
-    // Auto-sync TOML workflows to DB on startup
+    // Assemble workflows based on repo stacks
+    let mut workflows = workflows;
+    let all_stacks = query_all_repo_stacks(&connection).unwrap_or_default();
+    let combo_count = all_stacks.iter().filter(|s| !s.is_empty()).count();
+    assemble_workflows(&mut workflows, all_stacks);
+    info!(combo_count, total = workflows.manifests.len(), "assembled workflows");
+
+    // Auto-sync TOML + assembled workflows to DB on startup
     let sync_result = sync_toml_workflows_to_db(&connection, &workflows);
     info!(
         synced = sync_result.synced,
@@ -934,6 +974,7 @@ fn build_router(state: AppState) -> Router {
         )
         .route("/v1/prompt-files", get(list_prompt_files))
         .route("/v1/prompt-files/preview", get(preview_prompt_file))
+        .route("/v1/stacks", get(list_stacks))
         .route("/v1/workflows/{workflow_id}/update", post(update_workflow))
         .route("/v1/settings", get(get_settings).post(patch_settings))
         .route("/v1/repos/{repo_id}/languages", get(get_repo_languages))
@@ -1089,6 +1130,7 @@ fn apply_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
         "ALTER TABLE workflows ADD COLUMN commit_hash TEXT",
         "ALTER TABLE missions RENAME COLUMN colony_id TO repo_id",
         "ALTER TABLE crabs RENAME COLUMN colony_id TO repo_id",
+        "ALTER TABLE repos ADD COLUMN stacks TEXT NOT NULL DEFAULT '[]'",
     ];
     for sql in migrations {
         match conn.execute(sql, []) {
@@ -1415,8 +1457,13 @@ async fn sync_workflows(
         let wf = state.workflows.read().unwrap();
         wf.prompts_path.clone()
     };
-    let new_registry = WorkflowRegistry::load(&prompts_path);
+    let mut new_registry = WorkflowRegistry::load(&prompts_path);
     info!(count = new_registry.manifests.len(), path = %prompts_path.display(), "reloaded workflow registry for sync");
+
+    // Re-assemble workflows from repo stacks
+    let db = state.db.lock().await;
+    let all_stacks = query_all_repo_stacks(&db)?;
+    assemble_workflows(&mut new_registry, all_stacks);
 
     // Update in-memory registry and clone for DB sync
     let registry_clone = {
@@ -1426,7 +1473,6 @@ async fn sync_workflows(
     };
 
     // Sync to DB
-    let db = state.db.lock().await;
     let result = sync_toml_workflows_to_db(&db, &registry_clone);
     Ok(Json(result))
 }
@@ -1509,6 +1555,93 @@ async fn preview_prompt_file(
     let wf = state.workflows.read().unwrap();
     let content = wf.load_prompt_file(&query.path)?;
     Ok(Json(PromptFilePreview { path: query.path, content }))
+}
+
+// ---------------------------------------------------------------------------
+// Stacks endpoint
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+struct StackEntry {
+    name: String,
+    path: String,
+}
+
+async fn list_stacks(State(state): State<AppState>) -> Result<Json<Vec<StackEntry>>, ApiError> {
+    let wf = state.workflows.read().unwrap();
+    let mut stacks: Vec<StackEntry> = wf
+        .stack_map
+        .iter()
+        .map(|(name, path)| StackEntry { name: name.clone(), path: path.clone() })
+        .collect();
+    stacks.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(stacks))
+}
+
+// ---------------------------------------------------------------------------
+// Assembled workflows
+// ---------------------------------------------------------------------------
+
+/// Compute the assembled workflow name for a base workflow and a sorted stack combo.
+fn assembled_name(base: &str, combo: &[String]) -> String {
+    format!("{base}/{}", combo.join("+"))
+}
+
+/// Assemble workflows by combining each base workflow with each unique stack combo.
+fn assemble_workflows(registry: &mut WorkflowRegistry, repo_stacks: Vec<Vec<String>>) {
+    // Remove old assembled manifests (names containing '/')
+    registry.manifests.retain(|name, _| !name.contains('/'));
+
+    // Collect unique stack combos (sorted, deduped)
+    let mut unique_combos: Vec<Vec<String>> = Vec::new();
+    for mut stacks in repo_stacks {
+        if stacks.is_empty() {
+            continue;
+        }
+        stacks.sort();
+        stacks.dedup();
+        if !unique_combos.contains(&stacks) {
+            unique_combos.push(stacks);
+        }
+    }
+
+    // Get base workflow names (those without '/')
+    let base_names: Vec<String> = registry.manifests.keys().cloned().collect();
+
+    for combo in &unique_combos {
+        let resolved_includes = registry.resolve_stacks(combo);
+        for base_name in &base_names {
+            let manifest = &registry.manifests[base_name];
+            let name = assembled_name(base_name, combo);
+
+            let assembled = WorkflowManifest {
+                workflow: crabitat_core::WorkflowMeta {
+                    name: name.clone(),
+                    description: format!(
+                        "{} [{}]",
+                        manifest.workflow.description,
+                        combo.join("+")
+                    ),
+                    version: manifest.workflow.version.clone(),
+                    include: resolved_includes.clone(),
+                },
+                steps: manifest.steps.clone(),
+            };
+
+            info!(name = %name, includes = ?resolved_includes, "assembled workflow");
+            registry.manifests.insert(name, assembled);
+        }
+    }
+}
+
+/// Query all repos' stacks from DB.
+fn query_all_repo_stacks(conn: &Connection) -> Result<Vec<Vec<String>>, ApiError> {
+    let mut stmt = conn.prepare("SELECT stacks FROM repos")?;
+    let rows = stmt.query_map([], |row| {
+        let json: String = row.get(0)?;
+        Ok(parse_stacks_json(&json))
+    })?;
+    Ok(rows.filter_map(Result::ok).collect())
 }
 
 // ---------------------------------------------------------------------------
@@ -2772,6 +2905,9 @@ async fn create_repo(
     let repo_id = ExternalId::new("repo").to_string();
     let default_branch = request.default_branch.unwrap_or_else(|| "main".to_string());
     let language = request.language.unwrap_or_default();
+    let stacks = request.stacks.unwrap_or_default();
+    let stacks_json =
+        serde_json::to_string(&stacks).unwrap_or_else(|_| "[]".to_string());
     let created_at_ms = now_ms();
     let full_name = format!("{}/{}", request.owner, request.name);
 
@@ -2783,14 +2919,23 @@ async fn create_repo(
         default_branch,
         language,
         local_path: request.local_path,
+        stacks,
         created_at_ms,
     };
 
     let db = state.db.lock().await;
     db.execute(
-        "INSERT INTO repos (repo_id, owner, name, default_branch, language, local_path, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![row.repo_id, row.owner, row.name, row.default_branch, row.language, row.local_path, row.created_at_ms as i64],
+        "INSERT INTO repos (repo_id, owner, name, default_branch, language, local_path, stacks, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![row.repo_id, row.owner, row.name, row.default_branch, row.language, row.local_path, stacks_json, row.created_at_ms as i64],
     )?;
+
+    // Re-assemble workflows if stacks were provided
+    if !row.stacks.is_empty() {
+        let all_stacks = query_all_repo_stacks(&db)?;
+        let mut wf = state.workflows.write().unwrap();
+        assemble_workflows(&mut wf, all_stacks);
+        sync_toml_workflows_to_db(&db, &wf);
+    }
 
     emit_console_event(&state.console_tx, ConsoleEvent::RepoCreated { repo: row.clone() });
     Ok(Json(row))
@@ -2825,10 +2970,14 @@ async fn update_repo(
 
     let default_branch = request.default_branch.unwrap_or(existing.default_branch);
     let local_path = request.local_path.unwrap_or(existing.local_path);
+    let stacks_changed = request.stacks.is_some();
+    let stacks = request.stacks.unwrap_or(existing.stacks);
+    let stacks_json =
+        serde_json::to_string(&stacks).unwrap_or_else(|_| "[]".to_string());
 
     db.execute(
-        "UPDATE repos SET default_branch = ?2, local_path = ?3 WHERE repo_id = ?1",
-        params![repo_id, default_branch, local_path],
+        "UPDATE repos SET default_branch = ?2, local_path = ?3, stacks = ?4 WHERE repo_id = ?1",
+        params![repo_id, default_branch, local_path, stacks_json],
     )?;
 
     let updated = RepoRecord {
@@ -2839,8 +2988,17 @@ async fn update_repo(
         default_branch,
         language: existing.language,
         local_path,
+        stacks,
         created_at_ms: existing.created_at_ms,
     };
+
+    // Re-assemble workflows when stacks change
+    if stacks_changed {
+        let all_stacks = query_all_repo_stacks(&db)?;
+        let mut wf = state.workflows.write().unwrap();
+        assemble_workflows(&mut wf, all_stacks);
+        sync_toml_workflows_to_db(&db, &wf);
+    }
 
     emit_console_event(&state.console_tx, ConsoleEvent::RepoUpdated { repo: updated.clone() });
     Ok(Json(updated))
@@ -3059,7 +3217,24 @@ async fn queue_issue(
             .unwrap_or(None);
         let queue_position = max_pos.unwrap_or(0) + 1;
 
-        let workflow_name = request.workflow.unwrap_or_else(|| "dev-task".to_string());
+        let workflow_name = request.workflow.unwrap_or_else(|| {
+            // Look up repo stacks to compute the default assembled workflow name
+            let stacks_json: String = tx
+                .query_row(
+                    "SELECT stacks FROM repos WHERE repo_id = ?1",
+                    params![repo_id],
+                    |row| row.get(0),
+                )
+                .unwrap_or_else(|_| "[]".to_string());
+            let mut stacks = parse_stacks_json(&stacks_json);
+            if stacks.is_empty() {
+                "develop-feature".to_string()
+            } else {
+                stacks.sort();
+                stacks.dedup();
+                assembled_name("develop-feature", &stacks)
+            }
+        });
         let prompt =
             format!("{}#{}: {}\n\n{}", full_name, request.issue_number, detail.title, detail.body);
         let mission = Mission::new(&prompt);
@@ -3435,14 +3610,19 @@ fn build_status_snapshot(conn: &Connection) -> Result<StatusSnapshot, ApiError> 
 // Query helpers
 // ---------------------------------------------------------------------------
 
+fn parse_stacks_json(json: &str) -> Vec<String> {
+    serde_json::from_str(json).unwrap_or_default()
+}
+
 fn query_repos(conn: &Connection) -> Result<Vec<RepoRecord>, ApiError> {
     let mut stmt = conn.prepare(
-        "SELECT repo_id, owner, name, default_branch, language, local_path, created_at_ms FROM repos ORDER BY created_at_ms DESC",
+        "SELECT repo_id, owner, name, default_branch, language, local_path, stacks, created_at_ms FROM repos ORDER BY created_at_ms DESC",
     )?;
     let rows = stmt.query_map([], |row| {
         let owner: String = row.get(1)?;
         let name: String = row.get(2)?;
         let full_name = format!("{owner}/{name}");
+        let stacks_json: String = row.get(6)?;
         Ok(RepoRecord {
             repo_id: row.get(0)?,
             owner,
@@ -3451,7 +3631,8 @@ fn query_repos(conn: &Connection) -> Result<Vec<RepoRecord>, ApiError> {
             default_branch: row.get(3)?,
             language: row.get(4)?,
             local_path: row.get(5)?,
-            created_at_ms: row.get::<_, i64>(6)? as u64,
+            stacks: parse_stacks_json(&stacks_json),
+            created_at_ms: row.get::<_, i64>(7)? as u64,
         })
     })?;
     Ok(rows.filter_map(Result::ok).collect())
@@ -3459,13 +3640,14 @@ fn query_repos(conn: &Connection) -> Result<Vec<RepoRecord>, ApiError> {
 
 fn fetch_repo(conn: &Connection, repo_id: &str) -> Result<Option<RepoRecord>, ApiError> {
     let mut stmt = conn.prepare(
-        "SELECT repo_id, owner, name, default_branch, language, local_path, created_at_ms FROM repos WHERE repo_id = ?1",
+        "SELECT repo_id, owner, name, default_branch, language, local_path, stacks, created_at_ms FROM repos WHERE repo_id = ?1",
     )?;
     let mut rows = stmt.query(params![repo_id])?;
     if let Some(row) = rows.next()? {
         let owner: String = row.get(1)?;
         let name: String = row.get(2)?;
         let full_name = format!("{owner}/{name}");
+        let stacks_json: String = row.get(6)?;
         return Ok(Some(RepoRecord {
             repo_id: row.get(0)?,
             owner,
@@ -3474,7 +3656,8 @@ fn fetch_repo(conn: &Connection, repo_id: &str) -> Result<Option<RepoRecord>, Ap
             default_branch: row.get(3)?,
             language: row.get(4)?,
             local_path: row.get(5)?,
-            created_at_ms: row.get::<_, i64>(6)? as u64,
+            stacks: parse_stacks_json(&stacks_json),
+            created_at_ms: row.get::<_, i64>(7)? as u64,
         }));
     }
     Ok(None)
@@ -3816,15 +3999,18 @@ fn sync_toml_workflows_to_db(
         let include_json = serde_json::to_string(&manifest.workflow.include)
             .unwrap_or_else(|_| "[]".to_string());
 
+        // Assembled workflows (name contains '/') get source = 'assembled'
+        let source = if name.contains('/') { "assembled" } else { "toml" };
+
         // Upsert workflow by name
         let upsert_result = conn.execute(
             "INSERT INTO workflows (workflow_id, name, description, include, version, source, commit_hash, created_at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, 'toml', ?6, ?7)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(name) DO UPDATE SET
                description = excluded.description,
                include = excluded.include,
                version = excluded.version,
-               source = 'toml',
+               source = excluded.source,
                commit_hash = excluded.commit_hash",
             params![
                 ExternalId::new("wf").to_string(),
@@ -3832,6 +4018,7 @@ fn sync_toml_workflows_to_db(
                 manifest.workflow.description,
                 include_json,
                 manifest.workflow.version,
+                source,
                 commit_hash,
                 now_ms() as i64,
             ],
@@ -3895,16 +4082,14 @@ fn sync_toml_workflows_to_db(
         }
     }
 
-    // Remove stale toml-sourced workflows not in current registry
+    // Remove stale toml/assembled workflows not in current registry
     let removed = if manifest_names.is_empty() {
-        // Remove all toml-sourced workflows
-        conn.execute("DELETE FROM workflows WHERE source = 'toml'", [])
+        conn.execute("DELETE FROM workflows WHERE source IN ('toml', 'assembled')", [])
             .unwrap_or(0)
     } else {
-        // Build placeholders for NOT IN
         let placeholders: Vec<String> = manifest_names.iter().enumerate().map(|(i, _)| format!("?{}", i + 1)).collect();
         let sql = format!(
-            "DELETE FROM workflows WHERE source = 'toml' AND name NOT IN ({})",
+            "DELETE FROM workflows WHERE source IN ('toml', 'assembled') AND name NOT IN ({})",
             placeholders.join(", ")
         );
         let params: Vec<&dyn rusqlite::types::ToSql> = manifest_names
@@ -3914,7 +4099,7 @@ fn sync_toml_workflows_to_db(
         conn.execute(&sql, params.as_slice()).unwrap_or(0)
     };
 
-    info!(synced, removed, errors = errors.len(), commit = ?commit_hash, "TOML workflow sync complete");
+    info!(synced, removed, errors = errors.len(), commit = ?commit_hash, "workflow sync complete");
     SyncResult { synced, removed, commit_hash, errors }
 }
 
@@ -4179,6 +4364,7 @@ mod tests {
         let workflows = WorkflowRegistry {
             manifests: HashMap::new(),
             prompts_path: PathBuf::from("/tmp/test-prompts"),
+            stack_map: HashMap::new(),
         };
         AppState {
             db: Arc::new(Mutex::new(conn)),
@@ -4198,6 +4384,7 @@ mod tests {
                 default_branch: Some("main".into()),
                 language: None,
                 local_path: "/tmp/test".into(),
+                stacks: None,
             }),
         )
         .await

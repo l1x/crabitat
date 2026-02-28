@@ -3,24 +3,21 @@ import Layout from '../layouts/Layout.astro';
 import Sidebar from '../components/Sidebar.astro';
 import MissionPipeline from '../components/MissionPipeline.astro';
 import CreateMissionModal from '../components/CreateMissionModal.astro';
-import { fetchRepos, fetchWorkflows, fetchMissions, fetchColonies, fetchTasks } from '../lib/api-client';
-import { mockIssues, mockAgents, mockMessages } from '../lib/mock-data';
-import type { RepoRecord, MissionRecord, ColonyRecord, TaskRecord, WorkflowRecord } from '../lib/types';
+import { fetchStatus, fetchWorkflows, fetchTasks } from '../lib/api-client';
+import type { StatusSnapshot, TaskRecord, WorkflowRecord } from '../lib/types';
 
-let repos: RepoRecord[] = [];
-try { repos = await fetchRepos(); } catch {}
+let status: StatusSnapshot | null = null;
+try { status = await fetchStatus(); } catch {}
 
 let workflows: WorkflowRecord[] = [];
 try { workflows = await fetchWorkflows(); } catch {}
 
-let missions: MissionRecord[] = [];
-try { missions = await fetchMissions(); } catch {}
-
-let colonies: ColonyRecord[] = [];
-try { colonies = await fetchColonies(); } catch {}
-
 let tasks: TaskRecord[] = [];
 try { tasks = await fetchTasks(); } catch {}
+
+const repos = status?.repos ?? [];
+const missions = status?.missions ?? [];
+const crabs = status?.crabs ?? [];
 
 ---
 
@@ -28,10 +25,10 @@ try { tasks = await fetchTasks(); } catch {}
   <Sidebar
     activePage="/missions"
     repoCount={repos.length}
-    issueCount={mockIssues.length}
+    issueCount={status?.summary.cached_issue_count ?? 0}
     missionCount={missions.length}
-    agentCount={mockAgents.length}
-    messageCount={mockMessages.length}
+    agentCount={crabs.length}
+    messageCount={0}
     workflowCount={workflows.length}
   />
 
@@ -49,11 +46,11 @@ try { tasks = await fetchTasks(); } catch {}
       </div>
     </header>
     <div class="section">
-      <MissionPipeline missions={missions} tasks={tasks} colonies={colonies} />
+      <MissionPipeline missions={missions} tasks={tasks} repos={repos} />
     </div>
   </div>
 
-  <CreateMissionModal colonies={colonies} workflows={workflows} />
+  <CreateMissionModal repos={repos} workflows={workflows} />
 </Layout>
 
 <script>

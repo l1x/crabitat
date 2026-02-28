@@ -1,13 +1,12 @@
 ---
-import type { ColonyRecord } from '../lib/types';
+import type { RepoRecord } from '../lib/types';
 import EmptyState from './EmptyState.astro';
 
 interface Props {
-  colonies: ColonyRecord[];
+  repos: RepoRecord[];
 }
 
-const { colonies } = Astro.props;
-const coloniesWithRepo = colonies.filter((c) => c.repo);
+const { repos } = Astro.props;
 ---
 
 <div class="data-panel">
@@ -15,18 +14,18 @@ const coloniesWithRepo = colonies.filter((c) => c.repo);
     <span class="data-panel-title">Issue Queue</span>
   </div>
   <div class="data-panel-body">
-    {coloniesWithRepo.length === 0 ? (
+    {repos.length === 0 ? (
       <EmptyState
-        title="No colonies with a repo"
-        description="Bind a colony to a GitHub repo (PATCH /v1/colonies/{id}) to start queuing issues."
+        title="No repos registered"
+        description="Add a repo to start queuing issues."
       />
     ) : (
       <div id="queue-panel">
         <div style="margin-bottom:16px">
-          <label for="queue-colony-select" style="font-weight:500;margin-right:8px">Colony:</label>
-          <select id="queue-colony-select" class="input" style="display:inline-block;width:auto">
-            {coloniesWithRepo.map((c) => (
-              <option value={c.colony_id}>{c.name} ({c.repo})</option>
+          <label for="queue-repo-select" style="font-weight:500;margin-right:8px">Repository:</label>
+          <select id="queue-repo-select" class="input" style="display:inline-block;width:auto">
+            {repos.map((r) => (
+              <option value={r.repo_id}>{r.full_name}</option>
             ))}
           </select>
           <button class="btn btn--primary" id="queue-refresh-btn" style="margin-left:8px">Refresh</button>
@@ -40,7 +39,7 @@ const coloniesWithRepo = colonies.filter((c) => c.repo);
             </div>
             <div class="data-panel-body" id="issues-list">
               <div class="empty-state">
-                <div class="empty-state-title">Select a colony and click Refresh</div>
+                <div class="empty-state-title">Select a repo and click Refresh</div>
               </div>
             </div>
           </div>

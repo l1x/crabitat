@@ -4,21 +4,18 @@ import Sidebar from '../components/Sidebar.astro';
 import ContentHeader from '../components/ContentHeader.astro';
 import IssueList from '../components/IssueList.astro';
 import type { IssueWithRepo } from '../components/IssueList.astro';
-import { fetchRepos, fetchRepoIssues, fetchWorkflows, fetchMissions, fetchColonies } from '../lib/api-client';
-import { mockAgents, mockMessages } from '../lib/mock-data';
-import type { RepoRecord, MissionRecord, ColonyRecord, WorkflowRecord } from '../lib/types';
+import { fetchStatus, fetchRepoIssues, fetchWorkflows } from '../lib/api-client';
+import type { StatusSnapshot, WorkflowRecord } from '../lib/types';
 
-let repos: RepoRecord[] = [];
-try { repos = await fetchRepos(); } catch {}
+let status: StatusSnapshot | null = null;
+try { status = await fetchStatus(); } catch {}
 
 let workflows: WorkflowRecord[] = [];
 try { workflows = await fetchWorkflows(); } catch {}
 
-let missions: MissionRecord[] = [];
-try { missions = await fetchMissions(); } catch {}
-
-let colonies: ColonyRecord[] = [];
-try { colonies = await fetchColonies(); } catch {}
+const repos = status?.repos ?? [];
+const missions = status?.missions ?? [];
+const crabs = status?.crabs ?? [];
 
 // Fetch real issues from GitHub for each registered repo
 const allIssues: IssueWithRepo[] = [];
@@ -39,15 +36,15 @@ for (const repo of repos) {
     repoCount={repos.length}
     issueCount={allIssues.length}
     missionCount={missions.length}
-    agentCount={mockAgents.length}
-    messageCount={mockMessages.length}
+    agentCount={crabs.length}
+    messageCount={0}
     workflowCount={workflows.length}
   />
 
   <div class="content">
     <ContentHeader title="Issues" />
     <div class="section">
-      <IssueList issues={allIssues} repos={repos} colonies={colonies} workflows={workflows} />
+      <IssueList issues={allIssues} repos={repos} workflows={workflows} />
     </div>
   </div>
 </Layout>

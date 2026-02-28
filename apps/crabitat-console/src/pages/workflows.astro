@@ -3,12 +3,11 @@ import Layout from '../layouts/Layout.astro';
 import Sidebar from '../components/Sidebar.astro';
 import WorkflowList from '../components/WorkflowList.astro';
 import PromptBrowser from '../components/PromptBrowser.astro';
-import { fetchRepos, fetchWorkflows, fetchPromptFiles, fetchSettings } from '../lib/api-client';
-import { mockIssues, mockMissions, mockAgents, mockMessages } from '../lib/mock-data';
-import type { SettingsRecord, WorkflowRecord } from '../lib/types';
+import { fetchStatus, fetchWorkflows, fetchPromptFiles, fetchSettings } from '../lib/api-client';
+import type { StatusSnapshot, SettingsRecord, WorkflowRecord } from '../lib/types';
 
-let repos = [];
-try { repos = await fetchRepos(); } catch {}
+let status: StatusSnapshot | null = null;
+try { status = await fetchStatus(); } catch {}
 
 let workflows: WorkflowRecord[] = [];
 try { workflows = await fetchWorkflows(); } catch {}
@@ -24,11 +23,11 @@ try { settings = await fetchSettings(); } catch {}
 <Layout title="Workflows — Crabitat Console">
   <Sidebar
     activePage="/workflows"
-    repoCount={repos.length}
-    issueCount={mockIssues.length}
-    missionCount={mockMissions.length}
-    agentCount={mockAgents.length}
-    messageCount={mockMessages.length}
+    repoCount={status?.repos.length ?? 0}
+    issueCount={status?.summary.cached_issue_count ?? 0}
+    missionCount={status?.missions.length ?? 0}
+    agentCount={status?.crabs.length ?? 0}
+    messageCount={0}
     workflowCount={workflows.length}
   />
 
@@ -135,7 +134,7 @@ try { settings = await fetchSettings(); } catch {}
 
     try {
       const res = await fetch('/api/settings', {
-        method: 'PATCH',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompts_path: newPath }),
       });
