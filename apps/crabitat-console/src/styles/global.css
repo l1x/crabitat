@@ -238,24 +238,6 @@ button { cursor: pointer; }
   margin-top: 2px;
 }
 
-.footer-status {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  padding: 2px 8px;
-  border-radius: 4px;
-}
-
-.footer-status--online {
-  background: var(--good-bg);
-  color: var(--good);
-}
-
-.footer-status--offline {
-  background: var(--bad-bg);
-  color: var(--bad);
-}
 
 .footer-user {
   display: flex;
@@ -819,26 +801,6 @@ dialog.modal::backdrop {
   color: #9ca3af;
 }
 
-/* ------------------------------------------------------------------ */
-/* Connection status indicators                                        */
-/* ------------------------------------------------------------------ */
-
-.footer-status--live {
-  background: var(--good-bg);
-  color: var(--good);
-  animation: pulse-live 2s ease-in-out infinite;
-}
-
-@keyframes pulse-live {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
-}
-
-.footer-status--reconnecting {
-  background: var(--warn-bg);
-  color: var(--warn);
-  animation: pulse-live 1s ease-in-out infinite;
-}
 
 /* ------------------------------------------------------------------ */
 /* Sidebar v2 — flat nav with icons                                    */

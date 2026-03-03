@@ -1,20 +1,9 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use crabitat_core::{RunId, now_ms};
-use crabitat_protocol::{Envelope, Heartbeat, MessageKind, TaskAssigned};
-use futures_util::{SinkExt, StreamExt};
+use crabitat_core::RunId;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
-use std::process::Stdio;
-use std::time::Duration;
-use tokio::process::Command as TokioCommand;
-use tokio_tungstenite::connect_async;
-use tokio_tungstenite::tungstenite::Message as WsMessage;
-use tracing::{error, info, warn};
 use uuid::Uuid;
-
-const CRAB_PROMPT_TEMPLATE: &str = include_str!("crab_prompt.md");
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -23,7 +12,7 @@ const CRAB_PROMPT_TEMPLATE: &str = include_str!("crab_prompt.md");
 #[derive(Debug, Parser)]
 #[command(
     name = "crabitat-crab",
-    about = "Crab agent runtime — connects to control-plane and executes tasks"
+    about = "Crab agent runtime — interacts with control-plane via REST"
 )]
 struct Cli {
     /// Control-plane base URL
@@ -116,21 +105,6 @@ enum Cmd {
 
     /// List tasks. Prints JSON array.
     Tasks,
-
-    /// Connect via WebSocket and auto-execute tasks (legacy mode)
-    Connect {
-        #[arg(long)]
-        repo_id: String,
-
-        #[arg(long)]
-        name: String,
-
-        #[arg(long, default_value = ".")]
-        repo: PathBuf,
-
-        #[arg(long)]
-        crab_id: Option<String>,
-    },
 }
 
 // ---------------------------------------------------------------------------
@@ -142,11 +116,6 @@ struct RegisterCrabBody {
     crab_id: String,
     repo_id: String,
     name: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct CrabResponse {
-    crab_id: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -252,9 +221,6 @@ async fn main() -> Result<()> {
         }
         Cmd::Tasks => {
             cmd_tasks(cp).await?;
-        }
-        Cmd::Connect { repo_id, name, repo, crab_id } => {
-            run_connect(cp, &repo_id, &name, &repo, crab_id).await?;
         }
     }
 
@@ -525,354 +491,4 @@ async fn cmd_tasks(cp: &str) -> Result<()> {
         println!("{body}");
     }
     Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Legacy WebSocket connect flow
-// ---------------------------------------------------------------------------
-
-async fn run_connect(
-    control_plane: &str,
-    repo_id: &str,
-    name: &str,
-    repo: &Path,
-    crab_id_opt: Option<String>,
-) -> Result<()> {
-    let http = Client::new();
-    let crab_id = crab_id_opt.unwrap_or_else(|| Uuid::new_v4().to_string());
-
-    info!(crab_id = %crab_id, name = %name, "registering with control-plane");
-
-    let resp = http
-        .post(format!("{control_plane}/v1/crabs/register"))
-        .json(&RegisterCrabBody {
-            crab_id: crab_id.clone(),
-            repo_id: repo_id.to_string(),
-            name: name.to_string(),
-        })
-        .send()
-        .await
-        .context("failed to register crab")?;
-
-    if !resp.status().is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        anyhow::bail!("registration failed: {body}");
-    }
-
-    let crab_resp: CrabResponse = resp.json().await.context("bad registration response")?;
-    info!(crab_id = %crab_resp.crab_id, "registered successfully");
-
-    let ws_url = format!(
-        "{}/v1/ws/crab/{}",
-        control_plane.replacen("http://", "ws://", 1).replacen("https://", "wss://", 1),
-        crab_id
-    );
-    info!(url = %ws_url, "connecting WebSocket");
-
-    let (ws_stream, _) = connect_async(&ws_url).await.context("WebSocket connect failed")?;
-    let (mut ws_write, mut ws_read) = ws_stream.split();
-    info!("WebSocket connected — listening for tasks");
-
-    let mut heartbeat_interval = tokio::time::interval(Duration::from_secs(30));
-
-    loop {
-        tokio::select! {
-            _ = heartbeat_interval.tick() => {
-                let envelope = Envelope::new(
-                    &crab_id,
-                    "control-plane",
-                    MessageKind::Heartbeat(Heartbeat {
-                        crab_id: crab_id.clone(),
-                        healthy: true,
-                    }),
-                    now_ms(),
-                );
-                if let Ok(json) = serde_json::to_string(&envelope)
-                    && ws_write.send(WsMessage::Text(json)).await.is_err()
-                {
-                    warn!("heartbeat send failed, reconnecting");
-                    break;
-                }
-            }
-            msg = ws_read.next() => {
-                match msg {
-                    Some(Ok(WsMessage::Text(text))) => {
-                        match serde_json::from_str::<Envelope>(&text) {
-                            Ok(envelope) => {
-                                if let MessageKind::TaskAssigned(task) = envelope.kind {
-                                    info!(
-                                        task_id = %task.task_id,
-                                        title = %task.title,
-                                        "task assigned"
-                                    );
-                                    if let Err(e) = handle_task(
-                                        &http,
-                                        control_plane,
-                                        &crab_id,
-                                        name,
-                                        repo,
-                                        &task,
-                                    ).await {
-                                        error!(err = %e, "task execution failed");
-                                    }
-                                }
-                            }
-                            Err(e) => warn!(err = %e, "ignoring unparseable WS message"),
-                        }
-                    }
-                    Some(Ok(WsMessage::Close(_))) | None => {
-                        info!("WebSocket closed by server");
-                        break;
-                    }
-                    Some(Err(e)) => {
-                        warn!(err = %e, "WebSocket error");
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-            _ = tokio::signal::ctrl_c() => {
-                info!("shutting down");
-                break;
-            }
-        }
-    }
-
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Legacy task execution (used by `connect` subcommand)
-// ---------------------------------------------------------------------------
-
-async fn handle_task(
-    http: &Client,
-    control_plane: &str,
-    crab_id: &str,
-    crab_name: &str,
-    repo: &Path,
-    task: &TaskAssigned,
-) -> Result<()> {
-    let task_id_str = task.task_id.to_string();
-    let mission_id_str = task.mission_id.to_string();
-    let short_id = &task_id_str[..8.min(task_id_str.len())];
-    let burrow_dir = repo.join("burrows").join(short_id);
-
-    let run_id = RunId::new().to_string();
-    let started_at = now_ms();
-
-    let start_resp = http
-        .post(format!("{control_plane}/v1/runs/start"))
-        .json(&StartRunBody {
-            run_id: run_id.clone(),
-            mission_id: mission_id_str.clone(),
-            task_id: task_id_str.clone(),
-            crab_id: crab_id.to_string(),
-            burrow_path: burrow_dir.to_string_lossy().to_string(),
-            burrow_mode: "worktree".to_string(),
-        })
-        .send()
-        .await;
-
-    let run_registered = match start_resp {
-        Ok(r) if r.status().is_success() => {
-            info!(run_id = %run_id, "run started");
-            true
-        }
-        Ok(r) => {
-            let body = r.text().await.unwrap_or_default();
-            warn!(run_id = %run_id, body = %body, "start_run returned error");
-            false
-        }
-        Err(e) => {
-            warn!(run_id = %run_id, err = %e, "start_run request failed");
-            false
-        }
-    };
-
-    let result =
-        execute_in_burrow(crab_name, repo, task, &burrow_dir).await;
-
-    let end_to_end_ms = now_ms().saturating_sub(started_at);
-
-    let (status, summary, token_usage) = match &result {
-        Ok(output) => {
-            let status = if output.success { "completed" } else { "failed" };
-            let usage = if output.prompt_tokens.is_some() || output.completion_tokens.is_some() {
-                Some(TokenUsageBody {
-                    prompt_tokens: output.prompt_tokens,
-                    completion_tokens: output.completion_tokens,
-                    total_tokens: None,
-                })
-            } else {
-                None
-            };
-            (status, output.summary.clone(), usage)
-        }
-        Err(e) => ("failed", format!("task setup failed: {e}"), None),
-    };
-
-    info!(status = status, "task finished");
-
-    if run_registered {
-        let complete_resp = http
-            .post(format!("{control_plane}/v1/runs/complete"))
-            .json(&CompleteRunBody {
-                run_id: run_id.clone(),
-                status: status.to_string(),
-                summary: Some(summary),
-                timing: Some(TimingBody { end_to_end_ms: Some(end_to_end_ms) }),
-                token_usage,
-            })
-            .send()
-            .await;
-
-        match complete_resp {
-            Ok(r) if r.status().is_success() => info!(run_id = %run_id, "run completed"),
-            Ok(r) => {
-                let body = r.text().await.unwrap_or_default();
-                warn!(run_id = %run_id, body = %body, "complete_run returned error");
-            }
-            Err(e) => warn!(run_id = %run_id, err = %e, "complete_run request failed"),
-        }
-    }
-
-    if burrow_dir.exists() {
-        let cleanup = TokioCommand::new("git")
-            .args([
-                "-C",
-                &repo.to_string_lossy(),
-                "worktree",
-                "remove",
-                "--force",
-                &burrow_dir.to_string_lossy(),
-            ])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .await;
-
-        match cleanup {
-            Ok(s) if s.success() => info!("worktree cleaned up"),
-            _ => warn!(
-                burrow = %burrow_dir.display(),
-                "worktree cleanup failed (manual removal needed)"
-            ),
-        }
-    }
-
-    result.map(|_| ())
-}
-
-struct TaskOutput {
-    success: bool,
-    summary: String,
-    prompt_tokens: Option<u32>,
-    completion_tokens: Option<u32>,
-}
-
-/// JSON output from `claude --output-format json`.
-/// Other LLM CLIs can adopt the same shape or callers can use
-/// `complete-run --prompt-tokens / --completion-tokens` directly.
-#[derive(Debug, Deserialize)]
-struct LlmCliJsonOutput {
-    result: Option<String>,
-    usage: Option<LlmCliUsage>,
-}
-
-#[derive(Debug, Deserialize)]
-struct LlmCliUsage {
-    input_tokens: Option<u32>,
-    output_tokens: Option<u32>,
-}
-
-async fn execute_in_burrow(
-    crab_name: &str,
-    repo: &Path,
-    task: &TaskAssigned,
-    burrow_dir: &Path,
-) -> Result<TaskOutput> {
-    info!(burrow = %burrow_dir.display(), "creating worktree");
-    let worktree_result = TokioCommand::new("git")
-        .args([
-            "-C",
-            &repo.to_string_lossy(),
-            "worktree",
-            "add",
-            &burrow_dir.to_string_lossy(),
-            "HEAD",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .await
-        .context("failed to spawn git worktree")?;
-
-    if !worktree_result.status.success() {
-        let stderr = String::from_utf8_lossy(&worktree_result.stderr);
-        anyhow::bail!("git worktree add failed: {stderr}");
-    }
-    info!("worktree created");
-
-    let prompt_content = CRAB_PROMPT_TEMPLATE
-        .replace("{{crab_name}}", crab_name)
-        .replace("{{task_title}}", &task.title)
-        .replace("{{mission_prompt}}", &task.mission_prompt);
-
-    let claude_md_path = burrow_dir.join("CLAUDE.md");
-    std::fs::write(&claude_md_path, &prompt_content)
-        .context("failed to write CLAUDE.md into burrow")?;
-    info!(path = %claude_md_path.display(), "wrote CLAUDE.md");
-
-    info!(burrow = %burrow_dir.display(), "spawning claude");
-
-    let claude_output = TokioCommand::new("claude")
-        .current_dir(burrow_dir)
-        .env_remove("CLAUDECODE")
-        .arg("-p")
-        .arg(&task.title)
-        .arg("--output-format")
-        .arg("json")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .await;
-
-    let (success, stdout, stderr) = match claude_output {
-        Ok(output) => {
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            (output.status.success(), stdout, stderr)
-        }
-        Err(e) => {
-            error!(err = %e, "failed to spawn claude");
-            (false, String::new(), format!("spawn error: {e}"))
-        }
-    };
-
-    // Try to parse as Claude JSON output for result text and token usage
-    let (summary, prompt_tokens, completion_tokens) =
-        if let Ok(parsed) = serde_json::from_str::<LlmCliJsonOutput>(&stdout) {
-            let text = parsed.result.unwrap_or_else(|| {
-                if stderr.is_empty() { "(no output)".to_string() } else { stderr.clone() }
-            });
-            let pt = parsed.usage.as_ref().and_then(|u| u.input_tokens);
-            let ct = parsed.usage.as_ref().and_then(|u| u.output_tokens);
-            (text, pt, ct)
-        } else {
-            // Fall back to raw stdout
-            let text = if stdout.is_empty() {
-                if stderr.is_empty() { "(no output)".to_string() } else { stderr }
-            } else {
-                stdout
-            };
-            (text, None, None)
-        };
-
-    let summary = {
-        let max = 4096;
-        if summary.len() > max { format!("{}... [truncated]", &summary[..max]) } else { summary }
-    };
-
-    Ok(TaskOutput { success, summary, prompt_tokens, completion_tokens })
 }

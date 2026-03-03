@@ -147,16 +147,3 @@ export interface SkillRecord {
   description: string;
 }
 
-export type ConsoleEvent =
-  | { type: 'snapshot' } & StatusSnapshot
-  | { type: 'crab_updated'; crab: CrabRecord }
-| { type: 'mission_created'; mission: MissionRecord }
-  | { type: 'mission_updated'; mission: MissionRecord }
-  | { type: 'task_created'; task: TaskRecord }
-  | { type: 'task_updated'; task: TaskRecord }
-  | { type: 'run_created'; run: RunRecord }
-  | { type: 'run_updated'; run: RunRecord }
-  | { type: 'run_completed'; run: RunRecord }
-  | { type: 'repo_created'; repo: RepoRecord }
-  | { type: 'repo_updated'; repo: RepoRecord }
-  | { type: 'repo_deleted'; repo_id: string };

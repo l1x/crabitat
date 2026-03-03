@@ -1,20 +1,16 @@
 use anyhow::Result;
 use axum::{
     Json, Router,
-    extract::{
-        Path, Query, State,
-        ws::{Message, WebSocket, WebSocketUpgrade},
-    },
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{delete, get, post},
 };
 use clap::{Parser, Subcommand};
 use crabitat_core::{
-    BurrowMode, Mission, MissionId, MissionStatus, RunId, RunMetrics, RunStatus, TaskId,
+    BurrowMode, Mission, MissionStatus, RunId, RunMetrics, RunStatus, TaskId,
     TaskStatus, WorkflowManifest, evaluate_condition, now_ms,
 };
-use crabitat_protocol::{Envelope, MessageKind};
 use kiters::eid::ExternalId;
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
@@ -26,10 +22,9 @@ use std::{
     sync::{Arc, RwLock},
     time::Duration,
 };
-use tokio::sync::{Mutex, broadcast, mpsc};
+use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
 use tracing::info;
-use uuid::Uuid;
 
 /// Issues cache TTL: 5 minutes.
 const ISSUES_CACHE_TTL_MS: u64 = 5 * 60 * 1000;
@@ -52,8 +47,6 @@ enum Command {
         prompts_path: PathBuf,
     },
 }
-
-type CrabChannels = Arc<Mutex<HashMap<String, mpsc::UnboundedSender<String>>>>;
 
 // ---------------------------------------------------------------------------
 // Workflow Registry
@@ -519,27 +512,8 @@ fn parse_repo(repo: &str) -> Result<(&str, &str), ApiError> {
 #[derive(Clone)]
 struct AppState {
     db: Arc<Mutex<Connection>>,
-    crab_channels: CrabChannels,
-    console_tx: broadcast::Sender<String>,
     workflows: Arc<RwLock<WorkflowRegistry>>,
     github: GitHubClient,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum ConsoleEvent {
-    Snapshot(StatusSnapshot),
-    CrabUpdated { crab: CrabRecord },
-    MissionCreated { mission: MissionRecord },
-    MissionUpdated { mission: MissionRecord },
-    TaskCreated { task: TaskRecord },
-    TaskUpdated { task: TaskRecord },
-    RunCreated { run: RunRecord },
-    RunUpdated { run: RunRecord },
-    RunCompleted { run: RunRecord },
-    RepoCreated { repo: RepoRecord },
-    RepoUpdated { repo: RepoRecord },
-    RepoDeleted { repo_id: String },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -896,7 +870,6 @@ async fn serve(port: u16, db_path: &StdPath, prompts_path: &StdPath) -> Result<(
     let connection = init_db(db_path)?;
     seed_default_workflows(&connection)?;
     seed_settings(&connection, prompts_path)?;
-    let (console_tx, _) = broadcast::channel::<String>(256);
     let workflows = WorkflowRegistry::load(prompts_path);
     info!(count = workflows.manifests.len(), "workflow registry loaded");
 
@@ -925,8 +898,6 @@ async fn serve(port: u16, db_path: &StdPath, prompts_path: &StdPath) -> Result<(
     }
     let state = AppState {
         db: Arc::new(Mutex::new(connection)),
-        crab_channels: Arc::new(Mutex::new(HashMap::new())),
-        console_tx,
         workflows: Arc::new(RwLock::new(workflows)),
         github,
     };
@@ -980,8 +951,6 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/repos/{repo_id}/languages", get(get_repo_languages))
         .route("/v1/skills", get(list_skills))
         .route("/v1/status", get(get_status))
-        .route("/v1/ws/crab/{crab_id}", get(ws_crab_handler))
-        .route("/v1/ws/console", get(ws_console_handler))
         .layer(CorsLayer::very_permissive())
         .with_state(state)
 }
@@ -1181,171 +1150,6 @@ fn init_db(db_path: &StdPath) -> Result<Connection> {
     let conn = Connection::open(db_path)?;
     apply_schema(&conn)?;
     Ok(conn)
-}
-
-// ---------------------------------------------------------------------------
-// WebSocket handler
-// ---------------------------------------------------------------------------
-
-async fn ws_crab_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<AppState>,
-    Path(crab_id): Path<String>,
-) -> Response {
-    info!(crab_id = %crab_id, "WebSocket upgrade requested");
-    ws.on_upgrade(move |socket| handle_ws_crab(socket, state, crab_id))
-}
-
-async fn handle_ws_crab(mut socket: WebSocket, state: AppState, crab_id: String) {
-    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
-
-    // Register the channel for this crab
-    {
-        let mut channels = state.crab_channels.lock().await;
-        channels.insert(crab_id.clone(), tx);
-    }
-    info!(crab_id = %crab_id, "WebSocket connected");
-
-    loop {
-        tokio::select! {
-            // Messages from the crab (heartbeats)
-            ws_msg = socket.recv() => {
-                match ws_msg {
-                    Some(Ok(Message::Text(text))) => {
-                        if let Ok(envelope) = serde_json::from_str::<Envelope>(&text)
-                            && let MessageKind::Heartbeat(_) = &envelope.kind
-                        {
-                            let db = state.db.lock().await;
-                            let _ = db.execute(
-                                "UPDATE crabs SET updated_at_ms = ?2 WHERE crab_id = ?1",
-                                params![crab_id, now_ms() as i64],
-                            );
-                            if let Ok(Some(crab)) = fetch_crab(&db, &crab_id) {
-                                emit_console_event(&state.console_tx, ConsoleEvent::CrabUpdated { crab });
-                            }
-                        }
-                    }
-                    Some(Ok(Message::Close(_))) | None => break,
-                    _ => {}
-                }
-            }
-            // Messages to the crab (task assignments)
-            channel_msg = rx.recv() => {
-                match channel_msg {
-                    Some(text) => {
-                        if socket.send(Message::Text(text.into())).await.is_err() {
-                            break;
-                        }
-                    }
-                    None => break,
-                }
-            }
-        }
-    }
-
-    // Cleanup on disconnect
-    {
-        let mut channels = state.crab_channels.lock().await;
-        channels.remove(&crab_id);
-    }
-    {
-        let db = state.db.lock().await;
-        let _ = db.execute(
-            "UPDATE crabs SET state = 'offline', updated_at_ms = ?2 WHERE crab_id = ?1",
-            params![crab_id, now_ms() as i64],
-        );
-    }
-    info!(crab_id = %crab_id, "WebSocket disconnected");
-
-    // Emit crab offline event to console subscribers
-    {
-        let db = state.db.lock().await;
-        if let Ok(Some(crab)) = fetch_crab(&db, &crab_id) {
-            emit_console_event(&state.console_tx, ConsoleEvent::CrabUpdated { crab });
-        }
-    }
-}
-
-async fn ws_console_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
-    info!("Console WebSocket upgrade requested");
-    ws.on_upgrade(move |socket| handle_ws_console(socket, state))
-}
-
-async fn handle_ws_console(mut socket: WebSocket, state: AppState) {
-    // Send initial snapshot
-    {
-        let db = state.db.lock().await;
-        if let Ok(snapshot) = build_status_snapshot(&db) {
-            let event = ConsoleEvent::Snapshot(snapshot);
-            if let Ok(json) = serde_json::to_string(&event)
-                && socket.send(Message::Text(json.into())).await.is_err()
-            {
-                return;
-            }
-        }
-    }
-
-    let mut rx = state.console_tx.subscribe();
-
-    loop {
-        tokio::select! {
-            ws_msg = socket.recv() => {
-                match ws_msg {
-                    Some(Ok(Message::Ping(data))) => {
-                        if socket.send(Message::Pong(data)).await.is_err() {
-                            break;
-                        }
-                    }
-                    Some(Ok(Message::Close(_))) | None => break,
-                    _ => {}
-                }
-            }
-            broadcast_msg = rx.recv() => {
-                match broadcast_msg {
-                    Ok(json) => {
-                        if socket.send(Message::Text(json.into())).await.is_err() {
-                            break;
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Lagged(_)) => {
-                        // Re-send full snapshot on lag
-                        let db = state.db.lock().await;
-                        if let Ok(snapshot) = build_status_snapshot(&db) {
-                            let event = ConsoleEvent::Snapshot(snapshot);
-                            if let Ok(json) = serde_json::to_string(&event)
-                                && socket.send(Message::Text(json.into())).await.is_err()
-                            {
-                                break;
-                            }
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Closed) => break,
-                }
-            }
-        }
-    }
-
-    info!("Console WebSocket disconnected");
-}
-
-fn emit_console_event(tx: &broadcast::Sender<String>, event: ConsoleEvent) {
-    if let Ok(json) = serde_json::to_string(&event) {
-        let _ = tx.send(json);
-    }
-}
-
-async fn dispatch_assignments(state: &AppState, assignments: Vec<SchedulerAssignment>) {
-    if assignments.is_empty() {
-        return;
-    }
-    let channels = state.crab_channels.lock().await;
-    for assignment in assignments {
-        if let Some(tx) = channels.get(&assignment.crab_id)
-            && let Ok(json) = serde_json::to_string(&assignment.envelope)
-        {
-            let _ = tx.send(json);
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1931,7 +1735,7 @@ async fn register_crab(
         return Err(ApiError::bad_request("crab_id, repo_id, and name are required"));
     }
 
-    let (crab, assignments) = {
+    let crab = {
         let mut db = state.db.lock().await;
         let tx = db.transaction().map_err(ApiError::from)?;
 
@@ -1968,15 +1772,13 @@ async fn register_crab(
 
         let crab = fetch_crab(&tx, &request.crab_id)?
             .ok_or_else(|| ApiError::internal("failed to reload crab after registration"))?;
-        emit_console_event(&state.console_tx, ConsoleEvent::CrabUpdated { crab: crab.clone() });
 
         // New idle crab available — run scheduler to assign queued tasks
-        let assignments = run_scheduler_tick_db(&tx, &state.console_tx)?;
+        run_scheduler_tick_db(&tx)?;
         tx.commit().map_err(ApiError::from)?;
-        (crab, assignments)
+        crab
     };
 
-    dispatch_assignments(&state, assignments).await;
     Ok(Json(crab))
 }
 
@@ -1998,7 +1800,7 @@ async fn create_mission(
         return Err(ApiError::bad_request("repo_id is required"));
     }
 
-    let (row, assignments) = {
+    let row = {
         let mut db = state.db.lock().await;
         let wf = state.workflows.read().unwrap();
         let tx = db.transaction().map_err(ApiError::from)?;
@@ -2042,11 +1844,6 @@ async fn create_mission(
             ],
         )?;
 
-        emit_console_event(
-            &state.console_tx,
-            ConsoleEvent::MissionCreated { mission: row.clone() },
-        );
-
         // If a workflow is specified, expand it into tasks
         if let Some(ref workflow_name) = request.workflow {
             let manifest = wf
@@ -2072,16 +1869,14 @@ async fn create_mission(
                 &manifest,
                 &row.mission_id,
                 &request.prompt,
-                &state.console_tx,
             )?;
         }
 
-        let assignments = run_scheduler_tick_db(&tx, &state.console_tx)?;
+        run_scheduler_tick_db(&tx)?;
         tx.commit().map_err(ApiError::from)?;
-        (row, assignments)
+        row
     };
 
-    dispatch_assignments(&state, assignments).await;
     Ok(Json(row))
 }
 
@@ -2091,7 +1886,6 @@ fn expand_workflow_into_tasks(
     manifest: &WorkflowManifest,
     mission_id: &str,
     mission_prompt: &str,
-    console_tx: &broadcast::Sender<String>,
 ) -> Result<(), ApiError> {
     let now = now_ms();
 
@@ -2157,10 +1951,6 @@ fn expand_workflow_into_tasks(
         )?;
 
         step_to_task.insert(step.id.clone(), task_id.clone());
-
-        if let Ok(Some(task)) = fetch_task(conn, &task_id) {
-            emit_console_event(console_tx, ConsoleEvent::TaskCreated { task });
-        }
     }
 
     // Insert dependency edges
@@ -2209,9 +1999,7 @@ async fn create_task(
         return Err(ApiError::bad_request("title is required"));
     }
 
-    let notify_crab_id = request.assigned_crab_id.clone();
-
-    let (task, mission_prompt) = {
+    let task = {
         let mut db = state.db.lock().await;
         let tx = db.transaction().map_err(ApiError::from)?;
 
@@ -2259,55 +2047,9 @@ async fn create_task(
         let task = fetch_task(&tx, &task_id)?
             .ok_or_else(|| ApiError::internal("failed to reload task after creation"))?;
 
-        // Fetch mission prompt for WebSocket notification
-        let mission_prompt = if notify_crab_id.is_some() {
-            tx.query_row(
-                "SELECT prompt FROM missions WHERE mission_id = ?1",
-                params![request.mission_id],
-                |row| row.get::<_, String>(0),
-            )
-            .unwrap_or_default()
-        } else {
-            String::new()
-        };
-
         tx.commit().map_err(ApiError::from)?;
-        (task, mission_prompt)
+        task
     };
-
-    emit_console_event(&state.console_tx, ConsoleEvent::TaskCreated { task: task.clone() });
-
-    // Push TaskAssigned via WebSocket if the crab is connected
-    if let Some(ref crab_id) = notify_crab_id {
-        let channels = state.crab_channels.lock().await;
-        if let Some(tx) = channels.get(crab_id.as_str()) {
-            let task_uuid: Uuid = task.task_id.parse().expect("task_id is a valid uuid");
-            let mission_uuid: Uuid = task.mission_id.parse().expect("mission_id is a valid uuid");
-
-            let mut envelope = Envelope::new(
-                "control-plane",
-                crab_id.as_str(),
-                MessageKind::TaskAssigned(crabitat_protocol::TaskAssigned {
-                    task_id: TaskId(task_uuid),
-                    mission_id: MissionId(mission_uuid),
-                    title: task.title.clone(),
-                    mission_prompt,
-                    desired_status: TaskStatus::Running,
-                    step_id: task.step_id.clone(),
-                    prompt: task.prompt.clone(),
-                    context: task.context.clone(),
-                    worktree_path: None,
-                }),
-                now_ms(),
-            );
-            envelope.task_id = Some(TaskId(task_uuid));
-            envelope.mission_id = Some(MissionId(mission_uuid));
-
-            if let Ok(json) = serde_json::to_string(&envelope) {
-                let _ = tx.send(json);
-            }
-        }
-    }
 
     Ok(Json(task))
 }
@@ -2389,7 +2131,6 @@ async fn start_run(
 
     let run = fetch_run(&tx, &run_id)?
         .ok_or_else(|| ApiError::internal("failed to reload run after start"))?;
-    emit_console_event(&state.console_tx, ConsoleEvent::RunCreated { run: run.clone() });
     tx.commit().map_err(ApiError::from)?;
     Ok(Json(run))
 }
@@ -2472,13 +2213,8 @@ async fn update_run(
         RunStatus::Queued => {}
     }
 
-    if let Ok(Some(task)) = fetch_task(&tx, &existing.task_id) {
-        emit_console_event(&state.console_tx, ConsoleEvent::TaskUpdated { task });
-    }
-
     let updated = fetch_run(&tx, &request.run_id)?
         .ok_or_else(|| ApiError::internal("failed to reload run after update"))?;
-    emit_console_event(&state.console_tx, ConsoleEvent::RunUpdated { run: updated.clone() });
     tx.commit().map_err(ApiError::from)?;
     Ok(Json(updated))
 }
@@ -2494,7 +2230,7 @@ async fn complete_run(
         ));
     }
 
-    let (run, assignments) = {
+    let run = {
         let mut db = state.db.lock().await;
         let wf = state.workflows.read().unwrap();
         let tx = db.transaction().map_err(ApiError::from)?;
@@ -2553,22 +2289,19 @@ async fn complete_run(
 
         let run = fetch_run(&tx, &request.run_id)?
             .ok_or_else(|| ApiError::internal("failed to reload run after completion"))?;
-        emit_console_event(&state.console_tx, ConsoleEvent::RunCompleted { run: run.clone() });
 
         cascade_workflow(
             &tx,
             &existing.mission_id,
             &existing.task_id,
-            &state.console_tx,
             &wf,
         )?;
 
-        let assignments = run_scheduler_tick_db(&tx, &state.console_tx)?;
+        run_scheduler_tick_db(&tx)?;
         tx.commit().map_err(ApiError::from)?;
-        (run, assignments)
+        run
     };
 
-    dispatch_assignments(&state, assignments).await;
     Ok(Json(run))
 }
 
@@ -2577,7 +2310,6 @@ fn cascade_workflow(
     conn: &Connection,
     mission_id: &str,
     completed_task_id: &str,
-    console_tx: &broadcast::Sender<String>,
     workflows: &WorkflowRegistry,
 ) -> Result<(), ApiError> {
     let now = now_ms();
@@ -2597,8 +2329,8 @@ fn cascade_workflow(
 
     // If the task failed, cascade failure to all dependents
     if matches!(completed_task.status, TaskStatus::Failed) {
-        cascade_failure(conn, completed_task_id, now, console_tx)?;
-        update_mission_status(conn, mission_id, now, workflows, console_tx)?;
+        cascade_failure(conn, completed_task_id, now)?;
+        update_mission_status(conn, mission_id, now, workflows)?;
         return Ok(());
     }
 
@@ -2671,20 +2403,16 @@ fn cascade_workflow(
             )?;
         }
 
-        if let Ok(Some(updated_task)) = fetch_task(conn, dep_task_id) {
-            emit_console_event(console_tx, ConsoleEvent::TaskUpdated { task: updated_task });
-        }
-
         // If we just skipped a task, recurse to cascade further
         if !should_queue {
-            cascade_workflow(conn, mission_id, dep_task_id, console_tx, workflows)?;
+            cascade_workflow(conn, mission_id, dep_task_id, workflows)?;
         }
     }
 
     // Handle fix→review retry loop: if a "fix" step completed, find the "review"
     // step that depends on "implement" (same mission) and re-queue it
     if completed_step_id == "fix" {
-        requeue_review_after_fix(conn, mission_id, now, console_tx)?;
+        requeue_review_after_fix(conn, mission_id, now)?;
     }
 
     // Capture PR number from the "pr" step result
@@ -2700,7 +2428,7 @@ fn cascade_workflow(
         }
     }
 
-    update_mission_status(conn, mission_id, now, workflows, console_tx)?;
+    update_mission_status(conn, mission_id, now, workflows)?;
     Ok(())
 }
 
@@ -2708,7 +2436,6 @@ fn cascade_failure(
     conn: &Connection,
     failed_task_id: &str,
     now: u64,
-    console_tx: &broadcast::Sender<String>,
 ) -> Result<(), ApiError> {
     let mut stmt = conn.prepare("SELECT task_id FROM task_deps WHERE depends_on_task_id = ?1")?;
     let dependent_task_ids: Vec<String> =
@@ -2719,10 +2446,7 @@ fn cascade_failure(
             "UPDATE tasks SET status = ?2, updated_at_ms = ?3 WHERE task_id = ?1",
             params![dep_task_id, task_status_to_db(TaskStatus::Failed), now],
         )?;
-        if let Ok(Some(task)) = fetch_task(conn, dep_task_id) {
-            emit_console_event(console_tx, ConsoleEvent::TaskUpdated { task });
-        }
-        cascade_failure(conn, dep_task_id, now, console_tx)?;
+        cascade_failure(conn, dep_task_id, now)?;
     }
     Ok(())
 }
@@ -2731,7 +2455,6 @@ fn requeue_review_after_fix(
     conn: &Connection,
     mission_id: &str,
     now: u64,
-    console_tx: &broadcast::Sender<String>,
 ) -> Result<(), ApiError> {
     // Find the "review" task in this mission and check its retry count
     let review_task: Option<(String, i64)> = conn
@@ -2753,9 +2476,6 @@ fn requeue_review_after_fix(
             "UPDATE tasks SET status = ?2, updated_at_ms = ?3 WHERE task_id = ?1",
             params![review_task_id, task_status_to_db(TaskStatus::Queued), now],
         )?;
-        if let Ok(Some(task)) = fetch_task(conn, &review_task_id) {
-            emit_console_event(console_tx, ConsoleEvent::TaskUpdated { task });
-        }
     }
     Ok(())
 }
@@ -2855,7 +2575,6 @@ fn update_mission_status(
     mission_id: &str,
     _now: u64,
     workflows: &WorkflowRegistry,
-    console_tx: &broadcast::Sender<String>,
 ) -> Result<(), ApiError> {
     // Check if all tasks in the mission are terminal
     let non_terminal_count: i64 = conn.query_row(
@@ -2880,15 +2599,9 @@ fn update_mission_status(
             params![mission_id, mission_status_to_db(new_status)],
         )?;
 
-        // Emit mission updated
+        // Try to activate next mission in this repo's queue
         if let Ok(Some(mission)) = fetch_mission(conn, mission_id) {
-            emit_console_event(
-                console_tx,
-                ConsoleEvent::MissionUpdated { mission: mission.clone() },
-            );
-
-            // Try to activate next mission in this repo's queue
-            activate_next_mission_in_repo(conn, &mission.repo_id, workflows, console_tx)?;
+            activate_next_mission_in_repo(conn, &mission.repo_id, workflows)?;
         }
     }
     Ok(())
@@ -2945,7 +2658,6 @@ async fn create_repo(
         sync_toml_workflows_to_db(&db, &wf);
     }
 
-    emit_console_event(&state.console_tx, ConsoleEvent::RepoCreated { repo: row.clone() });
     Ok(Json(row))
 }
 
@@ -3008,7 +2720,6 @@ async fn update_repo(
         sync_toml_workflows_to_db(&db, &wf);
     }
 
-    emit_console_event(&state.console_tx, ConsoleEvent::RepoUpdated { repo: updated.clone() });
     Ok(Json(updated))
 }
 
@@ -3024,7 +2735,6 @@ async fn delete_repo(
 
     db.execute("DELETE FROM repos WHERE repo_id = ?1", params![repo_id])?;
 
-    emit_console_event(&state.console_tx, ConsoleEvent::RepoDeleted { repo_id });
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -3200,7 +2910,7 @@ async fn queue_issue(
     let detail = state.github.get_issue(&full_name, request.issue_number).await?;
 
     // Phase 3: All DB work in a single transaction
-    let (row, assignments) = {
+    let row = {
         let mut db = state.db.lock().await;
         let wf = state.workflows.read().unwrap();
         let tx = db.transaction().map_err(ApiError::from)?;
@@ -3275,19 +2985,13 @@ async fn queue_issue(
             ],
         )?;
 
-        emit_console_event(
-            &state.console_tx,
-            ConsoleEvent::MissionCreated { mission: row.clone() },
-        );
+        activate_next_mission_in_repo(&tx, &repo_id, &wf)?;
 
-        activate_next_mission_in_repo(&tx, &repo_id, &wf, &state.console_tx)?;
-
-        let assignments = run_scheduler_tick_db(&tx, &state.console_tx)?;
+        run_scheduler_tick_db(&tx)?;
         tx.commit().map_err(ApiError::from)?;
-        (row, assignments)
+        row
     };
 
-    dispatch_assignments(&state, assignments).await;
     Ok(Json(row))
 }
 
@@ -3354,7 +3058,6 @@ fn activate_next_mission_in_repo(
     conn: &Connection,
     repo_id: &str,
     workflows: &WorkflowRegistry,
-    console_tx: &broadcast::Sender<String>,
 ) -> Result<(), ApiError> {
     // Find ALL pending queued missions for this repo
     let mut stmt = conn.prepare(
@@ -3385,30 +3088,17 @@ fn activate_next_mission_in_repo(
                 &manifest.clone(),
                 &mission_id,
                 &mission_prompt,
-                console_tx,
             )?;
-        }
-
-        // Emit mission updated
-        if let Ok(Some(mission)) = fetch_mission(conn, &mission_id) {
-            emit_console_event(console_tx, ConsoleEvent::MissionUpdated { mission });
         }
     }
 
     Ok(())
 }
 
-struct SchedulerAssignment {
-    crab_id: String,
-    envelope: Envelope,
-}
-
 fn run_scheduler_tick_db(
     conn: &Connection,
-    console_tx: &broadcast::Sender<String>,
-) -> Result<Vec<SchedulerAssignment>, ApiError> {
+) -> Result<(), ApiError> {
     let now = now_ms();
-    let mut assignments = Vec::new();
 
     // Get all queued tasks (ordered by created_at_ms)
     let mut task_stmt = conn.prepare(
@@ -3423,9 +3113,12 @@ fn run_scheduler_tick_db(
     struct QueuedTask {
         task_id: String,
         mission_id: String,
+        #[allow(dead_code)]
         title: String,
         step_id: Option<String>,
+        #[allow(dead_code)]
         prompt: Option<String>,
+        #[allow(dead_code)]
         context: Option<String>,
     }
 
@@ -3487,58 +3180,9 @@ fn run_scheduler_tick_db(
             "UPDATE crabs SET state = 'busy', current_task_id = ?2, updated_at_ms = ?3 WHERE crab_id = ?1",
             params![crab_id, task.task_id, now],
         )?;
-
-        // Get worktree_path for this mission
-        let worktree_path: Option<String> = conn
-            .query_row(
-                "SELECT worktree_path FROM missions WHERE mission_id = ?1",
-                params![task.mission_id],
-                |row| row.get(0),
-            )
-            .ok();
-
-        // Get mission_prompt
-        let mission_prompt: String = conn
-            .query_row(
-                "SELECT prompt FROM missions WHERE mission_id = ?1",
-                params![task.mission_id],
-                |row| row.get(0),
-            )
-            .unwrap_or_default();
-
-        let task_uuid: Uuid = task.task_id.parse().unwrap_or_else(|_| Uuid::new_v4());
-        let mission_uuid: Uuid = task.mission_id.parse().unwrap_or_else(|_| Uuid::new_v4());
-
-        let mut envelope = Envelope::new(
-            "control-plane",
-            &crab_id,
-            MessageKind::TaskAssigned(crabitat_protocol::TaskAssigned {
-                task_id: TaskId(task_uuid),
-                mission_id: MissionId(mission_uuid),
-                title: task.title.clone(),
-                mission_prompt,
-                desired_status: TaskStatus::Running,
-                step_id: task.step_id.clone(),
-                prompt: task.prompt.clone(),
-                context: task.context.clone(),
-                worktree_path,
-            }),
-            now,
-        );
-        envelope.task_id = Some(TaskId(task_uuid));
-        envelope.mission_id = Some(MissionId(mission_uuid));
-
-        assignments.push(SchedulerAssignment { crab_id: crab_id.clone(), envelope });
-
-        if let Ok(Some(t)) = fetch_task(conn, &task.task_id) {
-            emit_console_event(console_tx, ConsoleEvent::TaskUpdated { task: t });
-        }
-        if let Ok(Some(crab)) = fetch_crab(conn, &crab_id) {
-            emit_console_event(console_tx, ConsoleEvent::CrabUpdated { crab });
-        }
     }
 
-    Ok(assignments)
+    Ok(())
 }
 
 async fn get_status(State(state): State<AppState>) -> Result<Json<StatusSnapshot>, ApiError> {
@@ -4287,7 +3931,7 @@ async fn poll_merge_wait_tasks(state: &AppState) -> Result<(), ApiError> {
             }
         };
 
-        let assignments = {
+        {
             let mut db = state.db.lock().await;
             let wf = state.workflows.read().unwrap();
             let tx = db.transaction().map_err(ApiError::from)?;
@@ -4305,52 +3949,38 @@ async fn poll_merge_wait_tasks(state: &AppState) -> Result<(), ApiError> {
                     params![item.task_id, now],
                 )?;
 
-                if let Ok(Some(task)) = fetch_task(&tx, &item.task_id) {
-                    emit_console_event(&state.console_tx, ConsoleEvent::TaskUpdated { task });
-                }
-
                 cascade_workflow(
                     &tx,
                     &item.mission_id,
                     &item.task_id,
-                    &state.console_tx,
                     &wf,
                 )?;
 
-                let assignments = run_scheduler_tick_db(&tx, &state.console_tx)?;
+                run_scheduler_tick_db(&tx)?;
                 tx.commit().map_err(ApiError::from)?;
 
                 info!(pr = pr_num, mission_id = %item.mission_id, "merge-wait completed: PR merged");
-                assignments
             } else if pr_status.state == "CLOSED" {
                 tx.execute(
                     "UPDATE tasks SET status = 'failed', updated_at_ms = ?2 WHERE task_id = ?1",
                     params![item.task_id, now],
                 )?;
 
-                if let Ok(Some(task)) = fetch_task(&tx, &item.task_id) {
-                    emit_console_event(&state.console_tx, ConsoleEvent::TaskUpdated { task });
-                }
-
                 cascade_workflow(
                     &tx,
                     &item.mission_id,
                     &item.task_id,
-                    &state.console_tx,
                     &wf,
                 )?;
 
-                let assignments = run_scheduler_tick_db(&tx, &state.console_tx)?;
+                run_scheduler_tick_db(&tx)?;
                 tx.commit().map_err(ApiError::from)?;
 
                 info!(pr = pr_num, mission_id = %item.mission_id, "merge-wait failed: PR closed without merge");
-                assignments
             } else {
                 continue;
             }
         };
-
-        dispatch_assignments(state, assignments).await;
     }
 
     Ok(())
@@ -4368,7 +3998,6 @@ mod tests {
     fn test_state() -> AppState {
         let conn = Connection::open_in_memory().unwrap();
         apply_schema(&conn).unwrap();
-        let (console_tx, _) = broadcast::channel::<String>(256);
         let workflows = WorkflowRegistry {
             manifests: HashMap::new(),
             prompts_path: PathBuf::from("/tmp/test-prompts"),
@@ -4376,8 +4005,6 @@ mod tests {
         };
         AppState {
             db: Arc::new(Mutex::new(conn)),
-            crab_channels: Arc::new(Mutex::new(HashMap::new())),
-            console_tx,
             workflows: Arc::new(RwLock::new(workflows)),
             github: GitHubClient { http: reqwest::Client::new(), token: None },
         }
