@@ -2,9 +2,7 @@
 import Layout from '../layouts/Layout.astro';
 import Sidebar from '../components/Sidebar.astro';
 import ContentHeader from '../components/ContentHeader.astro';
-import MessageLog from '../components/MessageLog.astro';
 import { fetchStatus, fetchWorkflows } from '../lib/api-client';
-import { mockMessages } from '../lib/mock-data';
 import type { StatusSnapshot, WorkflowRecord } from '../lib/types';
 
 let status: StatusSnapshot | null = null;
@@ -32,7 +30,21 @@ const crabs = status?.crabs ?? [];
   <div class="content">
     <ContentHeader title="Messages" />
     <div class="section">
-      <MessageLog messages={mockMessages} />
+      <div class="data-panel">
+        <div class="data-panel-header">
+          <span class="data-panel-title">Messages</span>
+          <span class="content-count">0</span>
+        </div>
+        <div class="data-panel-body">
+          <div class="empty-state">
+            <div class="empty-state-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+            </div>
+            <div class="empty-state-title">Coming soon</div>
+            <p class="empty-state-desc">Agent-to-agent messaging is not yet implemented.</p>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </Layout>

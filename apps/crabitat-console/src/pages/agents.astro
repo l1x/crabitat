@@ -2,9 +2,8 @@
 import Layout from '../layouts/Layout.astro';
 import Sidebar from '../components/Sidebar.astro';
 import ContentHeader from '../components/ContentHeader.astro';
-import AgentList from '../components/AgentList.astro';
+import CrabGrid from '../components/CrabGrid.astro';
 import { fetchStatus, fetchWorkflows } from '../lib/api-client';
-import { mockAgents } from '../lib/mock-data';
 import type { StatusSnapshot, WorkflowRecord } from '../lib/types';
 
 let status: StatusSnapshot | null = null;
@@ -32,7 +31,7 @@ const crabs = status?.crabs ?? [];
   <div class="content">
     <ContentHeader title="Agents" />
     <div class="section">
-      <AgentList agents={mockAgents} />
+      <CrabGrid crabs={crabs} />
     </div>
   </div>
 </Layout>
