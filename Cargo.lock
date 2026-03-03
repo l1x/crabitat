@@ -284,18 +284,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
-name = "crabitat-chief"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "crabitat-core",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "crabitat-control-plane"
 version = "0.1.0"
 dependencies = [
@@ -337,15 +325,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "crabitat-protocol"
-version = "0.1.0"
-dependencies = [
- "crabitat-core",
- "serde",
  "uuid",
 ]
 

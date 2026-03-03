@@ -2,9 +2,7 @@
 resolver = "2"
 members = [
   "crates/crabitat-core",
-  "crates/crabitat-protocol",
   "crates/crabitat-control-plane",
-  "crates/crabitat-chief",
   "crates/crabitat-crab",
 ]
 
