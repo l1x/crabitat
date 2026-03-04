@@ -523,3 +523,179 @@ fn update_mission_status(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::apply_schema;
+    use crate::workflows::WorkflowRegistry;
+    use crabitat_core::{WorkflowManifest, WorkflowMeta, WorkflowStep};
+    use rusqlite::Connection;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    fn test_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        apply_schema(&conn).unwrap();
+        conn
+    }
+
+    fn test_registry() -> WorkflowRegistry {
+        WorkflowRegistry {
+            manifests: HashMap::new(),
+            prompts_path: PathBuf::from("/tmp/test-prompts"),
+            stack_map: HashMap::new(),
+        }
+    }
+
+    fn seed_repo_and_mission(conn: &Connection) -> (String, String) {
+        let now = crabitat_core::now_ms() as i64;
+        conn.execute(
+            "INSERT INTO repos (repo_id, owner, name, local_path, created_at_ms) VALUES ('r1', 'o', 'n', '/tmp', ?1)",
+            params![now],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO missions (mission_id, repo_id, prompt, status, created_at_ms) VALUES ('m1', 'r1', 'test', 'running', ?1)",
+            params![now],
+        ).unwrap();
+        ("r1".into(), "m1".into())
+    }
+
+    #[test]
+    fn scheduler_assigns_queued_to_idle() {
+        let conn = test_conn();
+        let now = crabitat_core::now_ms() as i64;
+        let (_repo_id, _mission_id) = seed_repo_and_mission(&conn);
+
+        conn.execute(
+            "INSERT INTO crabs (crab_id, repo_id, name, state, updated_at_ms) VALUES ('c1', 'r1', 'Alice', 'idle', ?1)",
+            params![now],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO tasks (task_id, mission_id, title, status, created_at_ms, updated_at_ms) VALUES ('t1', 'm1', 'Do work', 'queued', ?1, ?1)",
+            params![now],
+        ).unwrap();
+
+        run_scheduler_tick_db(&conn).unwrap();
+
+        let status: String = conn.query_row("SELECT status FROM tasks WHERE task_id = 't1'", [], |r| r.get(0)).unwrap();
+        assert_eq!(status, "assigned");
+
+        let crab_state: String = conn.query_row("SELECT state FROM crabs WHERE crab_id = 'c1'", [], |r| r.get(0)).unwrap();
+        assert_eq!(crab_state, "busy");
+    }
+
+    #[test]
+    fn scheduler_skips_merge_wait() {
+        let conn = test_conn();
+        let now = crabitat_core::now_ms() as i64;
+        let (_repo_id, _mission_id) = seed_repo_and_mission(&conn);
+
+        conn.execute(
+            "INSERT INTO crabs (crab_id, repo_id, name, state, updated_at_ms) VALUES ('c1', 'r1', 'Alice', 'idle', ?1)",
+            params![now],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO tasks (task_id, mission_id, title, status, step_id, created_at_ms, updated_at_ms) VALUES ('t1', 'm1', 'Wait for merge', 'queued', 'merge-wait', ?1, ?1)",
+            params![now],
+        ).unwrap();
+
+        run_scheduler_tick_db(&conn).unwrap();
+
+        let status: String = conn.query_row("SELECT status FROM tasks WHERE task_id = 't1'", [], |r| r.get(0)).unwrap();
+        assert_eq!(status, "queued"); // not assigned
+    }
+
+    #[test]
+    fn scheduler_no_crabs_does_nothing() {
+        let conn = test_conn();
+        let now = crabitat_core::now_ms() as i64;
+        let (_repo_id, _mission_id) = seed_repo_and_mission(&conn);
+
+        conn.execute(
+            "INSERT INTO tasks (task_id, mission_id, title, status, created_at_ms, updated_at_ms) VALUES ('t1', 'm1', 'Do work', 'queued', ?1, ?1)",
+            params![now],
+        ).unwrap();
+
+        run_scheduler_tick_db(&conn).unwrap();
+
+        let status: String = conn.query_row("SELECT status FROM tasks WHERE task_id = 't1'", [], |r| r.get(0)).unwrap();
+        assert_eq!(status, "queued");
+    }
+
+    #[test]
+    fn expand_workflow_creates_tasks() {
+        let conn = test_conn();
+        let (_repo_id, _mission_id) = seed_repo_and_mission(&conn);
+        let registry = test_registry();
+
+        let manifest = WorkflowManifest {
+            workflow: WorkflowMeta {
+                name: "test-wf".into(),
+                description: "Test".into(),
+                version: "1.0.0".into(),
+                include: vec![],
+            },
+            steps: vec![
+                WorkflowStep { id: "plan".into(), prompt_file: "plan.md".into(), depends_on: vec![], condition: None, max_retries: 0, include: None },
+                WorkflowStep { id: "implement".into(), prompt_file: "impl.md".into(), depends_on: vec!["plan".into()], condition: None, max_retries: 0, include: None },
+                WorkflowStep { id: "review".into(), prompt_file: "review.md".into(), depends_on: vec!["implement".into()], condition: None, max_retries: 0, include: None },
+            ],
+        };
+
+        expand_workflow_into_tasks(&conn, &registry, &manifest, "m1", "do stuff").unwrap();
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM tasks WHERE mission_id = 'm1'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(count, 3);
+
+        // First task (no deps) should be queued
+        let plan_status: String = conn.query_row(
+            "SELECT status FROM tasks WHERE mission_id = 'm1' AND step_id = 'plan'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(plan_status, "queued");
+
+        // Dependent tasks should be blocked
+        let impl_status: String = conn.query_row(
+            "SELECT status FROM tasks WHERE mission_id = 'm1' AND step_id = 'implement'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(impl_status, "blocked");
+    }
+
+    #[test]
+    fn cascade_failure_propagates() {
+        let conn = test_conn();
+        let now = crabitat_core::now_ms() as i64;
+        let (_repo_id, _mission_id) = seed_repo_and_mission(&conn);
+
+        // Create a chain: t1 (failed) -> t2 (blocked) -> t3 (blocked)
+        conn.execute(
+            "INSERT INTO tasks (task_id, mission_id, title, status, step_id, created_at_ms, updated_at_ms) VALUES ('t1', 'm1', 'Step 1', 'failed', 's1', ?1, ?1)",
+            params![now],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO tasks (task_id, mission_id, title, status, step_id, created_at_ms, updated_at_ms) VALUES ('t2', 'm1', 'Step 2', 'blocked', 's2', ?1, ?1)",
+            params![now],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO tasks (task_id, mission_id, title, status, step_id, created_at_ms, updated_at_ms) VALUES ('t3', 'm1', 'Step 3', 'blocked', 's3', ?1, ?1)",
+            params![now],
+        ).unwrap();
+        conn.execute("INSERT INTO task_deps (task_id, depends_on_task_id) VALUES ('t2', 't1')", []).unwrap();
+        conn.execute("INSERT INTO task_deps (task_id, depends_on_task_id) VALUES ('t3', 't2')", []).unwrap();
+
+        cascade_failure(&conn, "t1", now as u64).unwrap();
+
+        let t2_status: String = conn.query_row("SELECT status FROM tasks WHERE task_id = 't2'", [], |r| r.get(0)).unwrap();
+        let t3_status: String = conn.query_row("SELECT status FROM tasks WHERE task_id = 't3'", [], |r| r.get(0)).unwrap();
+        assert_eq!(t2_status, "failed");
+        assert_eq!(t3_status, "failed");
+    }
+}

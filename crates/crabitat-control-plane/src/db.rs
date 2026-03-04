@@ -786,3 +786,186 @@ pub(crate) fn merge_metrics(
     }
     merged
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::github::GhIssue;
+    use crabitat_core::{BurrowMode, MissionStatus, RunMetrics, RunStatus, TaskStatus};
+    use rusqlite::Connection;
+
+    fn test_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        apply_schema(&conn).unwrap();
+        conn
+    }
+
+    #[test]
+    fn apply_schema_succeeds() {
+        let conn = Connection::open_in_memory().unwrap();
+        apply_schema(&conn).unwrap();
+    }
+
+    #[test]
+    fn apply_schema_idempotent() {
+        let conn = Connection::open_in_memory().unwrap();
+        apply_schema(&conn).unwrap();
+        apply_schema(&conn).unwrap();
+    }
+
+    #[test]
+    fn parse_stacks_json_valid() {
+        let result = parse_stacks_json(r#"["rust","ts"]"#);
+        assert_eq!(result, vec!["rust", "ts"]);
+    }
+
+    #[test]
+    fn parse_stacks_json_empty() {
+        let result = parse_stacks_json("[]");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn parse_stacks_json_invalid() {
+        let result = parse_stacks_json("garbage");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn task_status_roundtrip() {
+        let variants = [
+            TaskStatus::Queued,
+            TaskStatus::Assigned,
+            TaskStatus::Running,
+            TaskStatus::Blocked,
+            TaskStatus::Completed,
+            TaskStatus::Failed,
+            TaskStatus::Skipped,
+        ];
+        for status in variants {
+            let db = task_status_to_db(status);
+            let back = task_status_from_db(db);
+            assert_eq!(back, status);
+        }
+    }
+
+    #[test]
+    fn mission_status_roundtrip() {
+        let variants = [
+            MissionStatus::Pending,
+            MissionStatus::Running,
+            MissionStatus::Completed,
+            MissionStatus::Failed,
+        ];
+        for status in variants {
+            let db = mission_status_to_db(status);
+            let back = mission_status_from_db(db);
+            assert_eq!(back, status);
+        }
+    }
+
+    #[test]
+    fn run_status_roundtrip() {
+        let variants = [
+            RunStatus::Queued,
+            RunStatus::Running,
+            RunStatus::Blocked,
+            RunStatus::Completed,
+            RunStatus::Failed,
+        ];
+        for status in variants {
+            let db = run_status_to_db(status);
+            let back = run_status_from_db(db);
+            assert_eq!(back, status);
+        }
+    }
+
+    #[test]
+    fn burrow_mode_roundtrip() {
+        let variants = [BurrowMode::Worktree, BurrowMode::ExternalRepo];
+        for mode in variants {
+            let db = burrow_mode_to_db(mode);
+            let back = burrow_mode_from_db(db);
+            assert_eq!(back, mode);
+        }
+    }
+
+    #[test]
+    fn merge_metrics_usage_only() {
+        let base = RunMetrics::default();
+        let usage = TokenUsagePatch {
+            prompt_tokens: Some(100),
+            completion_tokens: Some(50),
+            total_tokens: None,
+        };
+        let result = merge_metrics(base, Some(usage), None);
+        assert_eq!(result.prompt_tokens, 100);
+        assert_eq!(result.completion_tokens, 50);
+        assert_eq!(result.total_tokens, 150);
+        assert!(result.first_token_ms.is_none());
+    }
+
+    #[test]
+    fn merge_metrics_timing_only() {
+        let base = RunMetrics { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15, ..Default::default() };
+        let timing = TimingPatch {
+            first_token_ms: Some(200),
+            llm_duration_ms: Some(1000),
+            execution_duration_ms: None,
+            end_to_end_ms: None,
+        };
+        let result = merge_metrics(base, None, Some(timing));
+        assert_eq!(result.prompt_tokens, 10);
+        assert_eq!(result.first_token_ms, Some(200));
+        assert_eq!(result.llm_duration_ms, Some(1000));
+    }
+
+    #[test]
+    fn merge_metrics_auto_total() {
+        let base = RunMetrics::default();
+        let usage = TokenUsagePatch {
+            prompt_tokens: Some(300),
+            completion_tokens: Some(200),
+            total_tokens: None,
+        };
+        let result = merge_metrics(base, Some(usage), None);
+        assert_eq!(result.total_tokens, 500);
+    }
+
+    #[test]
+    fn issue_cache_write_read_roundtrip() {
+        let conn = test_conn();
+        let now = crabitat_core::now_ms();
+
+        // Insert a repo first (FK constraint)
+        conn.execute(
+            "INSERT INTO repos (repo_id, owner, name, local_path, created_at_ms) VALUES ('r1', 'o', 'n', '/tmp', ?1)",
+            params![now as i64],
+        ).unwrap();
+
+        let issues = vec![
+            GhIssue { number: 1, title: "Bug".into(), body: "fix it".into(), labels: vec!["bug".into()], state: "OPEN".into() },
+            GhIssue { number: 2, title: "Feat".into(), body: "add it".into(), labels: vec![], state: "OPEN".into() },
+        ];
+        write_issues_cache(&conn, "r1", &issues).unwrap();
+
+        let (cached, _ts) = read_cached_issues(&conn, "r1").unwrap();
+        assert_eq!(cached.len(), 2);
+        assert_eq!(cached[0].number, 1);
+        assert_eq!(cached[0].title, "Bug");
+        assert_eq!(cached[1].number, 2);
+    }
+
+    #[test]
+    fn seed_settings_inserts_prompts_path() {
+        let conn = test_conn();
+        seed_settings(&conn, StdPath::new("/my/prompts")).unwrap();
+
+        let val: String = conn.query_row(
+            "SELECT value FROM settings WHERE key = 'prompts_path'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(val, "/my/prompts");
+    }
+}

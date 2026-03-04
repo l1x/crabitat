@@ -312,3 +312,140 @@ pub(crate) fn sync_toml_workflows_to_db(
     info!(synced, removed, errors = errors.len(), commit = ?commit_hash, "workflow sync complete");
     SyncResult { synced, removed, commit_hash, errors }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::apply_schema;
+    use crabitat_core::{WorkflowManifest, WorkflowMeta, WorkflowStep};
+    use rusqlite::Connection;
+    use std::collections::HashMap;
+
+    fn test_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        apply_schema(&conn).unwrap();
+        conn
+    }
+
+    fn test_registry(manifests: HashMap<String, WorkflowManifest>) -> WorkflowRegistry {
+        WorkflowRegistry {
+            manifests,
+            prompts_path: PathBuf::from("/tmp/test-prompts"),
+            stack_map: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn assembled_name_format() {
+        let name = assembled_name("base", &["a".into(), "b".into()]);
+        assert_eq!(name, "base/a+b");
+    }
+
+    #[test]
+    fn assembled_name_single_stack() {
+        let name = assembled_name("wf", &["rust".into()]);
+        assert_eq!(name, "wf/rust");
+    }
+
+    #[test]
+    fn assemble_workflows_creates_combos() {
+        let manifest = WorkflowManifest {
+            workflow: WorkflowMeta {
+                name: "build".into(),
+                description: "Build workflow".into(),
+                version: "1.0.0".into(),
+                include: vec![],
+            },
+            steps: vec![],
+        };
+        let mut manifests = HashMap::new();
+        manifests.insert("build".into(), manifest);
+        let mut registry = test_registry(manifests);
+
+        let repo_stacks = vec![vec!["rust".into(), "ts".into()]];
+        assemble_workflows(&mut registry, repo_stacks);
+
+        assert!(registry.manifests.contains_key("build"));
+        assert!(registry.manifests.contains_key("build/rust+ts"));
+    }
+
+    #[test]
+    fn assemble_workflows_dedupes() {
+        let manifest = WorkflowManifest {
+            workflow: WorkflowMeta {
+                name: "ci".into(),
+                description: "CI".into(),
+                version: "1.0.0".into(),
+                include: vec![],
+            },
+            steps: vec![],
+        };
+        let mut manifests = HashMap::new();
+        manifests.insert("ci".into(), manifest);
+        let mut registry = test_registry(manifests);
+
+        let repo_stacks = vec![
+            vec!["rust".into(), "ts".into()],
+            vec!["ts".into(), "rust".into()], // same combo, different order
+        ];
+        assemble_workflows(&mut registry, repo_stacks);
+
+        // Should only produce one assembled: ci/rust+ts (sorted)
+        let assembled_count = registry.manifests.keys().filter(|k| k.contains('/')).count();
+        assert_eq!(assembled_count, 1);
+    }
+
+    #[test]
+    fn sync_workflows_to_db_inserts() {
+        let conn = test_conn();
+        let manifest = WorkflowManifest {
+            workflow: WorkflowMeta {
+                name: "deploy".into(),
+                description: "Deploy workflow".into(),
+                version: "2.0.0".into(),
+                include: vec![],
+            },
+            steps: vec![
+                WorkflowStep {
+                    id: "build".into(),
+                    prompt_file: "prompts/build.md".into(),
+                    depends_on: vec![],
+                    condition: None,
+                    max_retries: 0,
+                    include: None,
+                },
+                WorkflowStep {
+                    id: "test".into(),
+                    prompt_file: "prompts/test.md".into(),
+                    depends_on: vec!["build".into()],
+                    condition: None,
+                    max_retries: 1,
+                    include: None,
+                },
+            ],
+        };
+        let mut manifests = HashMap::new();
+        manifests.insert("deploy".into(), manifest);
+        let registry = test_registry(manifests);
+
+        let result = sync_toml_workflows_to_db(&conn, &registry);
+        assert_eq!(result.synced, 1);
+        assert!(result.errors.is_empty());
+
+        // Verify workflow exists in DB
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM workflows WHERE name = 'deploy'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 1);
+
+        // Verify steps
+        let step_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM workflow_steps ws JOIN workflows w ON ws.workflow_id = w.workflow_id WHERE w.name = 'deploy'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(step_count, 2);
+    }
+}

@@ -335,3 +335,36 @@ pub(crate) struct SkillRecord {
     pub(crate) path: String,
     pub(crate) description: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crab_state_roundtrip() {
+        for state in [CrabState::Idle, CrabState::Busy, CrabState::Offline] {
+            let s = state.as_str();
+            let back = CrabState::from_str(s);
+            assert_eq!(back.as_str(), s);
+        }
+    }
+
+    #[test]
+    fn crab_state_unknown_defaults_idle() {
+        let state = CrabState::from_str("xyz");
+        assert_eq!(state.as_str(), "idle");
+    }
+
+    #[test]
+    fn crab_state_serde_roundtrip() {
+        let state = CrabState::Busy;
+        let json = serde_json::to_string(&state).unwrap();
+        let back: CrabState = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.as_str(), "busy");
+    }
+
+    #[test]
+    fn issues_cache_ttl_value() {
+        assert_eq!(ISSUES_CACHE_TTL_MS, 300_000);
+    }
+}

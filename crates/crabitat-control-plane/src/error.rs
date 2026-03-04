@@ -42,3 +42,37 @@ impl IntoResponse for ApiError {
         (self.status, Json(ApiErrorBody { ok: false, error: self.message })).into_response()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bad_request_sets_status() {
+        let err = ApiError::bad_request("oops");
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        assert_eq!(err.message, "oops");
+    }
+
+    #[test]
+    fn not_found_sets_status() {
+        let err = ApiError::not_found("gone");
+        assert_eq!(err.status, StatusCode::NOT_FOUND);
+        assert_eq!(err.message, "gone");
+    }
+
+    #[test]
+    fn internal_sets_status() {
+        let err = ApiError::internal("boom");
+        assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(err.message, "boom");
+    }
+
+    #[test]
+    fn from_rusqlite_error() {
+        let sqlite_err = rusqlite::Error::QueryReturnedNoRows;
+        let err = ApiError::from(sqlite_err);
+        assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(err.message.contains("sqlite"));
+    }
+}

@@ -362,3 +362,35 @@ impl GitHubClient {
 pub(crate) fn parse_repo(repo: &str) -> Result<(&str, &str), ApiError> {
     repo.split_once('/').ok_or_else(|| ApiError::bad_request("repo must be in 'owner/repo' format"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::StatusCode;
+
+    #[test]
+    fn parse_repo_valid() {
+        let (owner, repo) = parse_repo("owner/repo").unwrap();
+        assert_eq!(owner, "owner");
+        assert_eq!(repo, "repo");
+    }
+
+    #[test]
+    fn parse_repo_invalid_no_slash() {
+        let err = parse_repo("noslash").unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn parse_repo_multiple_slashes() {
+        let (owner, repo) = parse_repo("a/b/c").unwrap();
+        assert_eq!(owner, "a");
+        assert_eq!(repo, "b/c");
+    }
+
+    #[test]
+    fn client_no_token() {
+        let client = GitHubClient { http: reqwest::Client::new(), token: None };
+        assert!(!client.has_token());
+    }
+}
