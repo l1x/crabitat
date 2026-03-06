@@ -1,7 +1,5 @@
 ---
 import Layout from "../../layouts/Layout.astro";
-import RepoCard from "../../components/RepoCard.astro";
-import AddRepoModal from "../../components/AddRepoModal.astro";
 import { listRepos } from "../../lib/api-client";
 
 let repos = [];
@@ -12,15 +10,19 @@ try {
 } catch (e: any) {
   error = e.message;
 }
+
+// Redirect to first repo if available
+if (repos.length > 0) {
+  return Astro.redirect(`/issues/${repos[0].repo_id}`);
+}
 ---
 
-<Layout title="Repositories">
+<Layout title="Issues">
   <div class="page-header">
     <div>
-      <h1>Repositories</h1>
-      <p class="subtitle">Onboarded GitHub repos managed by Crabitat</p>
+      <h1>Issues</h1>
+      <p class="subtitle">Open GitHub issues from your onboarded repos</p>
     </div>
-    <AddRepoModal />
   </div>
 
   <div class="divider"></div>
@@ -30,13 +32,9 @@ try {
   {repos.length === 0 && !error && (
     <div class="empty">
       <p>No repositories onboarded yet.</p>
-      <p>Click <strong>+ Add Repo</strong> to get started.</p>
+      <p>Add a repo on the <a href="/repos">Repositories</a> page first.</p>
     </div>
   )}
-
-  <div class="grid">
-    {repos.map((repo) => <RepoCard repo={repo} />)}
-  </div>
 </Layout>
 
 <style>
@@ -81,13 +79,8 @@ try {
     font-size: 14px;
   }
 
-  .empty strong {
-    color: var(--body);
-  }
-
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
-    gap: 24px;
+  .empty a {
+    color: var(--accent);
+    text-decoration: underline;
   }
 </style>

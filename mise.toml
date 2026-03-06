@@ -1,66 +1,38 @@
-# tools
-[tools]
-rust = "1.90.0"
-node = "lts"
-bun = "latest"
-python = "3.13.10"
-
-# env
-[env]
-_.python.venv = { path = ".venv", create = true }
-
-[settings]
-experimental = true
-
-# tasks
 [tasks.fmt]
-description = "Format all Rust code in the workspace"
+description = "Format Rust code"
 run = "cargo fmt --all"
 
-[tasks.check]
-description = "Typecheck the full Rust workspace"
-run = "cargo check --workspace"
-
 [tasks.clippy]
-description = "Lint the Rust workspace"
+description = "Run clippy lints"
 run = "cargo clippy --workspace --all-targets -- -D warnings"
 
 [tasks.test]
-description = "Run workspace tests"
-run = "cargo test --workspace -- --nocapture"
+description = "Run all tests"
+run = "cargo test --workspace"
 
 [tasks.build]
-description = "Build all workspace members"
+description = "Build all crates"
 run = "cargo build --workspace"
 
 [tasks.verify]
-description = "Run fmt + clippy + tests"
-run = "mise run fmt && mise run clippy && mise run test"
+description = "Format, lint, test, build"
+run = """
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo build --workspace
+"""
 
-[tasks.run-control-plane]
-description = "Run the SQLite-backed control-plane"
-run = "cargo run -p crabitat-control-plane -- serve --port 8800 --db-path ./var/crabitat-control-plane.db"
+[tasks."run-cp"]
+description = "Run control-plane server"
+run = "cargo run -p crabitat-control-plane"
 
-[tasks.run-chief]
-description = "Run chief watch mode"
-run = "cargo run -p crabitat-chief -- --chief-id chief-1 watch"
+[tasks."console-dev"]
+description = "Run Astro console in dev mode"
+dir = "apps/crabitat-console"
+run = "bun run dev"
 
-[tasks.run-crab]
-description = "Run a crab agent (set COLONY_ID env var)"
-run = "cargo run -p crabitat-crab -- connect --control-plane http://127.0.0.1:8800 --colony-id ${COLONY_ID:-missing} --name crab-1 --role coder --repo ."
-
-[tasks.console-install]
-description = "Install Astro console dependencies"
-run = "cd apps/crabitat-console && bun install"
-
-[tasks.console-dev]
-description = "Run Astro Colony Console in dev mode"
-run = "cd apps/crabitat-console && bunx --bun astro dev"
-
-[tasks.console-build]
-description = "Build Astro Colony Console"
-run = "cd apps/crabitat-console && bunx --bun astro build"
-
-[tasks.console-start]
-description = "Build and start the console in production mode (port 4321)"
-run = "cd apps/crabitat-console && bunx --bun astro build && HOST=0.0.0.0 PORT=4321 bun dist/server/entry.mjs"
+[tasks."console-build"]
+description = "Build Astro console"
+dir = "apps/crabitat-console"
+run = "bun run build"

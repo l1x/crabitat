@@ -1,29 +1,35 @@
 ---
-import '../styles/global.css';
+import Sidebar from "../components/Sidebar.astro";
+import "../styles/global.css";
 
 interface Props {
-  title?: string;
+  title: string;
 }
 
-const { title = 'Crabitat Console' } = Astro.props as Props;
+const { title } = Astro.props;
 ---
 
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
-    <title>{title}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title} — crabitat</title>
   </head>
   <body>
-    <div class="app">
+    <Sidebar active={Astro.url.pathname} />
+    <main>
       <slot />
-    </div>
+    </main>
   </body>
 </html>
+
+<style>
+  main {
+    flex: 1;
+    position: relative;
+    z-index: 1;
+    padding: 32px 40px;
+    margin-left: 220px;
+  }
+</style>

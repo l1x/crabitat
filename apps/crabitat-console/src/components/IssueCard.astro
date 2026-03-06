@@ -1,0 +1,135 @@
+---
+import type { Issue } from "../lib/types";
+
+interface Props {
+  issue: Issue;
+}
+
+const { issue } = Astro.props;
+
+function truncate(text: string | null, max: number): string {
+  if (!text) return "";
+  return text.length > max ? text.slice(0, max) + "..." : text;
+}
+---
+
+<div class="card">
+  <div class="row">
+    <div class="left">
+      <span class={`dot ${issue.state === "OPEN" ? "open" : "closed"}`}></span>
+      <span class="number">#{issue.number}</span>
+      <span class="title">{issue.title}</span>
+    </div>
+    <button class="launch-btn">Launch</button>
+  </div>
+
+  {issue.labels.length > 0 && (
+    <div class="labels">
+      {issue.labels.map((label) => (
+        <span class="pill">{label}</span>
+      ))}
+    </div>
+  )}
+
+  {issue.body && (
+    <p class="body">{truncate(issue.body, 120)}</p>
+  )}
+</div>
+
+<style>
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-width: 880px;
+  }
+
+  .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .dot.open {
+    background: #3fb950;
+  }
+
+  .dot.closed {
+    background: #8b949e;
+  }
+
+  .number {
+    color: #999;
+    font-size: 13px;
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+
+  .title {
+    color: var(--heading);
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .labels {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    padding-left: 16px;
+  }
+
+  .pill {
+    font-size: 10px;
+    color: #888;
+    border: 1px solid #333;
+    border-radius: 9px;
+    padding: 1px 8px;
+  }
+
+  .body {
+    color: var(--muted);
+    font-size: 11px;
+    padding-left: 16px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .launch-btn {
+    font-size: 11px;
+    font-weight: 500;
+    color: #aaa;
+    padding: 4px 16px;
+    border: 1px solid #333;
+    border-radius: 4px;
+    flex-shrink: 0;
+    transition: all 0.15s;
+  }
+
+  .launch-btn:hover {
+    border-color: var(--accent);
+    color: var(--heading);
+  }
+</style>

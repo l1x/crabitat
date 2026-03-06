@@ -1,60 +1,93 @@
 ---
 interface Props {
-  activePage: string;
-  repoCount: number;
-  issueCount: number;
-  missionCount: number;
-  agentCount: number;
-  messageCount: number;
-  workflowCount?: number;
+  active: string;
 }
 
-const { activePage, repoCount, issueCount, missionCount, agentCount, messageCount, workflowCount = 0 } = Astro.props;
+const { active } = Astro.props;
 
-const navItems = [
-  { href: '/repos', label: 'Repos', count: repoCount, icon: '<path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>' },
-  { href: '/workflows', label: 'Workflows', count: workflowCount, icon: '<path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/>' },
-  { href: '/issues', label: 'Issues', count: issueCount, icon: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>' },
-  { href: '/missions', label: 'Missions', count: missionCount, icon: '<polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/>' },
-  { href: '/agents', label: 'Agents', count: agentCount, icon: '<path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/>' },
-  { href: '/messages', label: 'Messages', count: messageCount, icon: '<path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>' },
+const links = [
+  { href: "/repos", label: "Repositories" },
+  { href: "/issues", label: "Issues" },
+  { href: "/workflows", label: "Workflows" },
+  { href: "/missions", label: "Missions" },
 ];
 ---
 
-<aside class="sidebar">
-  <div class="sidebar-header">
-    <div class="sidebar-logo">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M2 12c0-3 2.5-5 5-5s3 1 5 1 2.5-1 5-1 5 2 5 5" />
-        <path d="M3 15c0 2 3 4 9 4s9-2 9-4" />
-        <circle cx="8" cy="11" r="1" fill="currentColor" />
-        <circle cx="16" cy="11" r="1" fill="currentColor" />
-      </svg>
-    </div>
-    <span class="sidebar-brand">Crabitat</span>
-    <span class="sidebar-version">v2</span>
-  </div>
+<nav>
+  <div class="logo">crabitat</div>
+  <div class="divider"></div>
+  <ul>
+    {links.map((link) => {
+      const isActive = active.startsWith(link.href);
+      return (
+        <li>
+          <a href={link.href} class:list={[{ active: isActive }]}>
+            {isActive && <span class="dot" />}
+            {link.label}
+          </a>
+        </li>
+      );
+    })}
+  </ul>
+</nav>
 
-  <nav class="sidebar-nav">
-    {navItems.map((item) => (
-      <a class={`nav-item ${activePage === item.href ? 'active' : ''}`} href={item.href}>
-        <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" set:html={item.icon} />
-        {item.label}
-        <span class="count-badge">{item.count}</span>
-      </a>
-    ))}
-  </nav>
+<style>
+  nav {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 220px;
+    height: 100vh;
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border-subtle);
+    z-index: 10;
+    padding: 20px 12px;
+  }
 
-  <div class="sidebar-footer">
-    <div class="footer-org">
-      <div>
-        <div class="footer-org-label">Mode</div>
-        <div class="footer-org-name">Control Plane</div>
-      </div>
-    </div>
-    <div class="footer-user">
-      <div class="footer-user-avatar">C</div>
-      <div class="footer-user-text">crabitat-console v2.0.0</div>
-    </div>
-  </div>
-</aside>
+  .logo {
+    color: var(--heading);
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    padding: 0 16px;
+  }
+
+  .divider {
+    height: 1px;
+    background: var(--border-subtle);
+    margin: 16px 16px 12px;
+  }
+
+  ul {
+    list-style: none;
+  }
+
+  a {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px;
+    border-radius: 6px;
+    color: var(--muted);
+    font-size: 13px;
+    transition: background 0.15s;
+  }
+
+  a:hover {
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  a.active {
+    background: #1a1a1a;
+    color: var(--heading);
+    font-weight: 500;
+  }
+
+  .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex-shrink: 0;
+  }
+</style>

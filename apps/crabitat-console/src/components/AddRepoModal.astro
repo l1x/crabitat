@@ -1,532 +1,162 @@
 ---
 ---
 
-<dialog class="modal modal--wide" id="add-repo-modal">
+<button class="trigger" id="open-modal">+ Add Repo</button>
+
+<dialog id="add-repo-modal">
   <div class="modal-content">
-    <div class="modal-header">
-      <span class="modal-title">Add Repository</span>
-      <button class="modal-close" id="add-repo-modal-close">&times;</button>
-    </div>
-    <div class="modal-body">
-      <div class="form-group">
-        <label class="form-label" for="repo-search-input">Search GitHub repos</label>
+    <h2>Add Repository</h2>
+    <div class="divider"></div>
+    <form method="POST" action="/api/repos/create">
+      <div class="field">
+        <label for="owner">OWNER</label>
+        <input type="text" id="owner" name="owner" required placeholder="acme" />
+      </div>
+      <div class="field">
+        <label for="name">NAME</label>
+        <input type="text" id="name" name="name" required placeholder="my-repo" />
+      </div>
+      <div class="field">
+        <label for="local_path">LOCAL PATH</label>
         <input
           type="text"
-          class="form-input"
-          id="repo-search-input"
-          placeholder="Type owner/name to filter, e.g. l1x/"
-          autocomplete="off"
+          id="local_path"
+          name="local_path"
+          required
+          placeholder="/Users/dev/code/my-repo"
         />
       </div>
-
-      <div class="repo-search-results" id="repo-search-results">
-        <div class="repo-search-hint">Loading repos...</div>
+      <div class="actions">
+        <button type="button" class="cancel" id="close-modal">Cancel</button>
+        <button type="submit" class="submit">Add Repo</button>
       </div>
-
-      <div class="repo-config-form" id="repo-config-form" hidden>
-        <div class="repo-config-selected" id="repo-config-selected"></div>
-
-        <div class="form-group">
-          <label class="form-label">Local path</label>
-          <div class="dir-picker" id="dir-picker">
-            <button class="dir-picker-btn" id="dir-picker-btn" type="button">Choose directory</button>
-            <span class="dir-picker-label" id="dir-picker-label">No directory chosen</span>
-          </div>
-          <div class="dir-browser" id="dir-browser" hidden>
-            <div class="dir-browser-crumbs" id="dir-browser-crumbs"></div>
-            <div class="dir-browser-list" id="dir-browser-list"></div>
-          </div>
-          <input type="hidden" id="repo-local-path" />
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Stacks</label>
-          <div class="stacks-picker" id="stacks-picker">
-            <span class="stacks-picker-hint">Loading stacks...</span>
-          </div>
-        </div>
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn" id="add-repo-cancel">Cancel</button>
-      <button class="btn btn--primary" id="add-repo-submit" disabled>Add Repo</button>
-    </div>
+    </form>
   </div>
 </dialog>
 
 <script>
-  const modal = document.getElementById('add-repo-modal') as HTMLDialogElement;
-  const closeBtn = document.getElementById('add-repo-modal-close')!;
-  const cancelBtn = document.getElementById('add-repo-cancel')!;
-  const submitBtn = document.getElementById('add-repo-submit') as HTMLButtonElement;
-  const searchInput = document.getElementById('repo-search-input') as HTMLInputElement;
-  const resultsDiv = document.getElementById('repo-search-results')!;
-  const configForm = document.getElementById('repo-config-form')!;
-  const configSelected = document.getElementById('repo-config-selected')!;
-  const localPathInput = document.getElementById('repo-local-path') as HTMLInputElement;
-  const dirPickerBtn = document.getElementById('dir-picker-btn')!;
-  const dirPickerLabel = document.getElementById('dir-picker-label')!;
-  const dirBrowser = document.getElementById('dir-browser')!;
-  const dirCrumbs = document.getElementById('dir-browser-crumbs')!;
-  const dirList = document.getElementById('dir-browser-list')!;
-  const stacksPicker = document.getElementById('stacks-picker')!;
+  const openBtn = document.getElementById("open-modal")!;
+  const closeBtn = document.getElementById("close-modal")!;
+  const dialog = document.getElementById("add-repo-modal") as HTMLDialogElement;
 
-  interface StackEntry {
-    name: string;
-    path: string;
-  }
-
-  let availableStacks: StackEntry[] = [];
-  let stacksLoaded = false;
-
-  async function loadStacks() {
-    if (stacksLoaded) return;
-    try {
-      const res = await fetch('/api/stacks');
-      if (!res.ok) throw new Error(`${res.status}`);
-      availableStacks = await res.json();
-      stacksLoaded = true;
-      renderStacks();
-    } catch {
-      stacksPicker.innerHTML = '<span class="stacks-picker-hint">Failed to load stacks</span>';
-    }
-  }
-
-  function renderStacks() {
-    if (availableStacks.length === 0) {
-      stacksPicker.innerHTML = '<span class="stacks-picker-hint">No stacks discovered</span>';
-      return;
-    }
-    stacksPicker.innerHTML = availableStacks
-      .map(
-        (s) => `
-        <label class="stack-chip">
-          <input type="checkbox" class="stack-checkbox" value="${s.name}" />
-          <span class="stack-chip-label">${s.name}</span>
-        </label>
-      `
-      )
-      .join('');
-  }
-
-  function getSelectedStacks(): string[] {
-    return Array.from(stacksPicker.querySelectorAll<HTMLInputElement>('.stack-checkbox:checked')).map(
-      (cb) => cb.value
-    );
-  }
-
-  interface GhRepo {
-    full_name: string;
-    default_branch: string;
-    description: string;
-    language: string;
-  }
-
-  interface BrowseResult {
-    path: string;
-    dirs: string[];
-    isGitRepo: boolean;
-  }
-
-  let ghRepos: GhRepo[] = [];
-  let loaded = false;
-  let selectedRepo: GhRepo | null = null;
-  let browserOpen = false;
-
-  async function loadRepos() {
-    if (loaded) return;
-    resultsDiv.innerHTML = '<div class="repo-search-hint">Loading repos from GitHub...</div>';
-    try {
-      const res = await fetch('/api/github/repos');
-      if (!res.ok) throw new Error(`${res.status}`);
-      ghRepos = await res.json();
-      loaded = true;
-      resultsDiv.innerHTML = '<div class="repo-search-hint">Start typing to search repos...</div>';
-    } catch {
-      resultsDiv.innerHTML = '<div class="repo-search-hint">Failed to load repos. Is gh CLI authenticated?</div>';
-    }
-  }
-
-  function renderResults(query: string) {
-    if (!loaded) return;
-    if (!query) {
-      resultsDiv.innerHTML = '<div class="repo-search-hint">Start typing to search repos...</div>';
-      return;
-    }
-    const q = query.toLowerCase();
-    const matches = ghRepos.filter((r) => r.full_name.toLowerCase().includes(q));
-
-    if (matches.length === 0) {
-      resultsDiv.innerHTML = '<div class="repo-search-hint">No matching repos found.</div>';
-      return;
-    }
-
-    resultsDiv.innerHTML = matches
-      .map(
-        (r) => `
-      <button class="repo-search-item${selectedRepo && selectedRepo.full_name === r.full_name ? ' repo-search-item--selected' : ''}"
-              data-full-name="${r.full_name}"
-              data-language="${r.language}"
-              data-default-branch="${r.default_branch}"
-              data-description="${r.description}">
-        <div class="repo-search-item-name">${r.full_name}</div>
-        <div class="repo-search-item-desc">${r.description}</div>
-        <span class="repo-search-item-lang">${r.language}</span>
-      </button>
-    `
-      )
-      .join('');
-
-    resultsDiv.querySelectorAll('.repo-search-item').forEach((btn) => {
-      btn.addEventListener('click', () => selectRepo(btn as HTMLElement));
-    });
-  }
-
-  // -- Directory browser --------------------------------------------------
-
-  function toggleBrowser(open?: boolean) {
-    browserOpen = open !== undefined ? open : !browserOpen;
-    dirBrowser.hidden = !browserOpen;
-    dirPickerBtn.classList.toggle('dir-picker-btn--open', browserOpen);
-  }
-
-  dirPickerBtn.addEventListener('click', () => {
-    if (!browserOpen) browseTo();
-    toggleBrowser();
+  openBtn.addEventListener("click", () => dialog.showModal());
+  closeBtn.addEventListener("click", () => dialog.close());
+  dialog.addEventListener("click", (e) => {
+    if (e.target === dialog) dialog.close();
   });
-
-  async function browseTo(path?: string) {
-    const qs = path ? `?path=${encodeURIComponent(path)}` : '';
-    try {
-      const res = await fetch(`/api/fs/browse${qs}`);
-      if (!res.ok) return;
-      const data: BrowseResult = await res.json();
-
-      localPathInput.value = data.path;
-
-      // Update pill label
-      if (data.isGitRepo) {
-        dirPickerLabel.innerHTML = `<span class="dir-picker-path">${data.path}</span><span class="dir-picker-git">git</span>`;
-      } else {
-        dirPickerLabel.innerHTML = `<span class="dir-picker-path">${data.path}</span>`;
-      }
-      dirPickerLabel.classList.add('dir-picker-label--active');
-
-      // Breadcrumbs
-      const segs = data.path.split('/').filter(Boolean);
-      let html = '<button class="dir-crumb" data-path="/">/</button>';
-      let acc = '';
-      for (const seg of segs) {
-        acc += '/' + seg;
-        html += `<span class="dir-crumb-sep">/</span><button class="dir-crumb" data-path="${acc}">${seg}</button>`;
-      }
-      dirCrumbs.innerHTML = html;
-      dirCrumbs.querySelectorAll<HTMLButtonElement>('.dir-crumb').forEach((b) => {
-        b.addEventListener('click', () => browseTo(b.dataset.path));
-      });
-
-      // Directory list
-      if (data.dirs.length === 0) {
-        dirList.innerHTML = '<div class="dir-browser-empty">No subdirectories</div>';
-      } else {
-        dirList.innerHTML = data.dirs
-          .map((d) => {
-            const full = (data.path === '/' ? '' : data.path) + '/' + d;
-            return `<button class="dir-entry" data-path="${full}"><span class="dir-entry-icon">&#128193;</span>${d}</button>`;
-          })
-          .join('');
-        dirList.querySelectorAll<HTMLButtonElement>('.dir-entry').forEach((b) => {
-          b.addEventListener('click', () => browseTo(b.dataset.path));
-        });
-      }
-
-      updateSubmitState();
-    } catch {
-      dirList.innerHTML = '<div class="dir-browser-empty">Failed to browse</div>';
-    }
-  }
-
-  function updateSubmitState() {
-    submitBtn.disabled = !selectedRepo || !localPathInput.value;
-  }
-
-  function selectRepo(btn: HTMLElement) {
-    const fullName = btn.dataset.fullName!;
-    const language = btn.dataset.language!;
-    const description = btn.dataset.description!;
-    const defaultBranch = btn.dataset.defaultBranch!;
-
-    selectedRepo = { full_name: fullName, language, description, default_branch: defaultBranch };
-
-    resultsDiv.querySelectorAll('.repo-search-item').forEach((el) => {
-      el.classList.toggle('repo-search-item--selected', (el as HTMLElement).dataset.fullName === fullName);
-    });
-
-    configForm.hidden = false;
-    configSelected.textContent = `${fullName} — ${description}`;
-    updateSubmitState();
-  }
-
-  function resetModal() {
-    selectedRepo = null;
-    searchInput.value = '';
-    if (loaded) {
-      resultsDiv.innerHTML = '<div class="repo-search-hint">Start typing to search repos...</div>';
-    }
-    configForm.hidden = true;
-    toggleBrowser(false);
-    localPathInput.value = '';
-    dirPickerLabel.textContent = 'No directory chosen';
-    dirPickerLabel.classList.remove('dir-picker-label--active');
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Add Repo';
-  }
-
-  searchInput.addEventListener('input', () => renderResults(searchInput.value.trim()));
-
-  closeBtn.addEventListener('click', () => { modal.close(); resetModal(); });
-  cancelBtn.addEventListener('click', () => { modal.close(); resetModal(); });
-  modal.addEventListener('click', (e) => {
-    if (e.target === modal) { modal.close(); resetModal(); }
-  });
-
-  submitBtn.addEventListener('click', async () => {
-    if (!selectedRepo || !localPathInput.value) return;
-    submitBtn.textContent = 'Adding...';
-    submitBtn.disabled = true;
-
-    const [owner, name] = selectedRepo.full_name.split('/');
-    try {
-      const stacks = getSelectedStacks();
-      const res = await fetch('/api/repos', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          owner,
-          name,
-          default_branch: selectedRepo.default_branch,
-          language: selectedRepo.language,
-          local_path: localPathInput.value,
-          stacks: stacks.length > 0 ? stacks : undefined,
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => null);
-        throw new Error(err?.error || `Failed: ${res.status}`);
-      }
-      const repo = await res.json();
-      window.dispatchEvent(new CustomEvent('repo-added', { detail: repo }));
-      modal.close();
-      resetModal();
-      window.location.reload();
-    } catch (e: unknown) {
-      submitBtn.textContent = 'Add Repo';
-      submitBtn.disabled = false;
-      alert(`Failed to add repo: ${e instanceof Error ? e.message : e}`);
-    }
-  });
-
-  (window as any).openAddRepoModal = () => {
-    resetModal();
-    modal.showModal();
-    loadRepos();
-    loadStacks();
-    searchInput.focus();
-  };
 </script>
 
 <style>
-  /* -- pill-shaped directory picker ---------------------------------- */
-  .dir-picker {
-    display: flex;
-    align-items: center;
-    background: var(--neutral-bg, #f3f4f6);
-    border: 1px solid var(--line, #e2e5ed);
-    border-radius: 999px;
-    overflow: hidden;
+  .trigger {
+    padding: 8px 20px;
+    border: 1px solid var(--btn-border);
+    border-radius: 6px;
+    color: #aaa;
+    font-size: 12px;
+    font-weight: 500;
     transition: border-color 0.15s;
   }
 
-  .dir-picker:hover {
-    border-color: var(--primary, #5b6abf);
+  .trigger:hover {
+    border-color: var(--muted);
   }
 
-  .dir-picker:has(.dir-picker-btn--open) {
-    border-color: var(--primary, #5b6abf);
-    border-radius: 12px 12px 0 0;
-  }
-
-  .dir-picker-btn {
-    flex-shrink: 0;
-    padding: 10px 20px;
-    background: rgba(0, 0, 0, 0.06);
+  dialog {
+    background: transparent;
     border: none;
-    border-right: 1px solid var(--line, #e2e5ed);
-    cursor: pointer;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--muted, #6b7280);
-    transition: background 0.15s, color 0.15s;
-    white-space: nowrap;
+    padding: 0;
+    max-width: 100vw;
+    max-height: 100vh;
   }
 
-  .dir-picker-btn:hover {
-    background: rgba(0, 0, 0, 0.1);
-    color: var(--ink, #1a1d26);
+  dialog::backdrop {
+    background: rgba(0, 0, 0, 0.7);
   }
 
-  .dir-picker-label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex: 1;
-    min-width: 0;
-    padding: 10px 16px;
-    font-size: 13px;
-    color: var(--muted, #6b7280);
-    font-family: var(--font-mono, monospace);
+  .modal-content {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    width: 400px;
   }
 
-  .dir-picker-label--active {
-    color: var(--ink, #1a1d26);
-  }
-
-  .dir-picker-path {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .dir-picker-git {
-    flex-shrink: 0;
-    padding: 1px 6px;
-    border-radius: 4px;
-    background: var(--good-bg, #dcfce7);
-    color: var(--good, #16a34a);
-    font-size: 11px;
+  h2 {
+    color: var(--heading);
+    font-size: 16px;
     font-weight: 600;
   }
 
-  /* -- dropdown directory browser ----------------------------------- */
-  .dir-browser {
-    border: 1px solid var(--primary, #5b6abf);
-    border-top: none;
-    border-radius: 0 0 12px 12px;
-    overflow: hidden;
-    background: var(--panel, #fff);
+  .divider {
+    height: 1px;
+    background: var(--border-subtle);
+    margin: 12px 0 16px;
   }
 
-  .dir-browser-crumbs {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
+  .field {
+    margin-bottom: 16px;
+  }
+
+  label {
+    display: block;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.8px;
+    margin-bottom: 6px;
+  }
+
+  input {
+    width: 100%;
     padding: 8px 12px;
-    background: var(--neutral-bg, #f9fafb);
-    border-bottom: 1px solid var(--line, #e5e7eb);
-    font-family: var(--font-mono, monospace);
-    font-size: 13px;
-    min-height: 36px;
-  }
-
-  .dir-crumb {
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 2px 3px;
+    background: var(--input-bg);
+    border: 1px solid var(--border);
     border-radius: 4px;
-    color: var(--primary, #5b6abf);
+    color: var(--body);
+    font-size: 12px;
     font-family: inherit;
-    font-size: inherit;
+    outline: none;
+    transition: border-color 0.15s;
   }
 
-  .dir-crumb:hover { background: var(--primary-soft, #eef0ff); }
-
-  .dir-crumb-sep {
-    color: var(--muted, #9ca3af);
-    user-select: none;
+  input:focus {
+    border-color: var(--accent);
   }
 
-  .dir-browser-list {
-    max-height: 200px;
-    overflow-y: auto;
+  input::placeholder {
+    color: var(--muted);
+  }
+
+  .actions {
     display: flex;
-    flex-direction: column;
-  }
-
-  .dir-entry {
-    display: flex;
-    align-items: center;
+    justify-content: flex-end;
     gap: 8px;
-    padding: 6px 12px;
-    background: none;
-    border: none;
-    border-bottom: 1px solid var(--line-light, #f0f1f5);
-    cursor: pointer;
-    text-align: left;
-    font-size: 13px;
-    color: var(--ink, #1a1d26);
+    margin-top: 20px;
   }
 
-  .dir-entry:last-child { border-bottom: none; }
-  .dir-entry:hover { background: var(--primary-soft, #eef0ff); }
-
-  .dir-entry-icon {
-    font-size: 14px;
-    flex-shrink: 0;
+  .cancel,
+  .submit {
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
   }
 
-  .dir-browser-empty {
-    padding: 12px;
-    text-align: center;
-    color: var(--muted, #6b7280);
-    font-size: 13px;
+  .cancel {
+    color: var(--muted);
   }
 
-  /* -- stacks picker ------------------------------------------------ */
-  .stacks-picker {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 4px 0;
+  .cancel:hover {
+    color: var(--body);
   }
 
-  .stacks-picker-hint {
-    font-size: 13px;
-    color: var(--muted, #6b7280);
+  .submit {
+    border: 1px solid var(--btn-border);
+    color: #aaa;
+    transition: border-color 0.15s;
   }
 
-  .stack-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
-    border: 1px solid var(--line, #e2e5ed);
-    border-radius: 999px;
-    cursor: pointer;
-    font-size: 13px;
-    transition: border-color 0.15s, background 0.15s;
-    user-select: none;
-  }
-
-  .stack-chip:hover {
-    border-color: var(--primary, #5b6abf);
-    background: var(--primary-soft, #eef0ff);
-  }
-
-  .stack-chip:has(.stack-checkbox:checked) {
-    border-color: var(--primary, #5b6abf);
-    background: var(--primary-soft, #eef0ff);
-    color: var(--primary, #5b6abf);
-    font-weight: 600;
-  }
-
-  .stack-checkbox {
-    width: 14px;
-    height: 14px;
-    accent-color: var(--primary, #5b6abf);
-  }
-
-  .stack-chip-label {
-    font-family: var(--font-mono, monospace);
+  .submit:hover {
+    border-color: var(--muted);
   }
 </style>

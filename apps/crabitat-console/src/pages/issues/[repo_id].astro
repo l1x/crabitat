@@ -1,0 +1,188 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import IssueCard from "../../components/IssueCard.astro";
+import { listRepos, listIssues } from "../../lib/api-client";
+import type { Repo, Issue } from "../../lib/types";
+
+const { repo_id } = Astro.params;
+
+let repos: Repo[] = [];
+let issues: Issue[] = [];
+let error = "";
+let activeRepo: Repo | undefined;
+
+try {
+  repos = await listRepos();
+  activeRepo = repos.find((r) => r.repo_id === repo_id);
+
+  if (activeRepo) {
+    issues = await listIssues(activeRepo.repo_id);
+  }
+} catch (e: any) {
+  error = e.message;
+}
+
+if (!activeRepo && !error) {
+  return Astro.redirect("/issues");
+}
+
+const openCount = issues.filter((i) => i.state === "OPEN").length;
+---
+
+<Layout title="Issues">
+  <div class="page-header">
+    <div>
+      <h1>Issues</h1>
+      <p class="subtitle">Open GitHub issues from your onboarded repos</p>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  {error && <p class="error">{error}</p>}
+
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <select id="repo-select" class="repo-select">
+        {repos.map((repo) => (
+          <option
+            value={repo.repo_id}
+            selected={repo.repo_id === repo_id}
+          >
+            {repo.owner} / {repo.name}
+          </option>
+        ))}
+      </select>
+      <button id="refresh-btn" class="refresh-btn">Refresh</button>
+    </div>
+    <span class="count">{openCount} open issue{openCount !== 1 ? "s" : ""}</span>
+  </div>
+
+  <div class="issue-list">
+    {issues.length === 0 && !error && (
+      <div class="empty">
+        <p>No issues found for this repository.</p>
+      </div>
+    )}
+    {issues.map((issue) => <IssueCard issue={issue} />)}
+  </div>
+</Layout>
+
+<script>
+  const select = document.getElementById("repo-select") as HTMLSelectElement;
+  const refreshBtn = document.getElementById("refresh-btn");
+
+  select?.addEventListener("change", () => {
+    window.location.href = `/issues/${select.value}`;
+  });
+
+  refreshBtn?.addEventListener("click", async () => {
+    const repoId = select?.value || "";
+    refreshBtn.textContent = "Refreshing...";
+    try {
+      await fetch(`http://localhost:3001/v1/repos/${repoId}/issues/refresh`, {
+        method: "POST",
+      });
+    } catch {
+      // reload anyway to show error state
+    }
+    window.location.reload();
+  });
+</script>
+
+<style>
+  .page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+
+  h1 {
+    color: var(--heading);
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+  }
+
+  .subtitle {
+    color: #777;
+    font-size: 13px;
+    margin-top: 4px;
+  }
+
+  .divider {
+    height: 1px;
+    background: var(--border-subtle);
+    margin: 20px 0;
+  }
+
+  .error {
+    color: #e55;
+    padding: 12px;
+    background: rgba(238, 85, 85, 0.1);
+    border-radius: 6px;
+    font-size: 13px;
+    margin-bottom: 20px;
+  }
+
+  .empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  .toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+    max-width: 880px;
+  }
+
+  .toolbar-left {
+    display: flex;
+    gap: 8px;
+  }
+
+  .repo-select {
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: #999;
+    font-size: 12px;
+    padding: 6px 12px;
+    border-radius: 4px;
+    min-width: 200px;
+    cursor: pointer;
+  }
+
+  .repo-select:focus {
+    outline: 1px solid var(--accent);
+    border-color: var(--accent);
+  }
+
+  .refresh-btn {
+    font-size: 12px;
+    color: #666;
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    transition: all 0.15s;
+  }
+
+  .refresh-btn:hover {
+    border-color: var(--accent);
+    color: var(--heading);
+  }
+
+  .count {
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .issue-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+</style>

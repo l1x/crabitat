@@ -1,0 +1,119 @@
+---
+import type { Repo } from "../lib/types";
+
+interface Props {
+  repo: Repo;
+}
+
+const { repo } = Astro.props;
+
+function timeAgo(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const seconds = Math.floor((now - then) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  return `${weeks}w ago`;
+}
+---
+
+<div class="card">
+  <div class="header">
+    <span class="dot"></span>
+    <span class="name">{repo.owner} / {repo.name}</span>
+  </div>
+
+  <div class="field">
+    <div class="label">LOCAL PATH</div>
+    <div class="value">{repo.local_path}</div>
+  </div>
+
+  <div class="field">
+    <div class="label">ONBOARDED</div>
+    <div class="value">{timeAgo(repo.created_at)}</div>
+  </div>
+
+  <div class="footer">
+    <form method="POST" action={`/api/repos/${repo.repo_id}/delete`}>
+      <button type="submit" class="delete-btn">Delete</button>
+    </form>
+  </div>
+</div>
+
+<style>
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex-shrink: 0;
+  }
+
+  .name {
+    color: var(--heading);
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .label {
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.8px;
+  }
+
+  .value {
+    color: var(--body);
+    font-size: 12px;
+  }
+
+  .footer {
+    border-top: 1px solid var(--border-subtle);
+    padding-top: 12px;
+    margin-top: 4px;
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .delete-btn {
+    font-size: 11px;
+    color: var(--muted);
+    padding: 4px 12px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    transition: all 0.15s;
+  }
+
+  .delete-btn:hover {
+    color: #e55;
+    border-color: #e55;
+  }
+</style>
