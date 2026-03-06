@@ -1,42 +1,53 @@
 ---
 import Layout from "../../layouts/Layout.astro";
-import RepoCard from "../../components/RepoCard.astro";
-import AddRepoModal from "../../components/AddRepoModal.astro";
-import { listRepos } from "../../lib/api-client";
-import type { Repo } from "../../lib/types";
+import WorkflowCard from "../../components/WorkflowCard.astro";
+import NewWorkflowModal from "../../components/NewWorkflowModal.astro";
+import { listAllWorkflows, getWorkflow, listRepos } from "../../lib/api-client";
+import type { WorkflowSummary, WorkflowDetail, Repo } from "../../lib/types";
 
+let summaries: WorkflowSummary[] = [];
+let details: Map<string, WorkflowDetail> = new Map();
 let repos: Repo[] = [];
 let error = "";
 
 try {
-  repos = await listRepos();
+  [summaries, repos] = await Promise.all([listAllWorkflows(), listRepos()]);
+  const detailResults = await Promise.all(
+    summaries.map((s) => getWorkflow(s.workflow_id)),
+  );
+  for (const d of detailResults) {
+    details.set(d.workflow_id, d);
+  }
 } catch (e) {
   error = e instanceof Error ? e.message : String(e);
 }
 ---
 
-<Layout title="Repositories">
+<Layout title="Workflows">
   <div class="page-header">
     <div>
-      <h1>Repositories</h1>
-      <p class="subtitle">Onboarded GitHub repos managed by Crabitat</p>
+      <h1>Workflows</h1>
+      <p class="subtitle">Repo-scoped templates with ordered steps and flavors</p>
     </div>
-    <AddRepoModal />
+    <NewWorkflowModal repos={repos} />
   </div>
 
   <div class="divider"></div>
 
   {error && <p class="error">{error}</p>}
 
-  {repos.length === 0 && !error && (
+  {summaries.length === 0 && !error && (
     <div class="empty">
-      <p>No repositories onboarded yet.</p>
-      <p>Click <strong>+ Add Repo</strong> to get started.</p>
+      <p>No workflows created yet.</p>
+      <p>Click <strong>+ New Workflow</strong> to get started.</p>
     </div>
   )}
 
   <div class="grid">
-    {repos.map((repo) => <RepoCard repo={repo} />)}
+    {summaries.map((s) => {
+      const d = details.get(s.workflow_id);
+      return d ? <WorkflowCard summary={s} detail={d} /> : null;
+    })}
   </div>
 </Layout>
 

@@ -9,9 +9,9 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
   try {
     await createRepo({ owner, name, local_path });
-  } catch (e: any) {
-    // For now, just redirect back — error handling can be improved later
-    return redirect("/repos?error=" + encodeURIComponent(e.message));
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return redirect("/repos?error=" + encodeURIComponent(msg));
   }
 
   return redirect("/repos");

@@ -1,14 +1,15 @@
 ---
 import Layout from "../../layouts/Layout.astro";
 import { listRepos } from "../../lib/api-client";
+import type { Repo } from "../../lib/types";
 
-let repos = [];
+let repos: Repo[] = [];
 let error = "";
 
 try {
   repos = await listRepos();
-} catch (e: any) {
-  error = e.message;
+} catch (e) {
+  error = e instanceof Error ? e.message : String(e);
 }
 
 // Redirect to first repo if available

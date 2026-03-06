@@ -6,7 +6,7 @@ mod models;
 use std::sync::{Arc, Mutex};
 
 use axum::Router;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use rusqlite::Connection;
 use tower_http::cors::CorsLayer;
 
@@ -40,6 +40,29 @@ async fn main() {
         .route(
             "/v1/repos/{repo_id}/issues/refresh",
             post(handlers::issues::refresh_repo_issues),
+        )
+        .route(
+            "/v1/repos/{repo_id}/workflows",
+            post(handlers::workflows::create_workflow)
+                .get(handlers::workflows::list_repo_workflows),
+        )
+        .route(
+            "/v1/workflows",
+            get(handlers::workflows::list_all_workflows),
+        )
+        .route(
+            "/v1/workflows/{workflow_id}",
+            get(handlers::workflows::get_workflow)
+                .put(handlers::workflows::update_workflow)
+                .delete(handlers::workflows::delete_workflow),
+        )
+        .route(
+            "/v1/workflows/{workflow_id}/flavors",
+            post(handlers::workflows::create_flavor),
+        )
+        .route(
+            "/v1/workflows/{workflow_id}/flavors/{flavor_id}",
+            delete(handlers::workflows::delete_flavor),
         )
         .layer(CorsLayer::permissive())
         .with_state(state);

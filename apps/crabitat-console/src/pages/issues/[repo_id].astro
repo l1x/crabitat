@@ -18,8 +18,8 @@ try {
   if (activeRepo) {
     issues = await listIssues(activeRepo.repo_id);
   }
-} catch (e: any) {
-  error = e.message;
+} catch (e) {
+  error = e instanceof Error ? e.message : String(e);
 }
 
 if (!activeRepo && !error) {
