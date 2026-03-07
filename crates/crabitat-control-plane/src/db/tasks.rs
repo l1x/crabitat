@@ -80,12 +80,12 @@ pub fn get_next_queued_task(conn: &Connection) -> Result<Option<(Task, String)>,
                 status: row.get(5)?,
                 created_at: row.get(6)?,
             },
-            row.get(7)?
+            row.get(7)?,
         ))
     });
 
     match result {
-        Ok(res) => Ok(Some(result?)),
+        Ok(res) => Ok(Some(res)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.to_string()),
     }
@@ -95,6 +95,7 @@ pub fn update_task_status(conn: &Connection, task_id: &str, status: &str) -> Res
     conn.execute(
         "UPDATE tasks SET status = ?1 WHERE task_id = ?2",
         params![status, task_id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
