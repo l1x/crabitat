@@ -26,11 +26,16 @@ try {
 <dialog class="detail-dialog" id={`detail-modal-${flavor.flavor_id}`}>
   <div class="modal-content">
     <div class="modal-header">
-      <h2 id="modal-title">{flavor.name} — Detail</h2>
+      <div class="title-row">
+        <h2 id="modal-title">{flavor.name}</h2>
+        <button type="button" class="edit-btn-inline" title="Edit flavor">✎</button>
+      </div>
       <button class="close-x">✕</button>
     </div>
     
     <div class="divider"></div>
+
+    <div id={`error-${flavor.flavor_id}`} class="modal-error hidden"></div>
 
     <!-- View/Preview Mode -->
     <div class="view-mode">
@@ -46,12 +51,11 @@ try {
       <div class="field">
         <label>PREVIEW CONTENT</label>
         <div class="preview-box">
-          <pre class="preview-text">Loading preview...</pre>
+          <div class="preview-text markdown-body">Loading preview...</div>
         </div>
       </div>
 
       <div class="actions">
-        <button type="button" class="edit-btn">Edit Flavor</button>
         <button type="button" class="close-btn">Close</button>
       </div>
     </div>
@@ -59,8 +63,8 @@ try {
     <!-- Edit Mode (hidden by default) -->
     <form class="edit-mode hidden">
       <div class="field">
-        <label for="edit-flavor-name">FLAVOR NAME</label>
-        <input type="text" name="name" id="edit-flavor-name" value={flavor.name} required />
+        <label for={`edit-name-${flavor.flavor_id}`}>FLAVOR NAME</label>
+        <input type="text" name="name" id={`edit-name-${flavor.flavor_id}`} value={flavor.name} required />
       </div>
 
       <div class="field">
@@ -86,17 +90,22 @@ try {
 <script is:inline define:vars={{ flavor }}>
   const dialog = document.getElementById(`detail-modal-${flavor.flavor_id}`);
   const trigger = document.querySelector(`.detail-trigger[data-flavor-id="${flavor.flavor_id}"]`);
+  const deleteBtn = document.querySelector(`.delete-flavor-btn[data-flavor-id="${flavor.flavor_id}"]`);
   const closeX = dialog.querySelector('.close-x');
   const closeBtn = dialog.querySelector('.close-btn');
-  const editBtn = dialog.querySelector('.edit-btn');
+  const editBtn = dialog.querySelector('.edit-btn-inline');
   const cancelEditBtn = dialog.querySelector('.cancel-edit-btn');
   const viewMode = dialog.querySelector('.view-mode');
   const editMode = dialog.querySelector('.edit-mode');
   const previewText = dialog.querySelector('.preview-text');
+  const errorEl = dialog.querySelector(`#error-${flavor.flavor_id}`);
 
   trigger.addEventListener('click', async () => {
     dialog.showModal();
     previewText.textContent = "Loading preview...";
+    errorEl.classList.add('hidden');
+    errorEl.textContent = '';
+
     try {
       if (flavor.prompt_paths && flavor.prompt_paths.length > 0) {
         const res = await fetch(`http://localhost:3001/v1/prompts/content`, {
@@ -106,7 +115,12 @@ try {
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        previewText.textContent = data.content || "Empty fragments.";
+        
+        if (typeof window.marked !== 'undefined') {
+          previewText.innerHTML = window.marked.parse(data.content || "Empty fragments.");
+        } else {
+          previewText.textContent = data.content || "Empty fragments.";
+        }
       } else {
         previewText.textContent = "No prompt fragments selected.";
       }
@@ -115,10 +129,27 @@ try {
     }
   });
 
+  deleteBtn?.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (confirm(`Are you sure you want to delete the flavor '${flavor.name}'?`)) {
+      try {
+        const res = await fetch(`http://localhost:3001/v1/workflows/${flavor.workflow_name}/flavors/${flavor.flavor_id}`, {
+          method: 'DELETE'
+        });
+        if (!res.ok) throw new Error('Failed to delete flavor');
+        window.location.reload();
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+  });
+
   const close = () => {
     dialog.close();
     viewMode.classList.remove('hidden');
     editMode.classList.add('hidden');
+    errorEl.classList.add('hidden');
+    errorEl.textContent = '';
   };
 
   closeX.addEventListener('click', close);
@@ -135,6 +166,7 @@ try {
   cancelEditBtn.addEventListener('click', () => {
     viewMode.classList.remove('hidden');
     editMode.classList.add('hidden');
+    errorEl.classList.add('hidden');
   });
 
   editMode.addEventListener('submit', async (e) => {
@@ -146,6 +178,7 @@ try {
     const saveBtn = editMode.querySelector('.save-btn');
     saveBtn.disabled = true;
     saveBtn.textContent = 'Saving...';
+    errorEl.classList.add('hidden');
 
     try {
       const res = await fetch(`http://localhost:3001/v1/workflows/${flavor.workflow_name}/flavors/${flavor.flavor_id}`, {
@@ -154,10 +187,15 @@ try {
         body: JSON.stringify({ name, prompt_paths })
       });
 
-      if (!res.ok) throw new Error('Failed to update flavor');
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to update flavor');
+      }
+
       window.location.reload();
     } catch (err) {
-      alert(err.message);
+      errorEl.textContent = err.message;
+      errorEl.classList.remove('hidden');
       saveBtn.disabled = false;
       saveBtn.textContent = 'Save Changes';
     }
@@ -233,11 +271,31 @@ try {
     margin-bottom: 12px;
   }
 
+  .title-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
   h2 {
     color: var(--heading);
     font-size: 20px;
     font-weight: 700;
     letter-spacing: -0.5px;
+  }
+
+  .edit-btn-inline {
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 4px;
+    transition: color 0.2s;
+  }
+
+  .edit-btn-inline:hover {
+    color: var(--heading);
   }
 
   .close-x {
@@ -257,6 +315,16 @@ try {
     height: 1px;
     background: var(--border-subtle);
     margin-bottom: 24px;
+  }
+
+  .modal-error {
+    background: rgba(238, 85, 85, 0.1);
+    color: #f85149;
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    margin-bottom: 24px;
+    border: 1px solid rgba(238, 85, 85, 0.2);
   }
 
   .field {
@@ -346,7 +414,7 @@ try {
     margin-top: 32px;
   }
 
-  .edit-btn, .close-btn, .cancel-edit-btn, .save-btn {
+  .close-btn, .cancel-edit-btn, .save-btn {
     padding: 10px 24px;
     border-radius: 8px;
     font-size: 14px;
@@ -360,16 +428,15 @@ try {
     border: none;
   }
 
-  .edit-btn {
-    background: var(--btn-bg);
-    border: 1px solid var(--btn-border);
-    color: var(--heading);
-  }
-
   .save-btn {
     background: #d0d0d0;
     color: #000;
     border: 1px solid #d0d0d0;
+  }
+
+  .save-btn:hover {
+    background: #ffffff;
+    border-color: #ffffff;
   }
 
   .hidden {

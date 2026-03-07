@@ -59,17 +59,19 @@ pub fn list_all(conn: &Connection) -> Result<Vec<Mission>, String> {
          FROM missions ORDER BY created_at DESC"
     ).map_err(|e| e.to_string())?;
 
-    let rows = stmt.query_map([], |row| {
-        Ok(Mission {
-            mission_id: row.get(0)?,
-            repo_id: row.get(1)?,
-            issue_number: row.get(2)?,
-            workflow_name: row.get(3)?,
-            flavor_id: row.get(4)?,
-            status: row.get(5)?,
-            created_at: row.get(6)?,
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(Mission {
+                mission_id: row.get(0)?,
+                repo_id: row.get(1)?,
+                issue_number: row.get(2)?,
+                workflow_name: row.get(3)?,
+                flavor_id: row.get(4)?,
+                status: row.get(5)?,
+                created_at: row.get(6)?,
+            })
         })
-    }).map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?;
 
     let mut missions = Vec::new();
     for m in rows {

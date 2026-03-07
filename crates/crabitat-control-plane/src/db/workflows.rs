@@ -54,7 +54,13 @@ pub fn insert_flavor(
         "INSERT INTO workflow_flavors (flavor_id, workflow_name, name, prompt_paths) VALUES (?1, ?2, ?3, ?4)",
         params![flavor_id, workflow_name, name, prompt_paths_json],
     )
-    .map_err(|e| format!("flavor already exists: {e}"))?;
+    .map_err(|e| {
+        if e.to_string().contains("UNIQUE constraint failed") {
+            format!("A flavor named '{}' already exists for this workflow.", name)
+        } else {
+            e.to_string()
+        }
+    })?;
 
     Ok(WorkflowFlavor {
         flavor_id,
@@ -86,7 +92,13 @@ pub fn update_flavor(
         "UPDATE workflow_flavors SET name = ?1, prompt_paths = ?2 WHERE flavor_id = ?3",
         params![name, prompt_paths_json, flavor_id],
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| {
+        if e.to_string().contains("UNIQUE constraint failed") {
+            format!("A flavor named '{}' already exists for this workflow.", name)
+        } else {
+            e.to_string()
+        }
+    })?;
 
     Ok(())
 }

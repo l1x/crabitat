@@ -67,8 +67,7 @@ async fn main() {
         )
         .route(
             "/v1/workflows/{name}/flavors/{flavor_id}",
-            delete(handlers::workflows::delete_flavor)
-                .patch(handlers::workflows::update_flavor),
+            delete(handlers::workflows::delete_flavor).patch(handlers::workflows::update_flavor),
         )
         .route(
             "/v1/prompts/files",
