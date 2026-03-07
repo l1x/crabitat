@@ -59,6 +59,40 @@ pub fn list_by_repo(conn: &Connection, repo_id: &str) -> Result<Vec<Issue>, Stri
     Ok(issues)
 }
 
+pub fn get_cached_issue(
+    conn: &Connection,
+    repo_id: &str,
+    issue_number: i64,
+) -> Result<Option<Issue>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT repo_id, number, title, body, labels, state, fetched_at
+             FROM github_issues_cache
+             WHERE repo_id = ?1 AND number = ?2",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let result = stmt.query_row(params![repo_id, issue_number], |row| {
+        let labels_str: String = row.get(4)?;
+        let labels: Vec<String> = serde_json::from_str(&labels_str).unwrap_or_default();
+        Ok(Issue {
+            repo_id: row.get(0)?,
+            number: row.get(1)?,
+            title: row.get(2)?,
+            body: row.get(3)?,
+            labels,
+            state: row.get(5)?,
+            fetched_at: row.get(6)?,
+        })
+    });
+
+    match result {
+        Ok(issue) => Ok(Some(issue)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 pub fn has_cached(conn: &Connection, repo_id: &str) -> Result<bool, String> {
     let mut stmt = conn
         .prepare("SELECT COUNT(*) FROM github_issues_cache WHERE repo_id = ?1")

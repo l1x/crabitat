@@ -1,7 +1,7 @@
 use crate::github;
 use crate::models::system::SystemStatus;
-use axum::extract::Query;
 use axum::Json;
+use axum::extract::Query;
 use serde::Deserialize;
 use std::fs;
 
@@ -36,15 +36,14 @@ pub async fn list_dirs(Query(params): Query<DirQuery>) -> Json<Vec<String>> {
     let mut dirs = Vec::new();
     if let Ok(entries) = fs::read_dir(search_dir) {
         for entry in entries.flatten() {
-            if let Ok(file_type) = entry.file_type() {
-                if file_type.is_dir() {
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    if name.to_lowercase().starts_with(&prefix.to_lowercase())
-                        && !name.starts_with('.')
-                    {
-                        let full_path = entry.path().to_string_lossy().to_string();
-                        dirs.push(full_path);
-                    }
+            if let Ok(file_type) = entry.file_type()
+                && file_type.is_dir()
+            {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.to_lowercase().starts_with(&prefix.to_lowercase()) && !name.starts_with('.')
+                {
+                    let full_path = entry.path().to_string_lossy().to_string();
+                    dirs.push(full_path);
                 }
             }
             if dirs.len() >= 10 {

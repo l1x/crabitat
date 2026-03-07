@@ -1,6 +1,8 @@
 pub mod issues;
+pub mod missions;
 pub mod repos;
 pub mod settings;
+pub mod tasks;
 pub mod workflows;
 
 use rusqlite::Connection;
@@ -46,6 +48,39 @@ pub(crate) fn migrate(conn: &Connection) {
         CREATE TABLE IF NOT EXISTS settings (
             key   TEXT PRIMARY KEY,
             value TEXT NOT NULL
+        );
+
+        -- Execution Layer (FR-4)
+
+        CREATE TABLE IF NOT EXISTS missions (
+            mission_id    TEXT PRIMARY KEY,
+            repo_id       TEXT NOT NULL REFERENCES repos(repo_id) ON DELETE CASCADE,
+            issue_number  INTEGER NOT NULL,
+            workflow_name TEXT NOT NULL,
+            flavor_id     TEXT REFERENCES workflow_flavors(flavor_id) ON DELETE SET NULL,
+            status        TEXT NOT NULL DEFAULT 'pending',
+            created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            FOREIGN KEY (repo_id, issue_number) REFERENCES github_issues_cache(repo_id, number)
+        );
+
+        CREATE TABLE IF NOT EXISTS tasks (
+            task_id          TEXT PRIMARY KEY,
+            mission_id       TEXT NOT NULL REFERENCES missions(mission_id) ON DELETE CASCADE,
+            step_id          TEXT NOT NULL,
+            step_order       INTEGER NOT NULL,
+            assembled_prompt TEXT NOT NULL,
+            status           TEXT NOT NULL DEFAULT 'queued',
+            created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS runs (
+            run_id      TEXT PRIMARY KEY,
+            task_id     TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+            status      TEXT NOT NULL,
+            logs        TEXT,
+            summary     TEXT,
+            started_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            finished_at TEXT
         );",
     )
     .expect("failed to run migrations");

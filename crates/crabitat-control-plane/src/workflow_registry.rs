@@ -23,13 +23,17 @@ impl WorkflowRegistry {
                 let path = entry.path();
                 if path.extension().and_then(|s| s.to_str()) == Some("toml") {
                     match fs::read_to_string(&path) {
-                        Ok(content) => {
-                            match toml::from_str::<WorkflowFile>(&content) {
-                                Ok(wf) => workflows.push(wf),
-                                Err(e) => tracing::error!("failed to parse workflow TOML at {:?}: {}", path, e),
-                            }
+                        Ok(content) => match toml::from_str::<WorkflowFile>(&content) {
+                            Ok(wf) => workflows.push(wf),
+                            Err(e) => tracing::error!(
+                                "failed to parse workflow TOML at {:?}: {}",
+                                path,
+                                e
+                            ),
+                        },
+                        Err(e) => {
+                            tracing::error!("failed to read workflow file at {:?}: {}", path, e)
                         }
-                        Err(e) => tracing::error!("failed to read workflow file at {:?}: {}", path, e),
                     }
                 }
             }

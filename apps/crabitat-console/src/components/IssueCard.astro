@@ -1,6 +1,7 @@
 ---
 import { marked } from 'marked';
 import type { Issue } from "../lib/types";
+import LaunchMissionModal from "./LaunchMissionModal.astro";
 
 interface Props {
   issue: Issue;
@@ -30,7 +31,7 @@ function getPreview(text: string | null): string {
       {issue.body && (
         <button class="expand-btn" title="Toggle full body">...</button>
       )}
-      <button class="launch-btn">Launch</button>
+      <LaunchMissionModal repoId={issue.repo_id} issueNumber={issue.number} />
     </div>
   </div>
 

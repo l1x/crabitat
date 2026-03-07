@@ -1,6 +1,7 @@
 mod db;
 mod github;
 mod handlers;
+mod mission_service;
 mod models;
 mod workflow_registry;
 
@@ -71,6 +72,11 @@ async fn main() {
         .route(
             "/v1/prompts/files",
             get(handlers::workflows::list_prompt_files),
+        )
+        .route("/v1/missions", post(handlers::missions::create_mission))
+        .route(
+            "/v1/missions/{mission_id}",
+            get(handlers::missions::get_mission),
         )
         .route("/v1/github/repos", get(handlers::github::search_repos))
         .route("/v1/settings", get(handlers::settings::list_settings))

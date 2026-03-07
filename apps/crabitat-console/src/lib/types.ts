@@ -74,3 +74,30 @@ export interface SystemStatus {
   gh_version: string | null;
   gh_user: string | null;
 }
+
+export interface Mission {
+  mission_id: string;
+  repo_id: string;
+  issue_number: number;
+  workflow_name: string;
+  flavor_id: string | null;
+  status: string;
+  created_at: string;
+}
+
+export interface Task {
+  task_id: string;
+  mission_id: string;
+  step_id: string;
+  step_order: number;
+  assembled_prompt: string;
+  status: string;
+  created_at: string;
+}
+
+export interface CreateMissionRequest {
+  repo_id: string;
+  issue_number: number;
+  workflow_name: string;
+  flavor_id?: string;
+}

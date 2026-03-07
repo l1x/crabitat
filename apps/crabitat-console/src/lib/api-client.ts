@@ -8,6 +8,9 @@ import type {
   CreateFlavorRequest,
   Setting,
   SystemStatus,
+  Mission,
+  Task,
+  CreateMissionRequest,
 } from "./types";
 
 const API_BASE = "http://localhost:3001";
@@ -151,5 +154,24 @@ export async function listPromptFiles(): Promise<string[]> {
 export async function listDirs(query: string): Promise<string[]> {
   const res = await fetch(`${API_BASE}/v1/system/dirs?q=${encodeURIComponent(query)}`);
   if (!res.ok) throw new Error(`Failed to list directories: ${res.status}`);
+  return res.json();
+}
+
+export async function createMission(body: CreateMissionRequest): Promise<Mission> {
+  const res = await fetch(`${API_BASE}/v1/missions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || `Failed to create mission: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function getMission(missionId: string): Promise<{ mission: Mission; tasks: Task[] }> {
+  const res = await fetch(`${API_BASE}/v1/missions/${missionId}`);
+  if (!res.ok) throw new Error(`Failed to get mission: ${res.status}`);
   return res.json();
 }
