@@ -85,6 +85,14 @@ async fn main() {
             "/v1/missions/{mission_id}",
             get(handlers::missions::get_mission),
         )
+        .route(
+            "/v1/tasks/next",
+            get(handlers::tasks::get_next_task),
+        )
+        .route(
+            "/v1/tasks/{task_id}/status",
+            post(handlers::tasks::update_task_status),
+        )
         .route("/v1/github/repos", get(handlers::github::search_repos))
         .route("/v1/settings", get(handlers::settings::list_settings))
         .route(

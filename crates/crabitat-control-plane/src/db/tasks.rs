@@ -56,3 +56,45 @@ pub fn list_tasks_for_mission(conn: &Connection, mission_id: &str) -> Result<Vec
     }
     Ok(tasks)
 }
+
+pub fn get_next_queued_task(conn: &Connection) -> Result<Option<(Task, String)>, String> {
+    // Get oldest queued task along with the local_path of the repo it belongs to
+    let mut stmt = conn.prepare(
+        "SELECT t.task_id, t.mission_id, t.step_id, t.step_order, t.assembled_prompt, t.status, t.created_at, r.local_path
+         FROM tasks t
+         JOIN missions m ON t.mission_id = m.mission_id
+         JOIN repos r ON m.repo_id = r.repo_id
+         WHERE t.status = 'queued'
+         ORDER BY t.created_at ASC
+         LIMIT 1"
+    ).map_err(|e| e.to_string())?;
+
+    let result = stmt.query_row([], |row| {
+        Ok((
+            Task {
+                task_id: row.get(0)?,
+                mission_id: row.get(1)?,
+                step_id: row.get(2)?,
+                step_order: row.get(3)?,
+                assembled_prompt: row.get(4)?,
+                status: row.get(5)?,
+                created_at: row.get(6)?,
+            },
+            row.get(7)?
+        ))
+    });
+
+    match result {
+        Ok(res) => Ok(Some(result?)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+pub fn update_task_status(conn: &Connection, task_id: &str, status: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE tasks SET status = ?1 WHERE task_id = ?2",
+        params![status, task_id],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
