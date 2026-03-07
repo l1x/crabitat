@@ -1,15 +1,26 @@
 ---
+import { getSystemStatus } from "../lib/api-client";
+import type { SystemStatus } from "../lib/types";
+
 interface Props {
   active: string;
 }
 
 const { active } = Astro.props;
 
+let status: SystemStatus | null = null;
+try {
+  status = await getSystemStatus();
+} catch (e) {
+  console.error("Failed to fetch system status", e);
+}
+
 const links = [
   { href: "/repos", label: "Repositories" },
   { href: "/issues", label: "Issues" },
   { href: "/workflows", label: "Workflows" },
   { href: "/missions", label: "Missions" },
+  { href: "/settings", label: "Settings" },
 ];
 ---
 
@@ -29,6 +40,20 @@ const links = [
       );
     })}
   </ul>
+
+  <div class="status-box">
+    <div class="status-header">SYSTEM STATUS</div>
+    <div class="status-item">
+      <span class:list={["indicator", status?.gh_installed ? "online" : "offline"]}></span>
+      <span class="label">GitHub CLI</span>
+      <span class="value">{status?.gh_installed ? "Installed" : "Missing"}</span>
+    </div>
+    <div class="status-item">
+      <span class:list={["indicator", status?.gh_auth_status ? "online" : "offline"]}></span>
+      <span class="label">GitHub Auth</span>
+      <span class="value">{status?.gh_auth_status ? status.gh_user : "Logged out"}</span>
+    </div>
+  </div>
 </nav>
 
 <style>
@@ -42,6 +67,8 @@ const links = [
     border-right: 1px solid var(--border-subtle);
     z-index: 10;
     padding: 20px 12px;
+    display: flex;
+    flex-direction: column;
   }
 
   .logo {
@@ -60,16 +87,17 @@ const links = [
 
   ul {
     list-style: none;
+    flex-grow: 1;
   }
 
   a {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 8px 16px;
+    padding: 10px 16px;
     border-radius: 6px;
     color: var(--muted);
-    font-size: 13px;
+    font-size: 14px;
     transition: background 0.15s;
   }
 
@@ -90,4 +118,39 @@ const links = [
     background: var(--accent);
     flex-shrink: 0;
   }
+
+  .status-box {
+    margin-top: auto;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 14px;
+    font-size: 12px;
+  }
+
+  .status-header {
+    color: var(--muted);
+    font-weight: 600;
+    margin-bottom: 10px;
+    letter-spacing: 0.5px;
+  }
+
+  .status-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+
+  .indicator {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+  }
+
+  .online { background: #3fb950; box-shadow: 0 0 4px #3fb950; }
+  .offline { background: #f85149; box-shadow: 0 0 4px #f85149; }
+
+  .label { color: var(--muted); flex-grow: 1; }
+  .value { color: var(--body); font-family: monospace; }
 </style>

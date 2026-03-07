@@ -1,0 +1,204 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { listSettings } from "../lib/api-client";
+import type { Setting } from "../lib/types";
+
+let settings: Setting[] = [];
+let error = "";
+let success = "";
+
+try {
+  settings = await listSettings();
+} catch (e) {
+  error = e instanceof Error ? e.message : String(e);
+}
+---
+
+<Layout title="Settings">
+  <div class="page-header">
+    <div>
+      <h1>Settings</h1>
+      <p class="subtitle">Global system configuration</p>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  {error && <p class="message error">{error}</p>}
+  {success && <p class="message success">{success}</p>}
+
+  <div class="settings-container">
+    <div class="setting-group">
+      <h3>Agent Prompts</h3>
+      <p class="description">
+        Point Crabitat to your prompts repository or local directory containing <code>workflows/</code> and <code>prompts/</code>.
+      </p>
+      
+      <div class="input-row">
+        <label for="prompts_root">Prompts Root Path</label>
+        <div class="input-group">
+          <input 
+            type="text" 
+            id="prompts_root" 
+            name="prompts_root" 
+            value={settings.find(s => s.key === 'prompts_root')?.value || ''}
+            placeholder="/path/to/your/agent-prompts"
+          />
+          <button id="save-prompts-root" class="primary-btn">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</Layout>
+
+<script>
+  import { updateSetting } from "../lib/api-client";
+
+  const saveBtn = document.getElementById('save-prompts-root');
+  const input = document.getElementById('prompts_root') as HTMLInputElement;
+
+  saveBtn?.addEventListener('click', async () => {
+    const value = input.value.trim();
+    if (!value) return;
+
+    saveBtn.innerText = 'Saving...';
+    saveBtn.setAttribute('disabled', 'true');
+
+    try {
+      await updateSetting('prompts_root', value);
+      window.location.reload();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+      saveBtn.innerText = 'Save';
+      saveBtn.removeAttribute('disabled');
+    }
+  });
+</script>
+
+<style>
+  .page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+
+  h1 {
+    color: var(--heading);
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+  }
+
+  .subtitle {
+    color: var(--muted);
+    font-size: 13px;
+    margin-top: 4px;
+  }
+
+  .divider {
+    height: 1px;
+    background: var(--border-subtle);
+    margin: 20px 0 32px;
+  }
+
+  .settings-container {
+    max-width: 800px;
+  }
+
+  .setting-group {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+  }
+
+  .setting-group h3 {
+    font-size: 16px;
+    margin-bottom: 8px;
+    color: var(--heading);
+  }
+
+  .description {
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 20px;
+    line-height: 1.5;
+  }
+
+  .input-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .input-group {
+    display: flex;
+    gap: 12px;
+  }
+
+  input {
+    flex-grow: 1;
+    background: #0f0f0f;
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    padding: 10px 14px;
+    color: var(--body);
+    font-size: 14px;
+    font-family: monospace;
+    transition: border-color 0.2s;
+  }
+
+  input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  .primary-btn {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 0 20px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+
+  .primary-btn:hover {
+    opacity: 0.9;
+  }
+
+  .primary-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .message {
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    margin-bottom: 24px;
+  }
+
+  .error {
+    background: rgba(238, 85, 85, 0.1);
+    color: #f85149;
+    border: 1px solid rgba(238, 85, 85, 0.2);
+  }
+
+  .success {
+    background: rgba(63, 185, 80, 0.1);
+    color: #3fb950;
+    border: 1px solid rgba(63, 185, 80, 0.2);
+  }
+</style>

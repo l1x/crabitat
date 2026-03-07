@@ -1,5 +1,6 @@
 pub mod issues;
 pub mod repos;
+pub mod settings;
 pub mod workflows;
 
 use rusqlite::Connection;
@@ -34,30 +35,17 @@ pub(crate) fn migrate(conn: &Connection) {
             PRIMARY KEY (repo_id, number)
         );
 
-        CREATE TABLE IF NOT EXISTS workflows (
-            workflow_id  TEXT PRIMARY KEY,
-            repo_id      TEXT NOT NULL REFERENCES repos(repo_id) ON DELETE CASCADE,
-            name         TEXT NOT NULL,
-            description  TEXT NOT NULL DEFAULT '',
-            created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-            UNIQUE(repo_id, name)
-        );
-
-        CREATE TABLE IF NOT EXISTS workflow_steps (
-            step_id         TEXT PRIMARY KEY,
-            workflow_id     TEXT NOT NULL REFERENCES workflows(workflow_id) ON DELETE CASCADE,
-            step_order      INTEGER NOT NULL,
-            name            TEXT NOT NULL,
-            prompt_template TEXT NOT NULL,
-            UNIQUE(workflow_id, step_order)
-        );
-
         CREATE TABLE IF NOT EXISTS workflow_flavors (
-            flavor_id    TEXT PRIMARY KEY,
-            workflow_id  TEXT NOT NULL REFERENCES workflows(workflow_id) ON DELETE CASCADE,
-            name         TEXT NOT NULL,
-            context      TEXT,
-            UNIQUE(workflow_id, name)
+            flavor_id     TEXT PRIMARY KEY,
+            workflow_name TEXT NOT NULL,
+            name          TEXT NOT NULL,
+            prompt_paths  TEXT NOT NULL DEFAULT '[]',
+            UNIQUE(workflow_name, name)
+        );
+
+        CREATE TABLE IF NOT EXISTS settings (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
         );",
     )
     .expect("failed to run migrations");

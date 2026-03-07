@@ -2,6 +2,7 @@ mod db;
 mod github;
 mod handlers;
 mod models;
+mod workflow_registry;
 
 use std::sync::{Arc, Mutex};
 
@@ -9,6 +10,8 @@ use axum::Router;
 use axum::routing::{delete, get, post};
 use rusqlite::Connection;
 use tower_http::cors::CorsLayer;
+use tower_http::trace::TraceLayer;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -17,8 +20,16 @@ pub struct AppState {
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "crabitat_control_plane=debug,tower_http=debug".into()),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
     let conn = db::init("crabitat.db");
-    println!("database initialized");
+    tracing::info!("database initialized");
 
     let state = AppState {
         db: Arc::new(Mutex::new(conn)),
@@ -42,34 +53,39 @@ async fn main() {
             post(handlers::issues::refresh_repo_issues),
         )
         .route(
-            "/v1/repos/{repo_id}/workflows",
-            post(handlers::workflows::create_workflow)
-                .get(handlers::workflows::list_repo_workflows),
-        )
-        .route(
             "/v1/workflows",
             get(handlers::workflows::list_all_workflows),
         )
         .route(
-            "/v1/workflows/{workflow_id}",
-            get(handlers::workflows::get_workflow)
-                .put(handlers::workflows::update_workflow)
-                .delete(handlers::workflows::delete_workflow),
+            "/v1/workflows/{name}",
+            get(handlers::workflows::get_workflow),
         )
         .route(
-            "/v1/workflows/{workflow_id}/flavors",
+            "/v1/workflows/{name}/flavors",
             post(handlers::workflows::create_flavor),
         )
         .route(
-            "/v1/workflows/{workflow_id}/flavors/{flavor_id}",
+            "/v1/workflows/{name}/flavors/{flavor_id}",
             delete(handlers::workflows::delete_flavor),
         )
+        .route(
+            "/v1/prompts/files",
+            get(handlers::workflows::list_prompt_files),
+        )
+        .route("/v1/github/repos", get(handlers::github::search_repos))
+        .route("/v1/settings", get(handlers::settings::list_settings))
+        .route(
+            "/v1/settings/{key}",
+            get(handlers::settings::get_setting).post(handlers::settings::update_setting),
+        )
+        .route("/v1/system/status", get(handlers::system::get_status))
+        .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3001")
         .await
         .unwrap();
-    println!("listening on http://localhost:3001");
+    tracing::info!("listening on http://localhost:3001");
     axum::serve(listener, app).await.unwrap();
 }

@@ -1,0 +1,289 @@
+---
+import { listPromptFiles } from "../lib/api-client";
+
+interface Props {
+  workflowName: string;
+}
+
+const { workflowName } = Astro.props;
+
+let promptFiles: string[] = [];
+try {
+  promptFiles = await listPromptFiles();
+} catch (e) {
+  console.error("Failed to list prompt files", e);
+}
+---
+
+<button class="add-flavor-trigger" data-workflow={workflowName}>+ flavor</button>
+
+<dialog class="flavor-dialog" id={`modal-${workflowName}`}>
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Add Flavor to {workflowName}</h2>
+      <button class="close-x">✕</button>
+    </div>
+    
+    <div class="divider"></div>
+
+    <form class="flavor-form">
+      <div class="field">
+        <label for="flavor-name">FLAVOR NAME</label>
+        <input type="text" name="name" id="flavor-name" placeholder="e.g. rust, astro, github" required />
+      </div>
+
+      <div class="field">
+        <label>PROMPT FILES</label>
+        <div class="prompt-picker">
+          {promptFiles.map((file) => (
+            <label class="prompt-item">
+              <input type="checkbox" name="prompts" value={file} />
+              <span class="file-path">{file}</span>
+            </label>
+          ))}
+          {promptFiles.length === 0 && <p class="empty-prompts">No .md files found in prompts root.</p>}
+        </div>
+      </div>
+
+      <div class="actions">
+        <button type="button" class="cancel-btn">Cancel</button>
+        <button type="submit" class="submit-btn">Create Flavor</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<script>
+  import { createFlavor } from "../lib/api-client";
+
+  // Using a class-based selector to handle multiple modals on one page
+  const triggers = document.querySelectorAll('.add-flavor-trigger');
+  
+  triggers.forEach(trigger => {
+    const workflowName = trigger.getAttribute('data-workflow');
+    const dialog = document.getElementById(`modal-${workflowName}`) as HTMLDialogElement;
+    const form = dialog.querySelector('.flavor-form') as HTMLFormElement;
+    const closeX = dialog.querySelector('.close-x');
+    const cancelBtn = dialog.querySelector('.cancel-btn');
+
+    trigger.addEventListener('click', () => dialog.showModal());
+    
+    const close = () => {
+      dialog.close();
+      form.reset();
+    };
+
+    closeX?.addEventListener('click', close);
+    cancelBtn?.addEventListener('click', close);
+    dialog.addEventListener('click', (e) => {
+      if (e.target === dialog) close();
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const formData = new FormData(form);
+      const name = formData.get('name') as string;
+      const promptPaths = formData.getAll('prompts') as string[];
+
+      if (!name) return;
+
+      const submitBtn = form.querySelector('.submit-btn') as HTMLButtonElement;
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Creating...';
+
+      try {
+        await createFlavor(workflowName!, { name, prompt_paths: promptPaths });
+        window.location.reload();
+      } catch (err) {
+        alert(err instanceof Error ? err.message : String(err));
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Create Flavor';
+      }
+    });
+  });
+</script>
+
+<style>
+  .add-flavor-trigger {
+    border: 1px dashed var(--btn-border);
+    color: var(--muted);
+    border-radius: 14px;
+    padding: 4px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.2s;
+  }
+
+  .add-flavor-trigger:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(212, 160, 84, 0.05);
+  }
+
+  .flavor-dialog {
+    background: transparent;
+    border: none;
+    padding: 0;
+    max-width: 100vw;
+    max-height: 100vh;
+    margin: auto;
+  }
+
+  .flavor-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(4px);
+  }
+
+  .modal-content {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px;
+    width: 500px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+  }
+
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+
+  h2 {
+    color: var(--heading);
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+  }
+
+  .close-x {
+    color: var(--faint);
+    font-size: 18px;
+    padding: 4px;
+  }
+
+  .close-x:hover {
+    color: var(--heading);
+  }
+
+  .divider {
+    height: 1px;
+    background: var(--border-subtle);
+    margin-bottom: 24px;
+  }
+
+  .field {
+    margin-bottom: 24px;
+  }
+
+  label {
+    display: block;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+  }
+
+  input[type="text"] {
+    width: 100%;
+    padding: 12px 16px;
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--body);
+    font-size: 15px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  input[type="text"]:focus {
+    border-color: var(--accent);
+  }
+
+  .prompt-picker {
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    max-height: 240px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .prompt-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border-subtle);
+    transition: background 0.1s;
+  }
+
+  .prompt-item:last-child {
+    border-bottom: none;
+  }
+
+  .prompt-item:hover {
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .prompt-item input {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent);
+  }
+
+  .file-path {
+    font-size: 14px;
+    font-family: monospace;
+    color: var(--body);
+  }
+
+  .empty-prompts {
+    padding: 20px;
+    color: var(--faint);
+    font-size: 14px;
+    text-align: center;
+  }
+
+  .actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 32px;
+  }
+
+  .cancel-btn, .submit-btn {
+    padding: 10px 24px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    transition: all 0.2s;
+  }
+
+  .cancel-btn {
+    color: var(--muted);
+  }
+
+  .cancel-btn:hover {
+    color: var(--heading);
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .submit-btn {
+    background: var(--accent);
+    color: #fff;
+  }
+
+  .submit-btn:hover {
+    opacity: 0.9;
+  }
+
+  .submit-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+</style>

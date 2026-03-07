@@ -1,7 +1,10 @@
-mod issues;
-mod repos;
-mod workflows;
+pub mod issues;
+pub mod repos;
+pub mod settings;
+pub mod system;
+pub mod workflows;
 
-pub use issues::*;
-pub use repos::*;
-pub use workflows::*;
+// Re-export only what is currently used elsewhere in the crate
+pub use issues::Issue;
+pub use repos::{CreateRepoRequest, Repo};
+// Add others as needed

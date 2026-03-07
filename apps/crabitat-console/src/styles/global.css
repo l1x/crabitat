@@ -1,16 +1,17 @@
 :root {
   --bg: #111111;
   --bg-sidebar: #0e0e0e;
-  --card: #181818;
-  --border: #262626;
+  --card: #1a1a1a;
+  --border: #2a2a2a;
   --border-subtle: #222222;
-  --heading: #ece5d8;
-  --body: #888888;
-  --muted: #555555;
-  --faint: #444444;
-  --accent: #c87a2a;
-  --btn-border: #333333;
-  --input-bg: #111111;
+  --heading: #ffffff;
+  --body: #b0b0b0;
+  --muted: #777777;
+  --faint: #555555;
+  --accent: #d4a054;
+  --btn-border: #3a3a3a;
+  --input-bg: #141414;
+  --font-size-base: 16px;
 }
 
 *,
@@ -25,8 +26,8 @@ html {
   font-family: -apple-system, "Helvetica Neue", sans-serif;
   background: var(--bg);
   color: var(--body);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: var(--font-size-base);
+  line-height: 1.6;
 }
 
 body {

@@ -36,3 +36,8 @@ run = "bun run dev"
 description = "Build Astro console"
 dir = "apps/crabitat-console"
 run = "bun run build"
+
+[tasks."console-check"]
+description = "Typecheck Astro console"
+dir = "apps/crabitat-console"
+run = "bun run astro check"

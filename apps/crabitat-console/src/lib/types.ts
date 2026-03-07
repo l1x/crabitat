@@ -22,47 +22,55 @@ export interface Issue {
   fetched_at: string;
 }
 
-export interface Workflow {
-  workflow_id: string;
-  repo_id: string;
+export interface WorkflowInfo {
   name: string;
   description: string;
-  created_at: string;
+  version?: string;
 }
 
-export interface WorkflowStep {
-  step_id: string;
-  workflow_id: string;
-  step_order: number;
-  name: string;
-  prompt_template: string;
+export interface WorkflowStepFile {
+  id: string;
+  prompt_file: string;
+  depends_on?: string[];
+  on_fail?: string;
+  max_retries?: number;
 }
 
 export interface WorkflowFlavor {
   flavor_id: string;
-  workflow_id: string;
+  workflow_name: string;
   name: string;
-  context: string | null;
+  prompt_paths: string[];
 }
 
-export interface WorkflowDetail extends Workflow {
-  steps: WorkflowStep[];
+export interface WorkflowDetail {
+  name: string;
+  description: string;
+  version?: string;
+  steps: WorkflowStepFile[];
   flavors: WorkflowFlavor[];
 }
 
-export interface WorkflowSummary extends Workflow {
-  flavor_count: number;
-  repo_owner: string;
-  repo_name: string;
-}
-
-export interface CreateWorkflowRequest {
+export interface WorkflowSummary {
   name: string;
-  description?: string;
-  steps: { name: string; prompt_template: string }[];
+  description: string;
+  step_count: number;
+  flavor_count: number;
 }
 
 export interface CreateFlavorRequest {
   name: string;
-  context?: string;
+  prompt_paths: string[];
+}
+
+export interface Setting {
+  key: string;
+  value: string;
+}
+
+export interface SystemStatus {
+  gh_installed: boolean;
+  gh_auth_status: boolean;
+  gh_version: string | null;
+  gh_user: string | null;
 }

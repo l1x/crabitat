@@ -1,5 +1,7 @@
 /target
 *.db
+*.db-shm
+*.db-wal
 node_modules/
 apps/*/node_modules/
 apps/*/.astro/

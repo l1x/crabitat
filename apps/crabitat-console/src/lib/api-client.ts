@@ -4,9 +4,10 @@ import type {
   Issue,
   WorkflowSummary,
   WorkflowDetail,
-  CreateWorkflowRequest,
   WorkflowFlavor,
   CreateFlavorRequest,
+  Setting,
+  SystemStatus,
 } from "./types";
 
 const API_BASE = "http://localhost:3001";
@@ -33,6 +34,20 @@ export async function createRepo(body: CreateRepoRequest): Promise<Repo> {
     const err = await res.json();
     throw new Error(err.error || `Failed to create repo: ${res.status}`);
   }
+  return res.json();
+}
+
+export interface GhRepoResult {
+  nameWithOwner: string;
+}
+
+export async function searchGithubRepos(
+  query: string,
+): Promise<GhRepoResult[]> {
+  const res = await fetch(
+    `${API_BASE}/v1/github/repos?q=${encodeURIComponent(query)}`,
+  );
+  if (!res.ok) throw new Error(`Failed to search repos: ${res.status}`);
   return res.json();
 }
 
@@ -69,49 +84,18 @@ export async function listAllWorkflows(): Promise<WorkflowSummary[]> {
   return res.json();
 }
 
-export async function listRepoWorkflows(
-  repoId: string,
-): Promise<WorkflowSummary[]> {
-  const res = await fetch(`${API_BASE}/v1/repos/${repoId}/workflows`);
-  if (!res.ok) throw new Error(`Failed to list repo workflows: ${res.status}`);
-  return res.json();
-}
-
-export async function getWorkflow(id: string): Promise<WorkflowDetail> {
-  const res = await fetch(`${API_BASE}/v1/workflows/${id}`);
+export async function getWorkflow(name: string): Promise<WorkflowDetail> {
+  const res = await fetch(`${API_BASE}/v1/workflows/${name}`);
   if (!res.ok) throw new Error(`Failed to get workflow: ${res.status}`);
   return res.json();
 }
 
-export async function createWorkflow(
-  repoId: string,
-  body: CreateWorkflowRequest,
-): Promise<WorkflowDetail> {
-  const res = await fetch(`${API_BASE}/v1/repos/${repoId}/workflows`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || `Failed to create workflow: ${res.status}`);
-  }
-  return res.json();
-}
-
-export async function deleteWorkflow(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/v1/workflows/${id}`, {
-    method: "DELETE",
-  });
-  if (!res.ok) throw new Error(`Failed to delete workflow: ${res.status}`);
-}
-
 export async function createFlavor(
-  workflowId: string,
+  workflowName: string,
   body: CreateFlavorRequest,
 ): Promise<WorkflowFlavor> {
   const res = await fetch(
-    `${API_BASE}/v1/workflows/${workflowId}/flavors`,
+    `${API_BASE}/v1/workflows/${workflowName}/flavors`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -126,12 +110,40 @@ export async function createFlavor(
 }
 
 export async function deleteFlavor(
-  workflowId: string,
+  workflowName: string,
   flavorId: string,
 ): Promise<void> {
   const res = await fetch(
-    `${API_BASE}/v1/workflows/${workflowId}/flavors/${flavorId}`,
+    `${API_BASE}/v1/workflows/${workflowName}/flavors/${flavorId}`,
     { method: "DELETE" },
   );
   if (!res.ok) throw new Error(`Failed to delete flavor: ${res.status}`);
+}
+
+export async function listSettings(): Promise<Setting[]> {
+  const res = await fetch(`${API_BASE}/v1/settings`);
+  if (!res.ok) throw new Error(`Failed to list settings: ${res.status}`);
+  return res.json();
+}
+
+export async function updateSetting(key: string, value: string): Promise<Setting> {
+  const res = await fetch(`${API_BASE}/v1/settings/${key}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value }),
+  });
+  if (!res.ok) throw new Error(`Failed to update setting: ${res.status}`);
+  return res.json();
+}
+
+export async function getSystemStatus(): Promise<SystemStatus> {
+  const res = await fetch(`${API_BASE}/v1/system/status`);
+  if (!res.ok) throw new Error(`Failed to get system status: ${res.status}`);
+  return res.json();
+}
+
+export async function listPromptFiles(): Promise<string[]> {
+  const res = await fetch(`${API_BASE}/v1/prompts/files`);
+  if (!res.ok) throw new Error(`Failed to list prompt files: ${res.status}`);
+  return res.json();
 }

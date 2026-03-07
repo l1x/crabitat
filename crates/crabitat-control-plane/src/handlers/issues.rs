@@ -46,7 +46,10 @@ fn lookup_repo(
     let conn = state.db.lock().unwrap();
     match repos::get_by_id(&conn, repo_id) {
         Ok(Some(repo)) => Ok((repo.owner, repo.name)),
-        Ok(None) => Err((StatusCode::NOT_FOUND, Json(json!({"error": "repo not found"})))),
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "repo not found"})),
+        )),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e})))),
     }
 }

@@ -1,25 +1,28 @@
 ---
 import Layout from "../../layouts/Layout.astro";
 import WorkflowCard from "../../components/WorkflowCard.astro";
-import NewWorkflowModal from "../../components/NewWorkflowModal.astro";
-import { listAllWorkflows, getWorkflow, listRepos } from "../../lib/api-client";
-import type { WorkflowSummary, WorkflowDetail, Repo } from "../../lib/types";
+import { listAllWorkflows, getWorkflow } from "../../lib/api-client";
+import type { WorkflowSummary, WorkflowDetail } from "../../lib/types";
 
 let summaries: WorkflowSummary[] = [];
 let details: Map<string, WorkflowDetail> = new Map();
-let repos: Repo[] = [];
 let error = "";
+let needsConfig = false;
 
 try {
-  [summaries, repos] = await Promise.all([listAllWorkflows(), listRepos()]);
+  summaries = await listAllWorkflows();
   const detailResults = await Promise.all(
-    summaries.map((s) => getWorkflow(s.workflow_id)),
+    summaries.map((s) => getWorkflow(s.name)),
   );
   for (const d of detailResults) {
-    details.set(d.workflow_id, d);
+    details.set(d.name, d);
   }
 } catch (e) {
-  error = e instanceof Error ? e.message : String(e);
+  if (e instanceof Error && e.message.includes("424")) {
+    needsConfig = true;
+  } else {
+    error = e instanceof Error ? e.message : String(e);
+  }
 }
 ---
 
@@ -27,25 +30,35 @@ try {
   <div class="page-header">
     <div>
       <h1>Workflows</h1>
-      <p class="subtitle">Repo-scoped templates with ordered steps and flavors</p>
+      <p class="subtitle">Global templates from your prompts repository</p>
     </div>
-    <NewWorkflowModal repos={repos} />
   </div>
 
   <div class="divider"></div>
 
-  {error && <p class="error">{error}</p>}
+  {error && <p class="message error">{error}</p>}
 
-  {summaries.length === 0 && !error && (
-    <div class="empty">
-      <p>No workflows created yet.</p>
-      <p>Click <strong>+ New Workflow</strong> to get started.</p>
+  {needsConfig && (
+    <div class="empty-state">
+      <div class="icon">⚙️</div>
+      <h2>Configuration Required</h2>
+      <p>You need to configure your <strong>Prompts Root Path</strong> before workflows can be loaded.</p>
+      <a href="/settings" class="primary-btn">Go to Settings</a>
+    </div>
+  )}
+
+  {!needsConfig && summaries.length === 0 && !error && (
+    <div class="empty-state">
+      <div class="icon">📂</div>
+      <h2>No Workflows Found</h2>
+      <p>No <code>.toml</code> files found in your <code>workflows/</code> directory.</p>
+      <p class="hint">Check your settings or add workflows to your prompts repo.</p>
     </div>
   )}
 
   <div class="grid">
     {summaries.map((s) => {
-      const d = details.get(s.workflow_id);
+      const d = details.get(s.name);
       return d ? <WorkflowCard summary={s} detail={d} /> : null;
     })}
   </div>
@@ -66,7 +79,7 @@ try {
   }
 
   .subtitle {
-    color: #777;
+    color: var(--muted);
     font-size: 13px;
     margin-top: 4px;
   }
@@ -74,27 +87,69 @@ try {
   .divider {
     height: 1px;
     background: var(--border-subtle);
-    margin: 20px 0;
+    margin: 20px 0 40px;
+  }
+
+  .message {
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    margin-bottom: 24px;
   }
 
   .error {
-    color: #e55;
-    padding: 12px;
     background: rgba(238, 85, 85, 0.1);
-    border-radius: 6px;
-    font-size: 13px;
+    color: #f85149;
+    border: 1px solid rgba(238, 85, 85, 0.2);
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: 80px 20px;
+    background: rgba(255, 255, 255, 0.01);
+    border: 1px dashed var(--border-subtle);
+    border-radius: 16px;
+    max-width: 600px;
+    margin: 0 auto;
+  }
+
+  .empty-state .icon {
+    font-size: 48px;
     margin-bottom: 20px;
   }
 
-  .empty {
-    text-align: center;
-    padding: 60px 20px;
-    color: var(--muted);
-    font-size: 14px;
+  .empty-state h2 {
+    color: var(--heading);
+    font-size: 20px;
+    margin-bottom: 12px;
   }
 
-  .empty strong {
-    color: var(--body);
+  .empty-state p {
+    color: var(--muted);
+    font-size: 14px;
+    margin-bottom: 24px;
+    line-height: 1.6;
+  }
+
+  .hint {
+    font-size: 12px !important;
+    opacity: 0.7;
+  }
+
+  .primary-btn {
+    display: inline-block;
+    background: var(--accent);
+    color: #fff;
+    text-decoration: none;
+    padding: 10px 24px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    transition: opacity 0.2s;
+  }
+
+  .primary-btn:hover {
+    opacity: 0.9;
   }
 
   .grid {

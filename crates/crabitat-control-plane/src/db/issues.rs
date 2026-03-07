@@ -40,8 +40,7 @@ pub fn list_by_repo(conn: &Connection, repo_id: &str) -> Result<Vec<Issue>, Stri
     let issues = stmt
         .query_map(params![repo_id], |row| {
             let labels_str: String = row.get(4)?;
-            let labels: Vec<String> =
-                serde_json::from_str(&labels_str).unwrap_or_default();
+            let labels: Vec<String> = serde_json::from_str(&labels_str).unwrap_or_default();
 
             Ok(Issue {
                 repo_id: row.get(0)?,
