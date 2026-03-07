@@ -74,6 +74,23 @@ pub fn delete_flavor(conn: &Connection, flavor_id: &str) -> Result<bool, String>
     Ok(affected > 0)
 }
 
+pub fn update_flavor(
+    conn: &Connection,
+    flavor_id: &str,
+    name: &str,
+    prompt_paths: &[String],
+) -> Result<(), String> {
+    let prompt_paths_json = serde_json::to_string(prompt_paths).map_err(|e| e.to_string())?;
+
+    conn.execute(
+        "UPDATE workflow_flavors SET name = ?1, prompt_paths = ?2 WHERE flavor_id = ?3",
+        params![name, prompt_paths_json, flavor_id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

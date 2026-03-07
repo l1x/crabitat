@@ -123,6 +123,33 @@ export async function deleteFlavor(
   if (!res.ok) throw new Error(`Failed to delete flavor: ${res.status}`);
 }
 
+export async function updateFlavor(
+  workflowName: string,
+  flavorId: string,
+  body: CreateFlavorRequest,
+): Promise<void> {
+  const res = await fetch(
+    `${API_BASE}/v1/workflows/${workflowName}/flavors/${flavorId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!res.ok) throw new Error(`Failed to update flavor: ${res.status}`);
+}
+
+export async function getPromptsContent(paths: string[]): Promise<string> {
+  const res = await fetch(`${API_BASE}/v1/prompts/content`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ paths }),
+  });
+  if (!res.ok) throw new Error(`Failed to fetch prompt content: ${res.status}`);
+  const data = await res.json();
+  return data.content;
+}
+
 export async function listSettings(): Promise<Setting[]> {
   const res = await fetch(`${API_BASE}/v1/settings`);
   if (!res.ok) throw new Error(`Failed to list settings: ${res.status}`);
@@ -167,6 +194,12 @@ export async function createMission(body: CreateMissionRequest): Promise<Mission
     const err = await res.json();
     throw new Error(err.error || `Failed to create mission: ${res.status}`);
   }
+  return res.json();
+}
+
+export async function listMissions(): Promise<Mission[]> {
+  const res = await fetch(`${API_BASE}/v1/missions`);
+  if (!res.ok) throw new Error(`Failed to list missions: ${res.status}`);
   return res.json();
 }
 

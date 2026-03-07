@@ -1,6 +1,7 @@
 ---
 import type { WorkflowSummary, WorkflowDetail } from "../lib/types";
 import AddFlavorModal from "./AddFlavorModal.astro";
+import FlavorDetailModal from "./FlavorDetailModal.astro";
 
 interface Props {
   summary: WorkflowSummary;
@@ -24,10 +25,7 @@ const { summary, detail } = Astro.props;
     <div class="section-label">FLAVORS</div>
     <div class="flavors">
       {detail.flavors.map((f) => (
-        <div class="flavor-pill-wrapper">
-          <span class="pill" title={f.prompt_paths.join(", ")}>{f.name}</span>
-          <button class="delete-flavor-btn" data-flavor-id={f.flavor_id} title="Delete flavor">✕</button>
-        </div>
+        <FlavorDetailModal flavor={f} />
       ))}
       <AddFlavorModal workflowName={summary.name} />
     </div>
@@ -54,31 +52,6 @@ const { summary, detail } = Astro.props;
     </div>
   </div>
 </div>
-
-<script>
-  import { deleteFlavor } from "../lib/api-client";
-
-  const deleteBtns = document.querySelectorAll('.delete-flavor-btn');
-  
-  deleteBtns.forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const flavorId = btn.getAttribute('data-flavor-id');
-      const card = btn.closest('.card');
-      const workflowName = card?.getAttribute('data-workflow-name');
-
-      if (!flavorId || !workflowName) return;
-
-      if (confirm('Are you sure you want to delete this flavor?')) {
-        try {
-          await deleteFlavor(workflowName, flavorId);
-          window.location.reload();
-        } catch (err) {
-          alert(err instanceof Error ? err.message : String(err));
-        }
-      }
-    });
-  });
-</script>
 
 <style>
   .card {
@@ -135,38 +108,6 @@ const { summary, detail } = Astro.props;
     flex-wrap: wrap;
     align-items: center;
     gap: 10px;
-  }
-
-  .flavor-pill-wrapper {
-    display: flex;
-    align-items: center;
-    gap: 0;
-    border: 1px solid var(--btn-border);
-    border-radius: 14px;
-    background: rgba(255, 255, 255, 0.02);
-    transition: border-color 0.2s;
-  }
-
-  .flavor-pill-wrapper:hover {
-    border-color: var(--muted);
-  }
-
-  .pill {
-    color: var(--body);
-    padding: 4px 8px 4px 14px;
-    font-size: 13px;
-    font-weight: 500;
-  }
-
-  .delete-flavor-btn {
-    color: var(--faint);
-    padding: 4px 10px 4px 4px;
-    font-size: 10px;
-    transition: color 0.2s;
-  }
-
-  .delete-flavor-btn:hover {
-    color: #f85149;
   }
 
   .steps {

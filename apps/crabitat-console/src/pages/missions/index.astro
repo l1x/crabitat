@@ -1,0 +1,199 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import { listMissions } from "../../lib/api-client";
+import type { Mission } from "../../lib/types";
+
+let missions: Mission[] = [];
+let error = "";
+
+try {
+  missions = await listMissions();
+} catch (e) {
+  error = e instanceof Error ? e.message : String(e);
+}
+
+function timeAgo(dateStr: string): string {
+  if (!dateStr) return "";
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const seconds = Math.floor((now - then) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+---
+
+<Layout title="Missions">
+  <div class="page-header">
+    <div>
+      <h1>Missions</h1>
+      <p class="subtitle">History of all agentic runs</p>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  {error && <p class="message error">{error}</p>}
+
+  {missions.length === 0 && !error && (
+    <div class="empty-state">
+      <div class="icon">🚀</div>
+      <h2>No Missions Yet</h2>
+      <p>Missions are created when you launch a workflow against an issue.</p>
+      <a href="/issues" class="primary-btn">Go to Issues</a>
+    </div>
+  )}
+
+  <div class="mission-list">
+    {missions.map((m) => (
+      <a href={`/missions/${m.mission_id}`} class="mission-row">
+        <div class="mission-main">
+          <div class={`status-dot ${m.status}`}></div>
+          <div class="mission-info">
+            <span class="workflow-name">{m.workflow_name}</span>
+            <span class="issue-ref">{m.repo_id} #{m.issue_number}</span>
+          </div>
+        </div>
+        <div class="mission-meta">
+          <span class="time">{timeAgo(m.created_at)}</span>
+          <span class="mission-id">ID: {m.mission_id.slice(0, 8)}</span>
+          <span class="chevron">→</span>
+        </div>
+      </a>
+    ))}
+  </div>
+</Layout>
+
+<style>
+  .page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+
+  h1 {
+    color: var(--heading);
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+  }
+
+  .subtitle {
+    color: var(--muted);
+    font-size: 14px;
+    margin-top: 4px;
+  }
+
+  .divider {
+    height: 1px;
+    background: var(--border-subtle);
+    margin: 24px 0 32px;
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: 80px 40px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    max-width: 600px;
+    margin: 40px auto;
+  }
+
+  .empty-state .icon { font-size: 48px; margin-bottom: 24px; }
+  .empty-state h2 { color: var(--heading); font-size: 24px; margin-bottom: 16px; }
+  .empty-state p { color: var(--muted); font-size: 16px; margin-bottom: 32px; }
+
+  .primary-btn {
+    display: inline-block;
+    background: #d0d0d0;
+    color: #000;
+    text-decoration: none;
+    padding: 12px 32px;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    transition: all 0.2s;
+  }
+
+  .mission-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-width: 1000px;
+  }
+
+  .mission-row {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: all 0.2s;
+  }
+
+  .mission-row:hover {
+    border-color: var(--muted);
+    background: rgba(255, 255, 255, 0.02);
+    transform: translateX(4px);
+  }
+
+  .mission-main {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+
+  .status-dot.pending { background: #c5a059; box-shadow: 0 0 8px rgba(197, 160, 89, 0.4); }
+  .status-dot.running { background: #388bfd; box-shadow: 0 0 8px rgba(56, 139, 253, 0.4); }
+  .status-dot.completed { background: #3fb950; box-shadow: 0 0 8px rgba(63, 185, 80, 0.4); }
+
+  .mission-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .workflow-name {
+    color: var(--heading);
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .issue-ref {
+    color: var(--muted);
+    font-size: 13px;
+    font-family: monospace;
+  }
+
+  .mission-meta {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .time { font-weight: 500; }
+  .mission-id { font-family: monospace; opacity: 0.6; }
+  .chevron { font-size: 18px; opacity: 0.4; }
+
+  .message.error {
+    background: rgba(238, 85, 85, 0.1);
+    color: #f85149;
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin-bottom: 24px;
+  }
+</style>

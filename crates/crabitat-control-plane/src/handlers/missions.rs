@@ -11,6 +11,16 @@ use crate::mission_service::MissionService;
 use crate::models::missions::{CreateMissionRequest, Mission};
 use crate::workflow_registry::WorkflowRegistry;
 
+pub async fn list_missions(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<Mission>>, (StatusCode, Json<Value>)> {
+    let conn = state.db.lock().unwrap();
+    match db::list_all(&conn) {
+        Ok(missions) => Ok(Json(missions)),
+        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e})))),
+    }
+}
+
 pub async fn create_mission(
     State(state): State<AppState>,
     Json(req): Json<CreateMissionRequest>,

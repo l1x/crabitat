@@ -1,6 +1,7 @@
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
+use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::AppState;
@@ -129,6 +130,49 @@ pub async fn delete_flavor(
         )),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e})))),
     }
+}
+
+pub async fn update_flavor(
+    State(state): State<AppState>,
+    Path((_workflow_name, flavor_id)): Path<(String, String)>,
+    Json(body): Json<CreateFlavorRequest>,
+) -> Result<StatusCode, (StatusCode, Json<Value>)> {
+    let conn = state.db.lock().unwrap();
+    match wf_db::update_flavor(&conn, &flavor_id, &body.name, &body.prompt_paths) {
+        Ok(_) => Ok(StatusCode::NO_CONTENT),
+        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e})))),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct PromptContentRequest {
+    pub paths: Vec<String>,
+}
+
+pub async fn get_prompts_content(
+    State(state): State<AppState>,
+    Json(body): Json<PromptContentRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    tracing::info!("fetching prompt content for paths: {:?}", body.paths);
+    let conn = state.db.lock().unwrap();
+    let registry = get_registry(&conn)?;
+
+    let mut combined = String::new();
+    for path in &body.paths {
+        match registry.read_prompt(path) {
+            Ok(content) => {
+                combined.push_str(&format!("--- {} ---\n", path));
+                combined.push_str(&content);
+                combined.push_str("\n\n");
+            }
+            Err(e) => {
+                tracing::error!("failed to read prompt {}: {}", path, e);
+                combined.push_str(&format!("--- ERROR READING {} ---\n{}\n\n", path, e));
+            }
+        }
+    }
+
+    Ok(Json(json!({ "content": combined })))
 }
 
 pub async fn list_prompt_files(

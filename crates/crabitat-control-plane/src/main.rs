@@ -67,13 +67,21 @@ async fn main() {
         )
         .route(
             "/v1/workflows/{name}/flavors/{flavor_id}",
-            delete(handlers::workflows::delete_flavor),
+            delete(handlers::workflows::delete_flavor)
+                .patch(handlers::workflows::update_flavor),
         )
         .route(
             "/v1/prompts/files",
             get(handlers::workflows::list_prompt_files),
         )
-        .route("/v1/missions", post(handlers::missions::create_mission))
+        .route(
+            "/v1/prompts/content",
+            post(handlers::workflows::get_prompts_content),
+        )
+        .route(
+            "/v1/missions",
+            post(handlers::missions::create_mission).get(handlers::missions::list_missions),
+        )
         .route(
             "/v1/missions/{mission_id}",
             get(handlers::missions::get_mission),
