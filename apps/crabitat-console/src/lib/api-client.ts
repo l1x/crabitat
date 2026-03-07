@@ -147,3 +147,9 @@ export async function listPromptFiles(): Promise<string[]> {
   if (!res.ok) throw new Error(`Failed to list prompt files: ${res.status}`);
   return res.json();
 }
+
+export async function listDirs(query: string): Promise<string[]> {
+  const res = await fetch(`${API_BASE}/v1/system/dirs?q=${encodeURIComponent(query)}`);
+  if (!res.ok) throw new Error(`Failed to list directories: ${res.status}`);
+  return res.json();
+}

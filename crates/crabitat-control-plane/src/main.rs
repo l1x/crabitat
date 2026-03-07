@@ -79,6 +79,7 @@ async fn main() {
             get(handlers::settings::get_setting).post(handlers::settings::update_setting),
         )
         .route("/v1/system/status", get(handlers::system::get_status))
+        .route("/v1/system/dirs", get(handlers::system::list_dirs))
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state);

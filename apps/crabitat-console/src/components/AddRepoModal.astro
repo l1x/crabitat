@@ -5,13 +5,17 @@
 
 <dialog id="add-repo-modal">
   <div class="modal-content">
-    <h2>Add Repository</h2>
+    <div class="modal-header">
+      <h2>Add Repository</h2>
+      <button class="close-x" id="close-modal-x">✕</button>
+    </div>
     <div class="divider"></div>
-    <form method="POST" action="/api/repos/create">
+    <form id="add-repo-form">
       <input type="hidden" id="hidden-owner" name="owner" />
       <input type="hidden" id="hidden-name" name="name" />
+      
       <div class="field">
-        <label for="repo-search">REPO</label>
+        <label for="repo-search">GITHUB REPOSITORY</label>
         <div class="autocomplete-wrapper">
           <input
             type="text"
@@ -23,100 +27,182 @@
           <ul id="repo-suggestions" class="suggestions"></ul>
         </div>
       </div>
+
       <div class="field">
-        <label for="local_path">LOCAL PATH</label>
-        <input
-          type="text"
-          id="local_path"
-          name="local_path"
-          required
-          placeholder="/Users/dev/code/my-repo"
-        />
+        <label for="local_path">LOCAL FILESYSTEM PATH</label>
+        <div class="autocomplete-wrapper">
+          <input
+            type="text"
+            id="local_path"
+            name="local_path"
+            required
+            placeholder="/Users/dev/code/my-repo"
+            autocomplete="off"
+          />
+          <ul id="path-suggestions" class="suggestions"></ul>
+        </div>
       </div>
+
       <div class="actions">
-        <button type="button" class="cancel" id="close-modal">Cancel</button>
-        <button type="submit" class="submit">Add Repo</button>
+        <button type="button" class="cancel" id="close-modal-btn">Cancel</button>
+        <button type="submit" class="submit" id="submit-repo">Add Repository</button>
       </div>
     </form>
   </div>
 </dialog>
 
 <script>
-  const openBtn = document.getElementById("open-modal")!;
-  const closeBtn = document.getElementById("close-modal")!;
+  import { listDirs, searchGithubRepos } from "../lib/api-client";
+
   const dialog = document.getElementById("add-repo-modal") as HTMLDialogElement;
+  const openBtn = document.getElementById("open-modal")!;
+  const closeX = document.getElementById("close-modal-x")!;
+  const closeBtn = document.getElementById("close-modal-btn")!;
+  const form = document.getElementById("add-repo-form") as HTMLFormElement;
+  
   const searchInput = document.getElementById("repo-search") as HTMLInputElement;
-  const suggestions = document.getElementById("repo-suggestions")!;
+  const repoSuggestions = document.getElementById("repo-suggestions")!;
   const hiddenOwner = document.getElementById("hidden-owner") as HTMLInputElement;
   const hiddenName = document.getElementById("hidden-name") as HTMLInputElement;
 
+  const pathInput = document.getElementById("local_path") as HTMLInputElement;
+  const pathSuggestions = document.getElementById("path-suggestions")!;
+
   openBtn.addEventListener("click", () => dialog.showModal());
-  closeBtn.addEventListener("click", () => dialog.close());
+  
+  const close = () => {
+    dialog.close();
+    form.reset();
+    repoSuggestions.innerHTML = "";
+    pathSuggestions.innerHTML = "";
+  };
+
+  closeX.addEventListener("click", close);
+  closeBtn.addEventListener("click", close);
   dialog.addEventListener("click", (e) => {
-    if (e.target === dialog) dialog.close();
+    if (e.target === dialog) close();
   });
 
-  let debounceTimer: ReturnType<typeof setTimeout>;
+  let repoDebounce: ReturnType<typeof setTimeout>;
+  let pathDebounce: ReturnType<typeof setTimeout>;
 
+  // Github Repo Search
   searchInput.addEventListener("input", () => {
     const q = searchInput.value.trim();
-    // Clear hidden fields when user edits
     hiddenOwner.value = "";
     hiddenName.value = "";
 
-    clearTimeout(debounceTimer);
+    clearTimeout(repoDebounce);
     if (q.length < 2) {
-      suggestions.innerHTML = "";
+      repoSuggestions.innerHTML = "";
       return;
     }
 
-    debounceTimer = setTimeout(async () => {
+    repoDebounce = setTimeout(async () => {
       try {
-        const res = await fetch(`http://localhost:3001/v1/github/repos?q=${encodeURIComponent(q)}`);
-        if (!res.ok) return;
-        const repos: { nameWithOwner: string }[] = await res.json();
-        suggestions.innerHTML = "";
-        for (const repo of repos) {
+        const repos = await searchGithubRepos(q);
+        repoSuggestions.innerHTML = "";
+        repos.forEach(repo => {
           const li = document.createElement("li");
           li.textContent = repo.nameWithOwner;
-          li.addEventListener("click", () => selectRepo(repo.nameWithOwner));
-          suggestions.appendChild(li);
-        }
-      } catch {
-        // Silently ignore search errors
-      }
-    }, 250);
+          li.addEventListener("click", () => {
+            searchInput.value = repo.nameWithOwner;
+            const [owner, name] = repo.nameWithOwner.split("/");
+            hiddenOwner.value = owner;
+            hiddenName.value = name;
+            repoSuggestions.innerHTML = "";
+          });
+          repoSuggestions.appendChild(li);
+        });
+      } catch {}
+    }, 300);
   });
 
-  function selectRepo(nameWithOwner: string) {
-    searchInput.value = nameWithOwner;
-    suggestions.innerHTML = "";
-    const [owner, name] = nameWithOwner.split("/");
-    hiddenOwner.value = owner;
-    hiddenName.value = name;
-  }
+  // Local Path Search
+  pathInput.addEventListener("input", () => {
+    const q = pathInput.value.trim();
+    clearTimeout(pathDebounce);
+    
+    if (q.length < 1) {
+      pathSuggestions.innerHTML = "";
+      return;
+    }
 
-  // Close suggestions when clicking outside
+    pathDebounce = setTimeout(async () => {
+      try {
+        const dirs = await listDirs(q);
+        pathSuggestions.innerHTML = "";
+        dirs.forEach(dir => {
+          const li = document.createElement("li");
+          li.textContent = dir;
+          li.addEventListener("click", () => {
+            pathInput.value = dir;
+            pathSuggestions.innerHTML = "";
+          });
+          pathSuggestions.appendChild(li);
+        });
+      } catch {}
+    }, 200);
+  });
+
+  // Form Submit
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const owner = hiddenOwner.value;
+    const name = hiddenName.value;
+    const local_path = pathInput.value.trim();
+
+    if (!owner || !name || !local_path) {
+      alert("Please select a repository from the suggestions and provide a local path.");
+      return;
+    }
+
+    const submitBtn = document.getElementById("submit-repo") as HTMLButtonElement;
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Adding...";
+
+    try {
+      const res = await fetch("http://localhost:3001/v1/repos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ owner, name, local_path }),
+      });
+      
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to add repository");
+      }
+
+      window.location.reload();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Add Repository";
+    }
+  });
+
+  // Close suggestions on outside click
   document.addEventListener("click", (e) => {
     if (!(e.target as Element).closest(".autocomplete-wrapper")) {
-      suggestions.innerHTML = "";
+      repoSuggestions.innerHTML = "";
+      pathSuggestions.innerHTML = "";
     }
   });
 </script>
 
 <style>
   .trigger {
-    padding: 8px 20px;
-    border: 1px solid var(--btn-border);
-    border-radius: 6px;
-    color: var(--body);
-    font-size: 12px;
-    font-weight: 500;
-    transition: border-color 0.15s;
+    padding: 10px 24px;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    transition: opacity 0.2s;
   }
 
   .trigger:hover {
-    border-color: var(--muted);
+    opacity: 0.9;
   }
 
   dialog {
@@ -129,40 +215,61 @@
   }
 
   dialog::backdrop {
-    background: rgba(0, 0, 0, 0.7);
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(4px);
   }
 
   .modal-content {
     background: var(--card);
     border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 24px;
-    width: 400px;
+    border-radius: 16px;
+    padding: 32px;
+    width: 500px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+  }
+
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
   }
 
   h2 {
     color: var(--heading);
-    font-size: 16px;
-    font-weight: 600;
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+  }
+
+  .close-x {
+    color: var(--faint);
+    font-size: 18px;
+    padding: 4px;
+    cursor: pointer;
+  }
+
+  .close-x:hover {
+    color: var(--heading);
   }
 
   .divider {
     height: 1px;
     background: var(--border-subtle);
-    margin: 12px 0 16px;
+    margin-bottom: 24px;
   }
 
   .field {
-    margin-bottom: 16px;
+    margin-bottom: 24px;
   }
 
   label {
     display: block;
     color: var(--muted);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.8px;
-    margin-bottom: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
   }
 
   .autocomplete-wrapper {
@@ -171,15 +278,15 @@
 
   input {
     width: 100%;
-    padding: 8px 12px;
+    padding: 12px 16px;
     background: var(--input-bg);
     border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: 8px;
     color: var(--body);
-    font-size: 12px;
+    font-size: 15px;
     font-family: inherit;
     outline: none;
-    transition: border-color 0.15s;
+    transition: border-color 0.2s;
   }
 
   input:focus {
@@ -196,13 +303,14 @@
     left: 0;
     right: 0;
     list-style: none;
-    background: var(--card);
+    background: #1a1a1a;
     border: 1px solid var(--border);
     border-top: none;
-    border-radius: 0 0 4px 4px;
-    max-height: 180px;
+    border-radius: 0 0 8px 8px;
+    max-height: 200px;
     overflow-y: auto;
-    z-index: 20;
+    z-index: 100;
+    box-shadow: 0 10px 20px rgba(0,0,0,0.4);
   }
 
   .suggestions:empty {
@@ -210,30 +318,37 @@
   }
 
   .suggestions :global(li) {
-    padding: 6px 12px;
-    font-size: 12px;
-    color: var(--heading);
+    padding: 10px 16px;
+    font-size: 14px;
+    font-family: monospace;
+    color: var(--body);
     cursor: pointer;
-    transition: background 0.1s;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .suggestions :global(li:last-child) {
+    border-bottom: none;
   }
 
   .suggestions :global(li:hover) {
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--heading);
   }
 
   .actions {
     display: flex;
     justify-content: flex-end;
-    gap: 8px;
-    margin-top: 20px;
+    gap: 12px;
+    margin-top: 32px;
   }
 
   .cancel,
   .submit {
-    padding: 8px 16px;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 500;
+    padding: 10px 24px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    transition: all 0.2s;
   }
 
   .cancel {
@@ -241,16 +356,21 @@
   }
 
   .cancel:hover {
-    color: var(--body);
+    color: var(--heading);
+    background: rgba(255, 255, 255, 0.05);
   }
 
   .submit {
-    border: 1px solid var(--btn-border);
-    color: var(--body);
-    transition: border-color 0.15s;
+    background: var(--accent);
+    color: #fff;
   }
 
   .submit:hover {
-    border-color: var(--muted);
+    opacity: 0.9;
+  }
+
+  .submit:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 </style>
