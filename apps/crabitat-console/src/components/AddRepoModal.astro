@@ -193,16 +193,18 @@
 <style>
   .trigger {
     padding: 10px 24px;
-    background: var(--accent);
-    color: #fff;
+    background: var(--btn-bg);
+    border: 1px solid var(--btn-border);
+    color: var(--heading);
     border-radius: 8px;
     font-size: 14px;
     font-weight: 600;
-    transition: opacity 0.2s;
+    transition: all 0.2s;
   }
 
   .trigger:hover {
-    opacity: 0.9;
+    background: #222;
+    border-color: var(--muted);
   }
 
   dialog {
@@ -290,7 +292,7 @@
   }
 
   input:focus {
-    border-color: var(--accent);
+    border-color: var(--muted);
   }
 
   input::placeholder {
@@ -361,12 +363,14 @@
   }
 
   .submit {
-    background: var(--accent);
-    color: #fff;
+    background: #d0d0d0;
+    color: #000000;
+    border: 1px solid #d0d0d0;
   }
 
   .submit:hover {
-    opacity: 0.9;
+    background: #ffffff;
+    border-color: #ffffff;
   }
 
   .submit:disabled {

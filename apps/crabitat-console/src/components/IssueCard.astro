@@ -227,7 +227,7 @@ function getPreview(text: string | null): string {
     font-weight: 600;
     color: var(--heading);
     padding: 8px 24px;
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--btn-bg);
     border: 1px solid var(--btn-border);
     border-radius: 6px;
     transition: all 0.2s;
@@ -235,8 +235,8 @@ function getPreview(text: string | null): string {
   }
 
   .launch-btn:hover {
-    border-color: var(--accent);
-    background: rgba(212, 160, 84, 0.1);
+    border-color: var(--muted);
+    background: #222;
   }
 
   .details {

@@ -126,15 +126,15 @@ const { repo } = Astro.props;
     font-weight: 600;
     color: var(--heading);
     padding: 8px 20px;
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--btn-bg);
     border: 1px solid var(--btn-border);
     border-radius: 6px;
     transition: all 0.2s;
   }
 
   .issues-btn:hover {
-    border-color: var(--accent);
-    background: rgba(212, 160, 84, 0.1);
+    border-color: var(--muted);
+    background: #222;
   }
 
   .delete-btn {

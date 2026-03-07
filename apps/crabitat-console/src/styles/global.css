@@ -7,10 +7,11 @@
   --heading: #ffffff;
   --body: #b0b0b0;
   --muted: #777777;
-  --faint: #555555;
-  --accent: #c5a059;
-  --btn-border: #3a3a3a;
-  --input-bg: #141414;
+  --faint: #444444;
+  --accent: #ffffff; /* Monochrome accent */
+  --btn-bg: #1a1a1a;
+  --btn-border: #333333;
+  --input-bg: #0a0a0a;
   --font-size-base: 16px;
 }
 
