@@ -94,7 +94,10 @@ pub fn update_flavor(
     )
     .map_err(|e| {
         if e.to_string().contains("UNIQUE constraint failed") {
-            format!("A flavor named '{}' already exists for this workflow.", name)
+            format!(
+                "A flavor named '{}' already exists for this workflow.",
+                name
+            )
         } else {
             e.to_string()
         }

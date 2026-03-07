@@ -1,8 +1,8 @@
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use serde_json::{Value, json};
 use serde::Deserialize;
+use serde_json::{Value, json};
 
 use crate::AppState;
 use crate::db::tasks as db;
@@ -16,7 +16,10 @@ pub async fn get_next_task(
             "task": task,
             "local_path": path
         }))),
-        Ok(None) => Err((StatusCode::NOT_FOUND, Json(json!({"error": "no queued tasks"})))),
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "no queued tasks"})),
+        )),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e})))),
     }
 }

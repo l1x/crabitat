@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::process::Command;
 use std::time::Duration;
 use tokio::time::sleep;
-use tracing::{info, error, debug, warn};
+use tracing::{debug, error, info, warn};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "The Crabitat Worker", long_about = None)]
@@ -43,8 +43,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
 
-    info!("Crab worker started. API: {}, agent: {}, interval: {}s", 
-          args.api_url, args.agent, args.interval);
+    info!(
+        "Crab worker started. API: {}, agent: {}, interval: {}s",
+        args.api_url, args.agent, args.interval
+    );
 
     let client = reqwest::Client::new();
 
@@ -63,29 +65,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-async fn poll_and_execute(args: &Args, client: &reqwest::Client) -> Result<bool, Box<dyn std::error::Error>> {
+async fn poll_and_execute(
+    args: &Args,
+    client: &reqwest::Client,
+) -> Result<bool, Box<dyn std::error::Error>> {
     // 1. Fetch next task
-    let res = client.get(format!("{}/v1/tasks/next", args.api_url)).send().await?;
-    
+    let res = client
+        .get(format!("{}/v1/tasks/next", args.api_url))
+        .send()
+        .await?;
+
     if res.status() == reqwest::StatusCode::NOT_FOUND {
         return Ok(false);
     }
 
     let task_data: TaskResponse = res.json().await?;
     let task_id = &task_data.task.task_id;
-    
+
     info!("Found task {} for repo {}", task_id, task_data.local_path);
 
     // 2. Mark as running
-    client.post(format!("{}/v1/tasks/{}/status", args.api_url, task_id))
-        .json(&UpdateStatusRequest { status: "running".into() })
-        .send().await?;
+    client
+        .post(format!("{}/v1/tasks/{}/status", args.api_url, task_id))
+        .json(&UpdateStatusRequest {
+            status: "running".into(),
+        })
+        .send()
+        .await?;
 
     // 3. Execute Agent
     info!("Spawning agent: {} in {}", args.agent, task_data.local_path);
-    
+
     let mut child = Command::new(&args.agent);
-    
+
     // Configure arguments based on the agent's expected interface
     match args.agent.as_str() {
         "claude" => {
@@ -125,9 +137,13 @@ async fn poll_and_execute(args: &Args, client: &reqwest::Client) -> Result<bool,
         }
     };
 
-    client.post(format!("{}/v1/tasks/{}/status", args.api_url, task_id))
-        .json(&UpdateStatusRequest { status: final_status.into() })
-        .send().await?;
+    client
+        .post(format!("{}/v1/tasks/{}/status", args.api_url, task_id))
+        .json(&UpdateStatusRequest {
+            status: final_status.into(),
+        })
+        .send()
+        .await?;
 
     Ok(true)
 }
