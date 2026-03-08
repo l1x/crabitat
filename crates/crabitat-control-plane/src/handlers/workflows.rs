@@ -161,7 +161,6 @@ pub async fn get_prompts_content(
     for path in &body.paths {
         match registry.read_prompt(path) {
             Ok(content) => {
-                combined.push_str(&format!("--- {} ---\n", path));
                 combined.push_str(&content);
                 combined.push_str("\n\n");
             }
