@@ -17,8 +17,9 @@ try {
 ---
 
 <div class="flavor-pill-wrapper">
-  <button class="pill-btn detail-trigger" data-flavor-id={flavor.flavor_id} title="View/Edit flavor">
-    {flavor.name}
+  <button class="pill-btn detail-trigger" data-flavor-id={flavor.flavor_id} title={flavor.prompt_paths.join('\n')}>
+    <span class="flavor-name">{flavor.name}</span>
+    <span class="flavor-count">{flavor.prompt_paths.length}</span>
   </button>
   <button class="delete-flavor-btn" data-flavor-id={flavor.flavor_id} title="Delete flavor">✕</button>
 </div>
@@ -225,6 +226,23 @@ try {
     background: transparent;
     border: none;
     cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .flavor-count {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--faint);
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    border: 1px solid var(--border-subtle);
+  }
+
+  .pill-btn:hover .flavor-count {
+    color: var(--muted);
+    background: rgba(255, 255, 255, 0.1);
   }
 
   .delete-flavor-btn {
