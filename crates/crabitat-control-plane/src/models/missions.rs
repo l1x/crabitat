@@ -9,6 +9,7 @@ pub struct Mission {
     pub flavor_id: Option<String>,
     pub status: String,
     pub created_at: String,
+    pub branch: String,
 }
 
 #[derive(Debug, Deserialize)]

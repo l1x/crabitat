@@ -6,12 +6,13 @@ pub fn insert(
     conn: &Connection,
     owner: &str,
     name: &str,
-    local_path: &str,
+    local_path: Option<&str>,
+    repo_url: Option<&str>,
 ) -> Result<Repo, String> {
     let repo_id = uuid::Uuid::new_v4().to_string();
     conn.execute(
-        "INSERT INTO repos (repo_id, owner, name, local_path) VALUES (?1, ?2, ?3, ?4)",
-        params![repo_id, owner, name, local_path],
+        "INSERT INTO repos (repo_id, owner, name, local_path, repo_url) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![repo_id, owner, name, local_path, repo_url],
     )
     .map_err(|e| format!("repo already exists: {e}"))?;
 
@@ -20,7 +21,7 @@ pub fn insert(
 
 pub fn list(conn: &Connection) -> Result<Vec<Repo>, String> {
     let mut stmt = conn
-        .prepare("SELECT repo_id, owner, name, local_path, created_at FROM repos ORDER BY created_at DESC")
+        .prepare("SELECT repo_id, owner, name, local_path, created_at, repo_url FROM repos ORDER BY created_at DESC")
         .map_err(|e| e.to_string())?;
 
     let repos = stmt
@@ -31,6 +32,7 @@ pub fn list(conn: &Connection) -> Result<Vec<Repo>, String> {
                 name: row.get(2)?,
                 local_path: row.get(3)?,
                 created_at: row.get(4)?,
+                repo_url: row.get(5)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -43,7 +45,7 @@ pub fn list(conn: &Connection) -> Result<Vec<Repo>, String> {
 pub fn get_by_id(conn: &Connection, repo_id: &str) -> Result<Option<Repo>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT repo_id, owner, name, local_path, created_at FROM repos WHERE repo_id = ?1",
+            "SELECT repo_id, owner, name, local_path, created_at, repo_url FROM repos WHERE repo_id = ?1",
         )
         .map_err(|e| e.to_string())?;
 
@@ -55,6 +57,7 @@ pub fn get_by_id(conn: &Connection, repo_id: &str) -> Result<Option<Repo>, Strin
                 name: row.get(2)?,
                 local_path: row.get(3)?,
                 created_at: row.get(4)?,
+                repo_url: row.get(5)?,
             })
         })
         .map_err(|e| e.to_string())?;

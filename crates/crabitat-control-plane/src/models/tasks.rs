@@ -12,13 +12,36 @@ pub struct Task {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[allow(dead_code)]
+pub struct GitInfo {
+    pub repo_url: String,
+    pub branch: String,
+    pub local_path: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TaskWithGit {
+    pub task: Task,
+    pub git: GitInfo,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Run {
     pub run_id: String,
     pub task_id: String,
     pub status: String,
     pub logs: Option<String>,
     pub summary: Option<String>,
+    pub duration_ms: Option<i64>,
+    pub tokens_used: Option<i64>,
     pub started_at: String,
     pub finished_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateRunRequest {
+    pub status: String,
+    pub logs: Option<String>,
+    pub summary: Option<String>,
+    pub duration_ms: Option<i64>,
+    pub tokens_used: Option<i64>,
 }

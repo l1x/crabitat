@@ -21,7 +21,8 @@ pub(crate) fn migrate(conn: &Connection) {
             repo_id    TEXT PRIMARY KEY,
             owner      TEXT NOT NULL,
             name       TEXT NOT NULL,
-            local_path TEXT NOT NULL,
+            local_path TEXT,
+            repo_url   TEXT,
             created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
             UNIQUE(owner, name)
         );
@@ -50,6 +51,14 @@ pub(crate) fn migrate(conn: &Connection) {
             value TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS environment_paths (
+            environment   TEXT NOT NULL,
+            resource_type TEXT NOT NULL,
+            resource_name TEXT NOT NULL,
+            path          TEXT NOT NULL,
+            PRIMARY KEY (environment, resource_type, resource_name)
+        );
+
         -- Execution Layer (FR-4)
 
         CREATE TABLE IF NOT EXISTS missions (
@@ -59,6 +68,7 @@ pub(crate) fn migrate(conn: &Connection) {
             workflow_name TEXT NOT NULL,
             flavor_id     TEXT REFERENCES workflow_flavors(flavor_id) ON DELETE SET NULL,
             status        TEXT NOT NULL DEFAULT 'pending',
+            branch        TEXT,
             created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
             FOREIGN KEY (repo_id, issue_number) REFERENCES github_issues_cache(repo_id, number)
         );
@@ -79,6 +89,8 @@ pub(crate) fn migrate(conn: &Connection) {
             status      TEXT NOT NULL,
             logs        TEXT,
             summary     TEXT,
+            duration_ms INTEGER,
+            tokens_used INTEGER,
             started_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
             finished_at TEXT
         );",

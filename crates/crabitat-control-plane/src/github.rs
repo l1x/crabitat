@@ -23,6 +23,8 @@ pub async fn check_status() -> SystemStatus {
         gh_auth_status: false,
         gh_version: None,
         gh_user: None,
+        gh_cli: false,
+        gh_auth: false,
     };
 
     // Check installation and version
@@ -35,6 +37,7 @@ pub async fn check_status() -> SystemStatus {
         && output.status.success()
     {
         status.gh_installed = true;
+        status.gh_cli = true;
         let stdout = String::from_utf8_lossy(&output.stdout);
         status.gh_version = stdout.lines().next().map(|l| l.to_string());
     }
@@ -57,6 +60,7 @@ pub async fn check_status() -> SystemStatus {
 
         if combined.contains("Logged in to github.com") {
             status.gh_auth_status = true;
+            status.gh_auth = true;
             // Extract user: "Logged in to github.com as USER"
             if let Some(user_line) = combined
                 .lines()

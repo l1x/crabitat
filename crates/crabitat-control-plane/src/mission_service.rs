@@ -8,6 +8,15 @@ pub struct MissionService {
     registry: WorkflowRegistry,
 }
 
+pub struct AssemblePromptRequest<'a> {
+    pub workflow_name: &'a str,
+    pub step_id: &'a str,
+    pub flavor_id: Option<&'a str>,
+    pub repo_id: &'a str,
+    pub issue_number: i64,
+    pub context: Option<&'a str>,
+}
+
 impl MissionService {
     pub fn new(conn: &Connection) -> Result<Self, String> {
         let prompts_root = settings_db::get(conn, "prompts_root")
@@ -23,29 +32,31 @@ impl MissionService {
     pub fn assemble_prompt(
         &self,
         conn: &Connection,
-        workflow_name: &str,
-        step_id: &str,
-        flavor_id: Option<&str>,
-        repo_id: &str,
-        issue_number: i64,
+        req: AssemblePromptRequest,
     ) -> Result<String, String> {
         // 1. Get Base Layer (Workflow Step)
         let wf = self
             .registry
-            .get_workflow(workflow_name)
-            .ok_or_else(|| format!("workflow not found: {}", workflow_name))?;
+            .get_workflow(req.workflow_name)
+            .ok_or_else(|| format!("workflow not found: {}", req.workflow_name))?;
 
-        let step =
-            wf.steps.iter().find(|s| s.id == step_id).ok_or_else(|| {
-                format!("step {} not found in workflow {}", step_id, workflow_name)
+        let step = wf
+            .steps
+            .iter()
+            .find(|s| s.id == req.step_id)
+            .ok_or_else(|| {
+                format!(
+                    "step {} not found in workflow {}",
+                    req.step_id, req.workflow_name
+                )
             })?;
 
         let base_layer = self.registry.read_prompt(&step.prompt_file)?;
 
         // 2. Get Flavor Layer
         let mut flavor_layer = String::new();
-        if let Some(fid) = flavor_id {
-            let flavors = wf_db::list_flavors_for_workflow(conn, workflow_name)?;
+        if let Some(fid) = req.flavor_id {
+            let flavors = wf_db::list_flavors_for_workflow(conn, req.workflow_name)?;
             let flavor = flavors
                 .iter()
                 .find(|f| f.flavor_id == fid)
@@ -59,20 +70,43 @@ impl MissionService {
         }
 
         // 3. Get Issue Layer
-        let issue = issues_db::get_cached_issue(conn, repo_id, issue_number)
+        let issue = issues_db::get_cached_issue(conn, req.repo_id, req.issue_number)
             .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("issue #{} not found in cache", issue_number))?;
+            .ok_or_else(|| format!("issue #{} not found in cache", req.issue_number))?;
 
-        let issue_body = issue.body.unwrap_or_default();
+        let issue_body = issue.body.clone().unwrap_or_default();
         let issue_layer = format!(
             "<issue>\n  <title>{}</title>\n  <body>\n{}\n  </body>\n</issue>",
             issue.title, issue_body
         );
 
-        // 4. Final Assembly
+        // 4. Resolve Template Variables
+        // Note: {{worktree_path}} is handled by the Crab worker (late-binding)
+        let mission_content = format!("{}\n\n{}", issue.title, issue_body);
+
+        let mut resolved_base = base_layer.replace("{{mission}}", &mission_content);
+        let mut resolved_flavor = flavor_layer.replace("{{mission}}", &mission_content);
+
+        // Handle {{context}} cleanup
+        let ctx_val = req.context.unwrap_or("");
+        if ctx_val.is_empty() {
+            resolved_base = resolved_base.replace("{{context}}", "");
+            resolved_flavor = resolved_flavor.replace("{{context}}", "");
+
+            // Clean up the "Context from prior steps" header if it exists
+            resolved_base = resolved_base.replace("## Context from prior steps", "");
+            resolved_flavor = resolved_flavor.replace("## Context from prior steps", "");
+        } else {
+            resolved_base = resolved_base.replace("{{context}}", ctx_val);
+            resolved_flavor = resolved_flavor.replace("{{context}}", ctx_val);
+        }
+
+        // 5. Final Assembly
         let final_prompt = format!(
             "# Instructions\n{}\n\n# Context & Standards\n{}\n\n# Target Issue\n{}",
-            base_layer, flavor_layer, issue_layer
+            resolved_base.trim(),
+            resolved_flavor.trim(),
+            issue_layer
         );
 
         Ok(final_prompt)

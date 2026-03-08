@@ -1,4 +1,4 @@
-use crate::models::tasks::Task;
+use crate::models::tasks::{CreateRunRequest, GitInfo, Run, Task, TaskWithGit};
 use rusqlite::{Connection, params};
 
 pub fn insert_task(
@@ -57,10 +57,11 @@ pub fn list_tasks_for_mission(conn: &Connection, mission_id: &str) -> Result<Vec
     Ok(tasks)
 }
 
-pub fn get_next_queued_task(conn: &Connection) -> Result<Option<(Task, String)>, String> {
-    // Get oldest queued task along with the local_path of the repo it belongs to
+pub fn get_next_queued_task(conn: &Connection) -> Result<Option<TaskWithGit>, String> {
+    // Get oldest queued task along with Git info
     let mut stmt = conn.prepare(
-        "SELECT t.task_id, t.mission_id, t.step_id, t.step_order, t.assembled_prompt, t.status, t.created_at, r.local_path
+        "SELECT t.task_id, t.mission_id, t.step_id, t.step_order, t.assembled_prompt, t.status, t.created_at, 
+                r.repo_url, m.branch, r.local_path
          FROM tasks t
          JOIN missions m ON t.mission_id = m.mission_id
          JOIN repos r ON m.repo_id = r.repo_id
@@ -70,8 +71,8 @@ pub fn get_next_queued_task(conn: &Connection) -> Result<Option<(Task, String)>,
     ).map_err(|e| e.to_string())?;
 
     let result = stmt.query_row([], |row| {
-        Ok((
-            Task {
+        Ok(TaskWithGit {
+            task: Task {
                 task_id: row.get(0)?,
                 mission_id: row.get(1)?,
                 step_id: row.get(2)?,
@@ -80,8 +81,12 @@ pub fn get_next_queued_task(conn: &Connection) -> Result<Option<(Task, String)>,
                 status: row.get(5)?,
                 created_at: row.get(6)?,
             },
-            row.get(7)?,
-        ))
+            git: GitInfo {
+                repo_url: row.get(7)?,
+                branch: row.get(8)?,
+                local_path: row.get(9)?,
+            },
+        })
     });
 
     match result {
@@ -98,4 +103,35 @@ pub fn update_task_status(conn: &Connection, task_id: &str, status: &str) -> Res
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+pub fn insert_run(conn: &Connection, task_id: &str, req: &CreateRunRequest) -> Result<Run, String> {
+    let run_id = uuid::Uuid::new_v4().to_string();
+
+    conn.execute(
+        "INSERT INTO runs (run_id, task_id, status, logs, summary, duration_ms, tokens_used, finished_at) 
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))",
+        params![
+            run_id,
+            task_id,
+            req.status,
+            req.logs,
+            req.summary,
+            req.duration_ms,
+            req.tokens_used
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(Run {
+        run_id,
+        task_id: task_id.to_string(),
+        status: req.status.clone(),
+        logs: req.logs.clone(),
+        summary: req.summary.clone(),
+        duration_ms: req.duration_ms,
+        tokens_used: req.tokens_used,
+        started_at: "".into(),
+        finished_at: Some("".into()),
+    })
 }

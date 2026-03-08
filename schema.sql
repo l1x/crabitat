@@ -2,7 +2,8 @@ CREATE TABLE IF NOT EXISTS repos (
     repo_id    TEXT PRIMARY KEY,
     owner      TEXT NOT NULL,
     name       TEXT NOT NULL,
-    local_path TEXT NOT NULL,
+    local_path TEXT,
+    repo_url   TEXT,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     UNIQUE(owner, name)
 );
@@ -31,6 +32,14 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS environment_paths (
+    environment   TEXT NOT NULL,
+    resource_type TEXT NOT NULL,
+    resource_name TEXT NOT NULL,
+    path          TEXT NOT NULL,
+    PRIMARY KEY (environment, resource_type, resource_name)
+);
+
 -- Execution Layer (FR-4)
 
 CREATE TABLE IF NOT EXISTS missions (
@@ -39,7 +48,8 @@ CREATE TABLE IF NOT EXISTS missions (
     issue_number  INTEGER NOT NULL,
     workflow_name TEXT NOT NULL,
     flavor_id     TEXT REFERENCES workflow_flavors(flavor_id) ON DELETE SET NULL,
-    status        TEXT NOT NULL DEFAULT 'pending', -- pending, running, completed, failed
+    status        TEXT NOT NULL DEFAULT 'pending',
+    branch        TEXT,
     created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     FOREIGN KEY (repo_id, issue_number) REFERENCES github_issues_cache(repo_id, number)
 );
@@ -50,16 +60,18 @@ CREATE TABLE IF NOT EXISTS tasks (
     step_id          TEXT NOT NULL,
     step_order       INTEGER NOT NULL,
     assembled_prompt TEXT NOT NULL,
-    status           TEXT NOT NULL DEFAULT 'queued', -- queued, running, completed, failed
+    status           TEXT NOT NULL DEFAULT 'queued',
     created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS runs (
     run_id      TEXT PRIMARY KEY,
     task_id     TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
-    status      TEXT NOT NULL, -- running, completed, failed
+    status      TEXT NOT NULL,
     logs        TEXT,
     summary     TEXT,
+    duration_ms INTEGER,
+    tokens_used INTEGER,
     started_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     finished_at TEXT
 );

@@ -1,18 +1,23 @@
 use crate::models::missions::{CreateMissionRequest, Mission};
 use rusqlite::{Connection, params};
 
-pub fn insert_mission(conn: &Connection, req: &CreateMissionRequest) -> Result<Mission, String> {
+pub fn insert_mission(
+    conn: &Connection,
+    req: &CreateMissionRequest,
+    branch: &str,
+) -> Result<Mission, String> {
     let mission_id = uuid::Uuid::new_v4().to_string();
 
     conn.execute(
-        "INSERT INTO missions (mission_id, repo_id, issue_number, workflow_name, flavor_id) 
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO missions (mission_id, repo_id, issue_number, workflow_name, flavor_id, branch) 
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             mission_id,
             req.repo_id,
             req.issue_number,
             req.workflow_name,
-            req.flavor_id
+            req.flavor_id,
+            branch
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -24,13 +29,14 @@ pub fn insert_mission(conn: &Connection, req: &CreateMissionRequest) -> Result<M
         workflow_name: req.workflow_name.clone(),
         flavor_id: req.flavor_id.clone(),
         status: "pending".to_string(),
-        created_at: "".to_string(), // Filled by query if needed
+        created_at: "".to_string(),
+        branch: branch.to_string(),
     })
 }
 
 pub fn get_mission(conn: &Connection, mission_id: &str) -> Result<Option<Mission>, String> {
     let mut stmt = conn.prepare(
-        "SELECT mission_id, repo_id, issue_number, workflow_name, flavor_id, status, created_at 
+        "SELECT mission_id, repo_id, issue_number, workflow_name, flavor_id, status, created_at, branch 
          FROM missions WHERE mission_id = ?1"
     ).map_err(|e| e.to_string())?;
 
@@ -43,6 +49,7 @@ pub fn get_mission(conn: &Connection, mission_id: &str) -> Result<Option<Mission
             flavor_id: row.get(4)?,
             status: row.get(5)?,
             created_at: row.get(6)?,
+            branch: row.get(7)?,
         })
     });
 
@@ -55,7 +62,7 @@ pub fn get_mission(conn: &Connection, mission_id: &str) -> Result<Option<Mission
 
 pub fn list_all(conn: &Connection) -> Result<Vec<Mission>, String> {
     let mut stmt = conn.prepare(
-        "SELECT mission_id, repo_id, issue_number, workflow_name, flavor_id, status, created_at 
+        "SELECT mission_id, repo_id, issue_number, workflow_name, flavor_id, status, created_at, branch 
          FROM missions ORDER BY created_at DESC"
     ).map_err(|e| e.to_string())?;
 
@@ -69,6 +76,7 @@ pub fn list_all(conn: &Connection) -> Result<Vec<Mission>, String> {
                 flavor_id: row.get(4)?,
                 status: row.get(5)?,
                 created_at: row.get(6)?,
+                branch: row.get(7)?,
             })
         })
         .map_err(|e| e.to_string())?;

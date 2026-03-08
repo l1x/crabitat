@@ -1,4 +1,5 @@
 use crate::models::settings::Setting;
+use crate::models::system::EnvironmentPath;
 use rusqlite::{Connection, Result};
 
 pub fn get(conn: &Connection, key: &str) -> Result<Option<String>> {
@@ -9,6 +10,43 @@ pub fn get(conn: &Connection, key: &str) -> Result<Option<String>> {
     } else {
         Ok(None)
     }
+}
+
+pub fn get_environment_path(
+    conn: &Connection,
+    env: &str,
+    res_type: &str,
+    res_name: &str,
+) -> Result<Option<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT path FROM environment_paths 
+         WHERE environment = ? AND resource_type = ? AND resource_name = ?",
+    )?;
+    let mut rows = stmt.query([env, res_type, res_name])?;
+    if let Some(row) = rows.next()? {
+        Ok(Some(row.get(0)?))
+    } else {
+        Ok(None)
+    }
+}
+
+pub fn list_all_environment_paths(conn: &Connection) -> Result<Vec<EnvironmentPath>> {
+    let mut stmt = conn
+        .prepare("SELECT environment, resource_type, resource_name, path FROM environment_paths")?;
+    let rows = stmt.query_map([], |row| {
+        Ok(EnvironmentPath {
+            environment: row.get(0)?,
+            resource_type: row.get(1)?,
+            resource_name: row.get(2)?,
+            path: row.get(3)?,
+        })
+    })?;
+
+    let mut paths = Vec::new();
+    for path in rows {
+        paths.push(path?);
+    }
+    Ok(paths)
 }
 
 pub fn set(conn: &Connection, key: &str, value: &str) -> Result<()> {

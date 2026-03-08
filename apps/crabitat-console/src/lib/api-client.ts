@@ -7,6 +7,7 @@ import type {
   WorkflowFlavor,
   CreateFlavorRequest,
   Setting,
+  EnvironmentPath,
   SystemStatus,
   Mission,
   Task,
@@ -169,6 +170,12 @@ export async function updateSetting(key: string, value: string): Promise<Setting
 export async function getSystemStatus(): Promise<SystemStatus> {
   const res = await fetch(`${API_BASE}/v1/system/status`);
   if (!res.ok) throw new Error(`Failed to get system status: ${res.status}`);
+  return res.json();
+}
+
+export async function listEnvironmentPaths(): Promise<EnvironmentPath[]> {
+  const res = await fetch(`${API_BASE}/v1/system/env-paths`);
+  if (!res.ok) throw new Error(`Failed to list environment paths: ${res.status}`);
   return res.json();
 }
 

@@ -2,14 +2,16 @@ export interface Repo {
   repo_id: string;
   owner: string;
   name: string;
-  local_path: string;
+  local_path: string | null;
+  repo_url: string | null;
   created_at: string;
 }
 
 export interface CreateRepoRequest {
   owner: string;
   name: string;
-  local_path: string;
+  local_path: string | null;
+  repo_url: string | null;
 }
 
 export interface Issue {
@@ -66,6 +68,13 @@ export interface CreateFlavorRequest {
 export interface Setting {
   key: string;
   value: string;
+}
+
+export interface EnvironmentPath {
+  environment: string;
+  resource_type: string;
+  resource_name: string;
+  path: string;
 }
 
 export interface SystemStatus {

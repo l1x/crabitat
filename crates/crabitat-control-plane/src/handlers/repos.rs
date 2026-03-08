@@ -12,7 +12,13 @@ pub async fn create_repo(
     Json(body): Json<CreateRepoRequest>,
 ) -> Result<(StatusCode, Json<Repo>), (StatusCode, Json<Value>)> {
     let conn = state.db.lock().unwrap();
-    match repos::insert(&conn, &body.owner, &body.name, &body.local_path) {
+    match repos::insert(
+        &conn,
+        &body.owner,
+        &body.name,
+        body.local_path.as_deref(),
+        body.repo_url.as_deref(),
+    ) {
         Ok(repo) => Ok((StatusCode::CREATED, Json(repo))),
         Err(e) => Err((StatusCode::CONFLICT, Json(json!({"error": e})))),
     }

@@ -5,7 +5,8 @@ pub struct Repo {
     pub repo_id: String,
     pub owner: String,
     pub name: String,
-    pub local_path: String,
+    pub local_path: Option<String>,
+    pub repo_url: Option<String>,
     pub created_at: String,
 }
 
@@ -13,5 +14,6 @@ pub struct Repo {
 pub struct CreateRepoRequest {
     pub owner: String,
     pub name: String,
-    pub local_path: String,
+    pub local_path: Option<String>,
+    pub repo_url: Option<String>,
 }

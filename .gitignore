@@ -8,3 +8,4 @@ apps/*/.astro/
 var/
 burrows/
 apps/*/dist/
+burrows/

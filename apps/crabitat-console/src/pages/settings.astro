@@ -1,14 +1,16 @@
 ---
 import Layout from "../layouts/Layout.astro";
-import { listSettings } from "../lib/api-client";
-import type { Setting } from "../lib/types";
+import { listSettings, listEnvironmentPaths } from "../lib/api-client";
+import type { Setting, EnvironmentPath } from "../lib/types";
 
 let settings: Setting[] = [];
+let envPaths: EnvironmentPath[] = [];
 let error = "";
 let success = "";
 
 try {
   settings = await listSettings();
+  envPaths = await listEnvironmentPaths();
 } catch (e) {
   error = e instanceof Error ? e.message : String(e);
 }
@@ -46,6 +48,36 @@ try {
           />
           <button id="save-prompts-root" class="primary-btn">Save</button>
         </div>
+      </div>
+    </div>
+
+    <div class="setting-group">
+      <h3>Environment Paths</h3>
+      <p class="description">
+        Absolute paths for agents and repositories across different environments.
+      </p>
+      
+      <div class="table-container">
+        <table class="env-table">
+          <thead>
+            <tr>
+              <th>Environment</th>
+              <th>Type</th>
+              <th>Resource</th>
+              <th>Path</th>
+            </tr>
+          </thead>
+          <tbody>
+            {envPaths.map(p => (
+              <tr>
+                <td class="pill-cell"><span class={`pill ${p.environment}`}>{p.environment}</span></td>
+                <td class="type-cell">{p.resource_type}</td>
+                <td class="name-cell">{p.resource_name}</td>
+                <td class="path-cell"><code>{p.path}</code></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   </div>
@@ -203,5 +235,58 @@ try {
     background: rgba(63, 185, 80, 0.1);
     color: #3fb950;
     border: 1px solid rgba(63, 185, 80, 0.2);
+  }
+
+  .table-container {
+    overflow-x: auto;
+  }
+
+  .env-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+
+  .env-table th {
+    text-align: left;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .env-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-subtle);
+    color: var(--body);
+  }
+
+  .pill {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+
+  .pill.local {
+    background: rgba(56, 139, 253, 0.15);
+    color: #58a6ff;
+  }
+
+  .pill.remote {
+    background: rgba(163, 113, 247, 0.15);
+    color: #bc8cff;
+  }
+
+  .path-cell code {
+    background: var(--input-bg);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 13px;
   }
 </style>

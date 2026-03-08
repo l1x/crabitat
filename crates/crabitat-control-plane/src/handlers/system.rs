@@ -1,8 +1,12 @@
+use crate::AppState;
+use crate::db::settings as settings_db;
 use crate::github;
 use crate::models::system::SystemStatus;
 use axum::Json;
-use axum::extract::Query;
+use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
 use serde::Deserialize;
+use serde_json::{Value, json};
 use std::fs;
 
 pub async fn get_status() -> Json<SystemStatus> {
@@ -53,4 +57,35 @@ pub async fn list_dirs(Query(params): Query<DirQuery>) -> Json<Vec<String>> {
     }
 
     Json(dirs)
+}
+
+pub async fn get_environment_path(
+    State(state): State<AppState>,
+    Path((env, res_type, res_name)): Path<(String, String, String)>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let conn = state.db.lock().unwrap();
+    match settings_db::get_environment_path(&conn, &env, &res_type, &res_name) {
+        Ok(Some(path)) => Ok(Json(json!({ "path": path }))),
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "path not found"})),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )),
+    }
+}
+
+pub async fn list_environment_paths(
+    State(state): State<AppState>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let conn = state.db.lock().unwrap();
+    match settings_db::list_all_environment_paths(&conn) {
+        Ok(paths) => Ok(Json(json!(paths))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )),
+    }
 }
