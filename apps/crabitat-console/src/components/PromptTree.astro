@@ -1,0 +1,114 @@
+---
+import type { PromptTreeNode } from "../lib/utils";
+
+interface Props {
+  nodes: PromptTreeNode[];
+  selectedPaths?: string[];
+  depth?: number;
+}
+
+const { nodes, selectedPaths = [], depth = 0 } = Astro.props;
+---
+
+<div class="tree-nodes" style={`margin-left: ${depth > 0 ? 12 : 0}px;`}>
+  {nodes.map((node) => (
+    <div class="tree-node">
+      {node.children ? (
+        <details open>
+          <summary class="dir-node">
+            <span class="folder-icon">📁</span>
+            <span class="node-name">{node.name}</span>
+          </summary>
+          <Astro.self nodes={node.children} selectedPaths={selectedPaths} depth={depth + 1} />
+        </details>
+      ) : (
+        <label class="prompt-item">
+          <input 
+            type="checkbox" 
+            name="prompts" 
+            value={node.fullPath} 
+            checked={selectedPaths.includes(node.fullPath || "")} 
+          />
+          <span class="file-icon">📄</span>
+          <span class="file-path">{node.name}</span>
+        </label>
+      )}
+    </div>
+  ))}
+</div>
+
+<style>
+  .tree-nodes {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .tree-node {
+    user-select: none;
+  }
+
+  details {
+    width: 100%;
+  }
+
+  summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+    border-radius: 6px;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 600;
+    transition: background 0.2s;
+    list-style: none;
+  }
+
+  summary::-webkit-details-marker {
+    display: none;
+  }
+
+  summary:hover {
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--heading);
+  }
+
+  .folder-icon {
+    font-size: 12px;
+    opacity: 0.7;
+  }
+
+  .prompt-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: background 0.2s;
+  }
+
+  .prompt-item:hover {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .file-icon {
+    font-size: 12px;
+    opacity: 0.5;
+    margin-left: 2px;
+  }
+
+  .file-path {
+    font-size: 13px;
+    color: var(--body);
+  }
+
+  input[type="checkbox"] {
+    accent-color: var(--muted);
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+  }
+</style>

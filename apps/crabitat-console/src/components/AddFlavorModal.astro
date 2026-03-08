@@ -1,5 +1,7 @@
 ---
 import { listPromptFiles } from "../lib/api-client";
+import { buildPromptTree } from "../lib/utils";
+import PromptTree from "./PromptTree.astro";
 
 interface Props {
   workflowName: string;
@@ -13,6 +15,8 @@ try {
 } catch (e) {
   console.error("Failed to list prompt files", e);
 }
+
+const promptTree = buildPromptTree(promptFiles);
 ---
 
 <button class="add-flavor-trigger" data-workflow={workflowName}>+ flavor</button>
@@ -37,12 +41,7 @@ try {
       <div class="field">
         <label>PROMPT FILES</label>
         <div class="prompt-picker">
-          {promptFiles.map((file) => (
-            <label class="prompt-item">
-              <input type="checkbox" name="prompts" value={file} />
-              <span class="file-path">{file}</span>
-            </label>
-          ))}
+          <PromptTree nodes={promptTree} />
           {promptFiles.length === 0 && <p class="empty-prompts">No .md files found in prompts root.</p>}
         </div>
       </div>
@@ -283,19 +282,7 @@ try {
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-  }
-
-  .prompt-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 16px;
-    cursor: pointer;
-    border-bottom: 1px solid var(--border-subtle);
-  }
-
-  .prompt-item:hover {
-    background: rgba(255, 255, 255, 0.03);
+    padding: 8px 0;
   }
 
   .preview-box {

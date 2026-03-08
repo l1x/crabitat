@@ -1,5 +1,7 @@
 ---
 import { listPromptFiles } from "../lib/api-client";
+import { buildPromptTree } from "../lib/utils";
+import PromptTree from "./PromptTree.astro";
 import type { WorkflowFlavor } from "../lib/types";
 
 interface Props {
@@ -14,14 +16,23 @@ try {
 } catch (e) {
   console.error("Failed to list prompt files", e);
 }
+
+const promptTree = buildPromptTree(promptFiles);
 ---
 
-<div class="flavor-pill-wrapper">
-  <button class="pill-btn detail-trigger" data-flavor-id={flavor.flavor_id} title={flavor.prompt_paths.join('\n')}>
-    <span class="flavor-name">{flavor.name}</span>
-    <span class="flavor-count">{flavor.prompt_paths.length}</span>
-  </button>
-  <button class="delete-flavor-btn" data-flavor-id={flavor.flavor_id} title="Delete flavor">✕</button>
+<div class="flavor-item-container">
+  <div class="flavor-pill-wrapper">
+    <button class="pill-btn detail-trigger" data-flavor-id={flavor.flavor_id}>
+      <span class="flavor-name">{flavor.name}</span>
+      <span class="flavor-count">{flavor.prompt_paths.length}</span>
+    </button>
+    <button class="delete-flavor-btn" data-flavor-id={flavor.flavor_id} title="Delete flavor">✕</button>
+  </div>
+  <ul class="flavor-paths-preview">
+    {flavor.prompt_paths.map(p => (
+      <li>{p}</li>
+    ))}
+  </ul>
 </div>
 
 <dialog class="detail-dialog" id={`detail-modal-${flavor.flavor_id}`}>
@@ -49,14 +60,16 @@ try {
         </ul>
       </div>
 
-      <div class="field">
+      <div class="field preview-field hidden">
         <label>PREVIEW CONTENT</label>
         <div class="preview-box">
-          <div class="preview-text markdown-body">Loading preview...</div>
+          <div class="preview-text markdown-body"></div>
         </div>
       </div>
 
       <div class="actions">
+        <button type="button" class="preview-btn-view">Preview Assembled Prompt</button>
+        <div class="spacer"></div>
         <button type="button" class="close-btn">Close</button>
       </div>
     </div>
@@ -71,12 +84,7 @@ try {
       <div class="field">
         <label>PROMPT FILES</label>
         <div class="prompt-picker">
-          {promptFiles.map((file) => (
-            <label class="prompt-item">
-              <input type="checkbox" name="prompts" value={file} checked={flavor.prompt_paths.includes(file)} />
-              <span class="file-path">{file}</span>
-            </label>
-          ))}
+          <PromptTree nodes={promptTree} selectedPaths={flavor.prompt_paths} />
         </div>
       </div>
 
@@ -96,6 +104,8 @@ try {
   const closeBtn = dialog.querySelector('.close-btn');
   const editBtn = dialog.querySelector('.edit-btn-inline');
   const cancelEditBtn = dialog.querySelector('.cancel-edit-btn');
+  const previewBtnView = dialog.querySelector('.preview-btn-view');
+  const previewField = dialog.querySelector('.preview-field');
   const viewMode = dialog.querySelector('.view-mode');
   const editMode = dialog.querySelector('.edit-mode');
   const previewText = dialog.querySelector('.preview-text');
@@ -103,30 +113,41 @@ try {
 
   trigger.addEventListener('click', async () => {
     dialog.showModal();
-    previewText.textContent = "Loading preview...";
+    previewField.classList.add('hidden');
+    previewText.innerHTML = "";
     errorEl.classList.add('hidden');
     errorEl.textContent = '';
+  });
+
+  previewBtnView.addEventListener('click', async () => {
+    if (!flavor.prompt_paths || flavor.prompt_paths.length === 0) {
+      alert("No prompt fragments selected.");
+      return;
+    }
+
+    previewBtnView.disabled = true;
+    previewBtnView.textContent = "Loading...";
 
     try {
-      if (flavor.prompt_paths && flavor.prompt_paths.length > 0) {
-        const res = await fetch(`http://localhost:3001/v1/prompts/content`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ paths: flavor.prompt_paths })
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        
-        if (typeof window.marked !== 'undefined') {
-          previewText.innerHTML = window.marked.parse(data.content || "Empty fragments.");
-        } else {
-          previewText.textContent = data.content || "Empty fragments.";
-        }
+      const res = await fetch(`http://localhost:3001/v1/prompts/content`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths: flavor.prompt_paths })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      
+      previewField.classList.remove('hidden');
+      if (typeof window.marked !== 'undefined') {
+        previewText.innerHTML = window.marked.parse(data.content || "Empty fragments.");
       } else {
-        previewText.textContent = "No prompt fragments selected.";
+        previewText.textContent = data.content || "Empty fragments.";
       }
     } catch (e) {
-      previewText.textContent = `Error loading preview: ${e.message}`;
+      alert(`Error loading preview: ${e.message}`);
+    } finally {
+      previewBtnView.disabled = false;
+      previewBtnView.textContent = "Preview Assembled Prompt";
     }
   });
 
@@ -204,6 +225,12 @@ try {
 </script>
 
 <style>
+  .flavor-item-container {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
   .flavor-pill-wrapper {
     display: flex;
     align-items: center;
@@ -212,6 +239,26 @@ try {
     border-radius: 14px;
     background: rgba(255, 255, 255, 0.02);
     transition: border-color 0.2s;
+    width: fit-content;
+  }
+
+  .flavor-paths-preview {
+    margin: 0;
+    padding: 0 0 0 12px;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .flavor-paths-preview li {
+    color: var(--faint);
+    font-size: 11px;
+    font-family: monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
   }
 
   .flavor-pill-wrapper:hover {
@@ -410,34 +457,39 @@ try {
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-  }
-
-  .prompt-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 16px;
-    cursor: pointer;
-    border-bottom: 1px solid var(--border-subtle);
-  }
-
-  .prompt-item:hover {
-    background: rgba(255, 255, 255, 0.03);
+    padding: 8px 0;
   }
 
   .actions {
     display: flex;
     justify-content: flex-end;
+    align-items: center;
     gap: 12px;
     margin-top: 32px;
   }
 
-  .close-btn, .cancel-edit-btn, .save-btn {
+  .spacer {
+    flex: 1;
+  }
+
+  .close-btn, .cancel-edit-btn, .save-btn, .preview-btn-view {
     padding: 10px 24px;
     border-radius: 8px;
     font-size: 14px;
     font-weight: 600;
+    transition: all 0.2s;
     cursor: pointer;
+  }
+
+  .preview-btn-view {
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid var(--border);
+  }
+
+  .preview-btn-view:hover {
+    color: var(--heading);
+    border-color: var(--muted);
   }
 
   .close-btn, .cancel-edit-btn {
