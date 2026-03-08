@@ -52,4 +52,37 @@ mod tests {
         let s1 = all.iter().find(|s| s.key == "s1").unwrap();
         assert_eq!(s1.value, "v1");
     }
+
+    #[test]
+    fn environment_paths() {
+        let conn = test_conn();
+
+        // Seed some paths
+        conn.execute(
+            "INSERT INTO environment_paths VALUES ('local', 'agent', 'gemini', '/path/to/gemini')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO environment_paths VALUES ('remote', 'agent', 'gemini', '/usr/bin/gemini')",
+            [],
+        )
+        .unwrap();
+
+        // Test get
+        let local_path =
+            settings::get_environment_path(&conn, "local", "agent", "gemini").unwrap();
+        assert_eq!(local_path, Some("/path/to/gemini".to_string()));
+
+        let remote_path =
+            settings::get_environment_path(&conn, "remote", "agent", "gemini").unwrap();
+        assert_eq!(remote_path, Some("/usr/bin/gemini".to_string()));
+
+        let unknown = settings::get_environment_path(&conn, "local", "agent", "unknown").unwrap();
+        assert_eq!(unknown, None);
+
+        // Test list
+        let all = settings::list_all_environment_paths(&conn).unwrap();
+        assert_eq!(all.len(), 2);
+    }
 }

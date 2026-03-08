@@ -189,3 +189,6 @@ pub fn list_runs_for_task(conn: &Connection, task_id: &str) -> Result<Vec<Run>, 
     }
     Ok(runs)
 }
+
+#[cfg(test)]
+mod tasks_test;

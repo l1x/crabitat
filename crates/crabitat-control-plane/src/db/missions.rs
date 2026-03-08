@@ -141,3 +141,6 @@ pub fn recalculate_mission_status(conn: &Connection, mission_id: &str) -> Result
 
     Ok(())
 }
+
+#[cfg(test)]
+mod missions_test;

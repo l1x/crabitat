@@ -80,6 +80,8 @@ pub(crate) fn migrate(conn: &Connection) {
             step_order       INTEGER NOT NULL,
             assembled_prompt TEXT NOT NULL,
             status           TEXT NOT NULL DEFAULT 'queued',
+            retry_count      INTEGER DEFAULT 0,
+            max_retries      INTEGER DEFAULT 3,
             created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
         );
 
