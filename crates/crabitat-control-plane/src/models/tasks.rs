@@ -8,6 +8,8 @@ pub struct Task {
     pub step_order: i64,
     pub assembled_prompt: String,
     pub status: String,
+    pub retry_count: i64,
+    pub max_retries: i64,
     pub created_at: String,
 }
 

@@ -7,13 +7,21 @@ pub fn insert_task(
     step_id: &str,
     step_order: i64,
     assembled_prompt: &str,
+    max_retries: i64,
 ) -> Result<Task, String> {
     let task_id = uuid::Uuid::new_v4().to_string();
 
     conn.execute(
-        "INSERT INTO tasks (task_id, mission_id, step_id, step_order, assembled_prompt) 
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![task_id, mission_id, step_id, step_order, assembled_prompt],
+        "INSERT INTO tasks (task_id, mission_id, step_id, step_order, assembled_prompt, max_retries) 
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            task_id,
+            mission_id,
+            step_id,
+            step_order,
+            assembled_prompt,
+            max_retries
+        ],
     )
     .map_err(|e| e.to_string())?;
 
@@ -24,6 +32,8 @@ pub fn insert_task(
         step_order,
         assembled_prompt: assembled_prompt.to_string(),
         status: "queued".to_string(),
+        retry_count: 0,
+        max_retries,
         created_at: "".to_string(),
     })
 }
@@ -31,7 +41,7 @@ pub fn insert_task(
 pub fn list_tasks_for_mission(conn: &Connection, mission_id: &str) -> Result<Vec<Task>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT task_id, mission_id, step_id, step_order, assembled_prompt, status, created_at 
+            "SELECT task_id, mission_id, step_id, step_order, assembled_prompt, status, retry_count, max_retries, created_at 
          FROM tasks WHERE mission_id = ?1 ORDER BY step_order ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -45,7 +55,9 @@ pub fn list_tasks_for_mission(conn: &Connection, mission_id: &str) -> Result<Vec
                 step_order: row.get(3)?,
                 assembled_prompt: row.get(4)?,
                 status: row.get(5)?,
-                created_at: row.get(6)?,
+                retry_count: row.get(6)?,
+                max_retries: row.get(7)?,
+                created_at: row.get(8)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -60,7 +72,7 @@ pub fn list_tasks_for_mission(conn: &Connection, mission_id: &str) -> Result<Vec
 pub fn get_next_queued_task(conn: &Connection) -> Result<Option<TaskWithGit>, String> {
     // Get oldest queued task along with Git info
     let mut stmt = conn.prepare(
-        "SELECT t.task_id, t.mission_id, t.step_id, t.step_order, t.assembled_prompt, t.status, t.created_at, 
+        "SELECT t.task_id, t.mission_id, t.step_id, t.step_order, t.assembled_prompt, t.status, t.retry_count, t.max_retries, t.created_at, 
                 r.repo_url, m.branch, r.local_path
          FROM tasks t
          JOIN missions m ON t.mission_id = m.mission_id
@@ -79,12 +91,14 @@ pub fn get_next_queued_task(conn: &Connection) -> Result<Option<TaskWithGit>, St
                 step_order: row.get(3)?,
                 assembled_prompt: row.get(4)?,
                 status: row.get(5)?,
-                created_at: row.get(6)?,
+                retry_count: row.get(6)?,
+                max_retries: row.get(7)?,
+                created_at: row.get(8)?,
             },
             git: GitInfo {
-                repo_url: row.get(7)?,
-                branch: row.get(8)?,
-                local_path: row.get(9)?,
+                repo_url: row.get(9)?,
+                branch: row.get(10)?,
+                local_path: row.get(11)?,
             },
         })
     });
@@ -100,6 +114,15 @@ pub fn update_task_status(conn: &Connection, task_id: &str, status: &str) -> Res
     conn.execute(
         "UPDATE tasks SET status = ?1 WHERE task_id = ?2",
         params![status, task_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn increment_task_retry(conn: &Connection, task_id: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE tasks SET status = 'queued', retry_count = retry_count + 1 WHERE task_id = ?1",
+        params![task_id],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -134,4 +157,35 @@ pub fn insert_run(conn: &Connection, task_id: &str, req: &CreateRunRequest) -> R
         started_at: "".into(),
         finished_at: Some("".into()),
     })
+}
+
+pub fn list_runs_for_task(conn: &Connection, task_id: &str) -> Result<Vec<Run>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT run_id, task_id, status, logs, summary, duration_ms, tokens_used, started_at, finished_at 
+         FROM runs WHERE task_id = ?1 ORDER BY started_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map([task_id], |row| {
+            Ok(Run {
+                run_id: row.get(0)?,
+                task_id: row.get(1)?,
+                status: row.get(2)?,
+                logs: row.get(3)?,
+                summary: row.get(4)?,
+                duration_ms: row.get(5)?,
+                tokens_used: row.get(6)?,
+                started_at: row.get(7)?,
+                finished_at: row.get(8)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut runs = Vec::new();
+    for run in rows {
+        runs.push(run.map_err(|e| e.to_string())?);
+    }
+    Ok(runs)
 }

@@ -80,8 +80,17 @@ pub async fn create_mission(
             )
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
 
-        tasks_db::insert_task(&tx, &mission.mission_id, &step.id, i as i64, &prompt)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
+        let max_retries = step.max_retries.unwrap_or(3) as i64;
+
+        tasks_db::insert_task(
+            &tx,
+            &mission.mission_id,
+            &step.id,
+            i as i64,
+            &prompt,
+            max_retries,
+        )
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
     }
 
     // 6. Commit
@@ -108,11 +117,22 @@ pub async fn get_mission(
             Json(json!({"error": "mission not found"})),
         ))?;
 
-    let tasks = tasks_db::list_tasks_for_mission(&conn, &mission_id)
+    let mut tasks = tasks_db::list_tasks_for_mission(&conn, &mission_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
+
+    // Hydrate tasks with their runs
+    let mut tasks_with_runs = Vec::new();
+    for task in tasks.drain(..) {
+        let runs = tasks_db::list_runs_for_task(&conn, &task.task_id)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
+
+        let mut task_val = json!(task);
+        task_val["runs"] = json!(runs);
+        tasks_with_runs.push(task_val);
+    }
 
     Ok(Json(json!({
         "mission": mission,
-        "tasks": tasks
+        "tasks": tasks_with_runs
     })))
 }

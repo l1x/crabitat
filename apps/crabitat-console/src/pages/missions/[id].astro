@@ -25,7 +25,9 @@ try {
         <a href="/missions">Missions</a> / <span>{id?.slice(0, 8)}...</span>
       </div>
       <h1>{mission?.workflow_name}</h1>
-      <p class="subtitle">Mission for Issue #{mission?.issue_number} in {mission?.repo_id}</p>
+      <p class="subtitle">
+        Mission for <a href={`https://github.com/${mission?.repo_owner}/${mission?.repo_name}/issues/${mission?.issue_number}`} target="_blank" rel="noopener noreferrer">Issue #{mission?.issue_number}</a> in {mission?.repo_owner}/{mission?.repo_name}
+      </p>
     </div>
     <div class={`status-badge ${mission?.status}`}>{mission?.status}</div>
   </div>
@@ -47,13 +49,26 @@ try {
               </div>
               <div class={`task-status ${task.status}`}>{task.status}</div>
             </div>
+
+            {task.runs && task.runs.length > 0 && (
+              <div class="run-stats">
+                <div class="stat">
+                  <span class="stat-label">Duration</span>
+                  <span class="stat-value">{(task.runs[0].duration_ms / 1000).toFixed(1)}s</span>
+                </div>
+                <div class="stat">
+                  <span class="stat-label">Tokens</span>
+                  <span class="stat-value">{task.runs[0].tokens_used || '—'}</span>
+                </div>
+              </div>
+            )}
             
             <div class="prompt-container">
               <div class="prompt-header">
                 <span>Assembled Prompt</span>
                 <button class="copy-btn" data-prompt={task.assembled_prompt}>Copy</button>
               </div>
-              <pre class="prompt-text">{task.assembled_prompt}</pre>
+              <div class="markdown-content" data-content={task.assembled_prompt}></div>
             </div>
           </div>
         ))}
@@ -63,6 +78,13 @@ try {
 </Layout>
 
 <script>
+  // Render markdown content
+  document.querySelectorAll('.markdown-content').forEach(el => {
+    const content = el.getAttribute('data-content') || '';
+    // @ts-ignore
+    el.innerHTML = window.marked.parse(content);
+  });
+
   // Simple copy to clipboard logic
   document.addEventListener('click', (e) => {
     const btn = (e.target as Element).closest('.copy-btn');
@@ -105,6 +127,17 @@ try {
     color: var(--muted);
     font-size: 14px;
     margin-top: 4px;
+  }
+
+  .subtitle a {
+    color: var(--heading);
+    text-decoration: none;
+    font-weight: 600;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .subtitle a:hover {
+    border-color: var(--heading);
   }
 
   .status-badge {
@@ -187,6 +220,34 @@ try {
     color: var(--muted);
   }
 
+  .run-stats {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 16px;
+    padding: 0 4px;
+  }
+
+  .stat {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .stat-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--muted);
+    letter-spacing: 0.5px;
+  }
+
+  .stat-value {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--heading);
+    font-family: monospace;
+  }
+
   .prompt-container {
     background: #0a0a0a;
     border: 1px solid var(--border-subtle);
@@ -221,17 +282,60 @@ try {
     border-color: var(--muted);
   }
 
-  .prompt-text {
-    padding: 16px;
+  .markdown-content {
+    padding: 24px;
+    font-size: 14px;
+    color: var(--body);
+    line-height: 1.6;
+    max-height: 500px;
+    overflow-y: auto;
+    background: #050505;
+  }
+
+  .markdown-content :global(h1),
+  .markdown-content :global(h2),
+  .markdown-content :global(h3) {
+    color: var(--heading);
+    margin-top: 24px;
+    margin-bottom: 12px;
+    font-weight: 700;
+  }
+
+  .markdown-content :global(h1) { font-size: 20px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px; }
+  .markdown-content :global(h2) { font-size: 18px; }
+  .markdown-content :global(h3) { font-size: 16px; }
+
+  .markdown-content :global(p) { margin-bottom: 16px; }
+
+  .markdown-content :global(code) {
+    background: rgba(255, 255, 255, 0.05);
+    padding: 2px 6px;
+    border-radius: 4px;
     font-family: monospace;
     font-size: 13px;
-    color: var(--body);
-    white-space: pre-wrap;
-    word-break: break-all;
-    max-height: 300px;
-    overflow-y: auto;
-    line-height: 1.5;
   }
+
+  .markdown-content :global(pre) {
+    background: #000;
+    padding: 16px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    overflow-x: auto;
+    border: 1px solid var(--border-subtle);
+  }
+
+  .markdown-content :global(pre code) {
+    background: transparent;
+    padding: 0;
+  }
+
+  .markdown-content :global(ul),
+  .markdown-content :global(ol) {
+    margin-bottom: 16px;
+    padding-left: 24px;
+  }
+
+  .markdown-content :global(li) { margin-bottom: 4px; }
 
   .message.error {
     background: rgba(238, 85, 85, 0.1);

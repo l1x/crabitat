@@ -87,11 +87,26 @@ export interface SystemStatus {
 export interface Mission {
   mission_id: string;
   repo_id: string;
+  repo_owner: string;
+  repo_name: string;
   issue_number: number;
   workflow_name: string;
   flavor_id: string | null;
   status: string;
+  branch: string | null;
   created_at: string;
+}
+
+export interface Run {
+  run_id: string;
+  task_id: string;
+  status: string;
+  logs: string | null;
+  summary: string | null;
+  duration_ms: number | null;
+  tokens_used: number | null;
+  started_at: string;
+  finished_at: string | null;
 }
 
 export interface Task {
@@ -102,6 +117,7 @@ export interface Task {
   assembled_prompt: string;
   status: string;
   created_at: string;
+  runs?: Run[];
 }
 
 export interface CreateMissionRequest {

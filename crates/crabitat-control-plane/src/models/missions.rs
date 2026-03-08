@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 pub struct Mission {
     pub mission_id: String,
     pub repo_id: String,
+    pub repo_owner: String,
+    pub repo_name: String,
     pub issue_number: i64,
     pub workflow_name: String,
     pub flavor_id: Option<String>,

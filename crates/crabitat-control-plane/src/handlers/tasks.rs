@@ -5,6 +5,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::AppState;
+use crate::db::missions as db_missions;
 use crate::db::tasks as db;
 use crate::models::tasks::CreateRunRequest;
 
@@ -33,10 +34,52 @@ pub async fn update_task_status(
     Json(body): Json<UpdateStatusRequest>,
 ) -> Result<StatusCode, (StatusCode, Json<Value>)> {
     let conn = state.db.lock().unwrap();
-    match db::update_task_status(&conn, &task_id, &body.status) {
-        Ok(_) => Ok(StatusCode::NO_CONTENT),
-        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e})))),
+
+    // 1. Update the task status
+    if let Err(e) = db::update_task_status(&conn, &task_id, &body.status) {
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))));
     }
+
+    // 2. Find the mission_id for this task to recalculate mission status
+    let mission_id_res: Result<String, String> = conn
+        .query_row(
+            "SELECT mission_id FROM tasks WHERE task_id = ?1",
+            [&task_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string());
+
+    if let Ok(mid) = mission_id_res {
+        let _ = db_missions::recalculate_mission_status(&conn, &mid);
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn retry_task(
+    State(state): State<AppState>,
+    Path(task_id): Path<String>,
+) -> Result<StatusCode, (StatusCode, Json<Value>)> {
+    let conn = state.db.lock().unwrap();
+
+    if let Err(e) = db::increment_task_retry(&conn, &task_id) {
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))));
+    }
+
+    // Recalculate mission status
+    let mission_id_res: Result<String, String> = conn
+        .query_row(
+            "SELECT mission_id FROM tasks WHERE task_id = ?1",
+            [&task_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string());
+
+    if let Ok(mid) = mission_id_res {
+        let _ = db_missions::recalculate_mission_status(&conn, &mid);
+    }
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn create_run(

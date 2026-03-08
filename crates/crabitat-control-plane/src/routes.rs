@@ -71,6 +71,7 @@ fn tasks_routes() -> Router<AppState> {
             "/{task_id}/status",
             post(handlers::tasks::update_task_status),
         )
+        .route("/{task_id}/retry", post(handlers::tasks::retry_task))
         .route("/{task_id}/runs", post(handlers::tasks::create_run))
 }
 

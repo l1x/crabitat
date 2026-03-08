@@ -1,6 +1,6 @@
 # Crabitat — Product Requirements Document
 
-**Version:** 0.3.1
+**Version:** 0.3.2
 **Date:** 2026-03-07
 
 ---
@@ -57,6 +57,7 @@ The Crab worker is responsible for the physical environment:
 4.  **Execution:** The Crab spawns the agent inside the burrow and captures all `stdout/stderr` output.
 5.  **Performance Tracking:** Each run records **execution duration** (ms) and **token usage** (if reported by the agent).
 6.  **Harvesting:** Upon success, the Crab `git push`es the burrow's branch back to the origin.
+7.  **Cleanup:** (TBD) Burrows accumulate in the cache. A future requirement will involve pruning completed burrows to save disk space.
 
 ---
 
@@ -69,6 +70,8 @@ FileSystem (.agent-prompts/)
 
 Database (SQLite)
   ├── repos (repo_id, owner, name, repo_url, local_path?)
+  ├── settings (key, value)
+  ├── environment_paths (environment, resource_type, resource_name, path)
   ├── workflow_flavors (flavor_id, workflow_name, name, prompt_paths_json)
   ├── github_issues_cache (repo_id, number, title, body, labels, state)
   ├── missions (mission_id, repo_id, issue_number, workflow_name, flavor_id, branch, status)

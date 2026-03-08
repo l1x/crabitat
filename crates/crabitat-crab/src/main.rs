@@ -44,6 +44,8 @@ struct TaskResponse {
 struct Task {
     task_id: String,
     assembled_prompt: String,
+    retry_count: i64,
+    max_retries: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -274,9 +276,15 @@ async fn poll_and_execute(
 
     let mut child = Command::new(&agent_path);
 
+    // Full tool use: ensure the agent inherits the parent shell's PATH and environment
+    child.env("PATH", std::env::var("PATH").unwrap_or_default());
+
     // Agent-specific argument handling
     if args.agent == "claude" {
         child.args(["-p", &final_prompt]);
+    } else if args.agent == "gemini" || args.agent == "gemini-cli" {
+        // Use --yolo mode to allow the agent to execute tools (like gh) without confirmation
+        child.args(["--approval-mode", "yolo", "-p", &final_prompt]);
     } else {
         child.arg(&final_prompt);
     }
@@ -286,7 +294,7 @@ async fn poll_and_execute(
     let duration = start_time.elapsed();
 
     // 9. Handle Result
-    let (final_status, logs) = match output {
+    let (success, logs) = match output {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout).to_string();
             let stderr = String::from_utf8_lossy(&out.stderr).to_string();
@@ -301,31 +309,24 @@ async fn poll_and_execute(
                     .args(["push", "origin", &task_data.git.branch])
                     .current_dir(&worktree_path)
                     .status();
-                ("completed", combined_logs)
+                (true, combined_logs)
             } else {
                 warn!(
                     "Task {} failed with exit code: {:?}",
                     task_id,
                     out.status.code()
                 );
-                ("failed", combined_logs)
+                (false, combined_logs)
             }
         }
         Err(e) => {
             error!("Failed to spawn agent: {}", e);
-            ("failed", format!("Failed to spawn agent: {}", e))
+            (false, format!("Failed to spawn agent: {}", e))
         }
     };
 
-    // 10. Report Result and Record Run
-    client
-        .post(format!("{}/v1/tasks/{}/status", args.api_url, task_id))
-        .json(&UpdateStatusRequest {
-            status: final_status.into(),
-        })
-        .send()
-        .await?;
-
+    // 10. Record Run
+    let final_status = if success { "completed" } else { "failed" };
     client
         .post(format!("{}/v1/tasks/{}/runs", args.api_url, task_id))
         .json(&CreateRunRequest {
@@ -337,6 +338,36 @@ async fn poll_and_execute(
         })
         .send()
         .await?;
+
+    // 11. Report Result or Retry
+    if success {
+        client
+            .post(format!("{}/v1/tasks/{}/status", args.api_url, task_id))
+            .json(&UpdateStatusRequest {
+                status: "completed".into(),
+            })
+            .send()
+            .await?;
+    } else if task_data.task.retry_count < task_data.task.max_retries {
+        info!(
+            "Retrying task {} ({} of {})",
+            task_id,
+            task_data.task.retry_count + 1,
+            task_data.task.max_retries
+        );
+        client
+            .post(format!("{}/v1/tasks/{}/retry", args.api_url, task_id))
+            .send()
+            .await?;
+    } else {
+        client
+            .post(format!("{}/v1/tasks/{}/status", args.api_url, task_id))
+            .json(&UpdateStatusRequest {
+                status: "failed".into(),
+            })
+            .send()
+            .await?;
+    }
 
     Ok(true)
 }

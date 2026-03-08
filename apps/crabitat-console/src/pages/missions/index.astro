@@ -134,13 +134,23 @@ function timeAgo(dateStr: string): string {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    transition: all 0.2s;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    text-decoration: none;
   }
 
   .mission-row:hover {
-    border-color: var(--muted);
-    background: rgba(255, 255, 255, 0.02);
+    border-color: #404040;
+    background: #111111;
     transform: translateX(4px);
+  }
+
+  .mission-row:hover .workflow-name {
+    color: #ffffff;
+  }
+
+  .mission-row:hover .issue-ref,
+  .mission-row:hover .mission-meta {
+    color: #a0a0a0;
   }
 
   .mission-main {
