@@ -29,6 +29,10 @@ struct Args {
     #[arg(short = 'e', long, default_value = "local")]
     env: String,
 
+    /// Run in non-interactive mode (auto-approve tools and disable git prompts)
+    #[arg(short = 'y', long)]
+    yolo: bool,
+
     /// SSH Key name/path (Mock for AWS Secrets Manager integration)
     #[arg(long)]
     ssh_key: Option<String>,
@@ -133,6 +137,14 @@ async fn get_env_path(
     None
 }
 
+fn new_git_command(args: &Args) -> Command {
+    let mut cmd = Command::new("git");
+    if args.yolo {
+        cmd.env("GIT_TERMINAL_PROMPT", "0");
+    }
+    cmd
+}
+
 async fn poll_and_execute(
     args: &Args,
     client: &reqwest::Client,
@@ -194,7 +206,7 @@ async fn poll_and_execute(
                         task_data.git.repo_url, cache_path
                     );
                     std::fs::create_dir_all(cache_path.parent().unwrap())?;
-                    let status = Command::new("git")
+                    let status = new_git_command(args)
                         .args([
                             "clone",
                             &task_data.git.repo_url,
@@ -212,7 +224,7 @@ async fn poll_and_execute(
 
     // 5. Update repo state
     info!("Fetching latest state from origin...");
-    let _ = Command::new("git")
+    let _ = new_git_command(args)
         .arg("fetch")
         .arg("origin")
         .current_dir(&repo_root)
@@ -224,7 +236,7 @@ async fn poll_and_execute(
 
     if worktree_path.exists() {
         info!("Cleaning up existing worktree {:?}", worktree_path);
-        let _ = Command::new("git")
+        let _ = new_git_command(args)
             .args([
                 "worktree",
                 "remove",
@@ -235,27 +247,28 @@ async fn poll_and_execute(
             .status();
     }
 
-    info!(
-        "Creating worktree for branch {} at {:?}",
-        task_data.git.branch, worktree_path
-    );
-    let status = Command::new("git")
-        .args([
-            "worktree",
-            "add",
-            worktree_path.to_str().unwrap(),
-            "-b",
-            &task_data.git.branch,
-        ])
+    // Check if the branch already exists locally or remotely
+    let branch_exists = new_git_command(args)
+        .args(["show-ref", "--verify", "--quiet"])
+        .arg(format!("refs/heads/{}", task_data.git.branch))
         .current_dir(&repo_root)
-        .status()?;
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+        || new_git_command(args)
+            .args(["show-ref", "--verify", "--quiet"])
+            .arg(format!("refs/remotes/origin/{}", task_data.git.branch))
+            .current_dir(&repo_root)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
 
-    if !status.success() {
+    if branch_exists {
         info!(
-            "Branch {} might already exist, attempting to track it...",
-            task_data.git.branch
+            "Branch {} exists, creating worktree and checking it out at {:?}",
+            task_data.git.branch, worktree_path
         );
-        let status = Command::new("git")
+        let status = new_git_command(args)
             .args([
                 "worktree",
                 "add",
@@ -264,8 +277,28 @@ async fn poll_and_execute(
             ])
             .current_dir(&repo_root)
             .status()?;
+
         if !status.success() {
-            return Err("Failed to create worktree".into());
+            return Err("Failed to create worktree from existing branch".into());
+        }
+    } else {
+        info!(
+            "Creating new branch {} and worktree at {:?}",
+            task_data.git.branch, worktree_path
+        );
+        let status = new_git_command(args)
+            .args([
+                "worktree",
+                "add",
+                worktree_path.to_str().unwrap(),
+                "-b",
+                &task_data.git.branch,
+            ])
+            .current_dir(&repo_root)
+            .status()?;
+
+        if !status.success() {
+            return Err("Failed to create new branch and worktree".into());
         }
     }
 
@@ -284,12 +317,26 @@ async fn poll_and_execute(
     // Full tool use: ensure the agent inherits the parent shell's PATH and environment
     child.env("PATH", std::env::var("PATH").unwrap_or_default());
 
+    if args.yolo {
+        child.env("GIT_TERMINAL_PROMPT", "0");
+    }
+
     // Agent-specific argument handling
     if args.agent == "claude" {
+        if args.yolo {
+            child.args(["--permission-mode", "bypassPermissions"]);
+        }
         child.args(["-p", &final_prompt]);
     } else if args.agent == "gemini" || args.agent == "gemini-cli" {
-        // Use --yolo mode to allow the agent to execute tools (like gh) without confirmation
-        child.args(["--approval-mode", "yolo", "-p", &final_prompt]);
+        if args.yolo {
+            child.args(["--approval-mode", "yolo"]);
+        }
+        child.args(["-p", &final_prompt]);
+    } else if args.agent == "codex" {
+        if args.yolo {
+            child.arg("--dangerously-bypass-approvals-and-sandbox");
+        }
+        child.arg(&final_prompt);
     } else {
         child.arg(&final_prompt);
     }
@@ -310,7 +357,7 @@ async fn poll_and_execute(
                     "Task {} completed successfully. Pushing changes...",
                     task_id
                 );
-                let _ = Command::new("git")
+                let _ = new_git_command(args)
                     .args(["push", "origin", &task_data.git.branch])
                     .current_dir(&worktree_path)
                     .status();
