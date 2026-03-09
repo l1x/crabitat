@@ -7,8 +7,8 @@ pub fn list_flavors_for_workflow(
 ) -> Result<Vec<WorkflowFlavor>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT flavor_id, workflow_name, name, prompt_paths
-             FROM workflow_flavors WHERE workflow_name = ?1 ORDER BY name",
+            "SELECT flavor_id, workflow_name, name, prompt_paths, created_at, updated_at
+             FROM workflow_flavors WHERE workflow_name = ?1 AND deleted_at IS NULL ORDER BY name",
         )
         .map_err(|e| e.to_string())?;
 
@@ -21,6 +21,8 @@ pub fn list_flavors_for_workflow(
                 workflow_name: row.get(1)?,
                 name: row.get(2)?,
                 prompt_paths,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -33,7 +35,7 @@ pub fn list_flavors_for_workflow(
 pub fn count_flavors_for_workflow(conn: &Connection, workflow_name: &str) -> Result<usize, String> {
     let count: usize = conn
         .query_row(
-            "SELECT COUNT(*) FROM workflow_flavors WHERE workflow_name = ?",
+            "SELECT COUNT(*) FROM workflow_flavors WHERE workflow_name = ? AND deleted_at IS NULL",
             params![workflow_name],
             |row| row.get(0),
         )
@@ -62,18 +64,28 @@ pub fn insert_flavor(
         }
     })?;
 
+    let created_at: String = conn
+        .query_row(
+            "SELECT created_at FROM workflow_flavors WHERE flavor_id = ?1",
+            params![flavor_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+
     Ok(WorkflowFlavor {
         flavor_id,
         workflow_name: workflow_name.to_string(),
         name: name.to_string(),
         prompt_paths: prompt_paths.to_vec(),
+        created_at,
+        updated_at: None,
     })
 }
 
 pub fn delete_flavor(conn: &Connection, flavor_id: &str) -> Result<bool, String> {
     let affected = conn
         .execute(
-            "DELETE FROM workflow_flavors WHERE flavor_id = ?1",
+            "UPDATE workflow_flavors SET deleted_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE flavor_id = ?1 AND deleted_at IS NULL",
             params![flavor_id],
         )
         .map_err(|e| e.to_string())?;
@@ -89,7 +101,7 @@ pub fn update_flavor(
     let prompt_paths_json = serde_json::to_string(prompt_paths).map_err(|e| e.to_string())?;
 
     conn.execute(
-        "UPDATE workflow_flavors SET name = ?1, prompt_paths = ?2 WHERE flavor_id = ?3",
+        "UPDATE workflow_flavors SET name = ?1, prompt_paths = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE flavor_id = ?3 AND deleted_at IS NULL",
         params![name, prompt_paths_json, flavor_id],
     )
     .map_err(|e| {

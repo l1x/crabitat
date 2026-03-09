@@ -40,6 +40,9 @@ pub async fn get_repo(
 ) -> Result<Json<Repo>, (StatusCode, Json<Value>)> {
     let conn = state.db.lock().unwrap();
     match repos::get_by_id(&conn, &repo_id) {
+        Ok(Some(repo)) if repo.deleted_at.is_some() => {
+            Err((StatusCode::NOT_FOUND, Json(json!({"error": "not found"}))))
+        }
         Ok(Some(repo)) => Ok(Json(repo)),
         Ok(None) => Err((StatusCode::NOT_FOUND, Json(json!({"error": "not found"})))),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e})))),
@@ -55,5 +58,72 @@ pub async fn delete_repo(
         Ok(true) => Ok(StatusCode::NO_CONTENT),
         Ok(false) => Err((StatusCode::NOT_FOUND, Json(json!({"error": "not found"})))),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e})))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db;
+    use rusqlite::Connection;
+    use std::sync::{Arc, Mutex};
+
+    fn setup() -> AppState {
+        let conn = Connection::open_in_memory().unwrap();
+        db::migrate(&conn);
+        AppState {
+            db: Arc::new(Mutex::new(conn)),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_repo_soft_deleted_returns_404() {
+        let state = setup();
+        let repo_id = {
+            let conn = state.db.lock().unwrap();
+            let repo = repos::insert(&conn, "owner", "name", None, None).unwrap();
+            repos::delete(&conn, &repo.repo_id).unwrap();
+            repo.repo_id
+        };
+
+        let result = get_repo(State(state), Path(repo_id)).await;
+        assert!(result.is_err());
+        let (status, _) = result.unwrap_err();
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_delete_repo_twice_returns_404() {
+        let state = setup();
+        let repo_id = {
+            let conn = state.db.lock().unwrap();
+            let repo = repos::insert(&conn, "owner", "name", None, None).unwrap();
+            repo.repo_id
+        };
+
+        // First delete: success
+        let res1 = delete_repo(State(state.clone()), Path(repo_id.clone())).await;
+        assert_eq!(res1.unwrap(), StatusCode::NO_CONTENT);
+
+        // Second delete: 404
+        let res2 = delete_repo(State(state), Path(repo_id)).await;
+        assert!(res2.is_err());
+        let (status, _) = res2.unwrap_err();
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_list_repos_excludes_deleted() {
+        let state = setup();
+        {
+            let conn = state.db.lock().unwrap();
+            repos::insert(&conn, "owner", "active", None, None).unwrap();
+            let r2 = repos::insert(&conn, "owner", "deleted", None, None).unwrap();
+            repos::delete(&conn, &r2.repo_id).unwrap();
+        }
+
+        let Json(repos) = list_repos(State(state)).await.unwrap();
+        assert_eq!(repos.len(), 1);
+        assert_eq!(repos[0].name, "active");
     }
 }

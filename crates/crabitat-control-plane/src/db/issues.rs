@@ -104,12 +104,3 @@ pub fn has_cached(conn: &Connection, repo_id: &str) -> Result<bool, String> {
 
     Ok(count > 0)
 }
-
-pub fn clear_cache(conn: &Connection, repo_id: &str) -> Result<(), String> {
-    conn.execute(
-        "DELETE FROM github_issues_cache WHERE repo_id = ?1",
-        params![repo_id],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
-}

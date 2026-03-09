@@ -25,8 +25,8 @@ pub async fn get_setting(
     Path(key): Path<String>,
 ) -> Result<Json<Setting>, (StatusCode, Json<Value>)> {
     let conn = state.db.lock().unwrap();
-    match db::get(&conn, &key) {
-        Ok(Some(value)) => Ok(Json(Setting { key, value })),
+    match db::get_full(&conn, &key) {
+        Ok(Some(setting)) => Ok(Json(setting)),
         Ok(None) => Err((
             StatusCode::NOT_FOUND,
             Json(json!({"error": "setting not found"})),
@@ -45,10 +45,17 @@ pub async fn update_setting(
 ) -> Result<Json<Setting>, (StatusCode, Json<Value>)> {
     let conn = state.db.lock().unwrap();
     match db::set(&conn, &key, &body.value) {
-        Ok(_) => Ok(Json(Setting {
-            key,
-            value: body.value,
-        })),
+        Ok(_) => match db::get_full(&conn, &key) {
+            Ok(Some(setting)) => Ok(Json(setting)),
+            Ok(None) => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "setting not found after upsert"})),
+            )),
+            Err(e) => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )),
+        },
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": e.to_string()})),

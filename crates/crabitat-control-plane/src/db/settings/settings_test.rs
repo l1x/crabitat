@@ -59,19 +59,18 @@ mod tests {
 
         // Seed some paths
         conn.execute(
-            "INSERT INTO environment_paths VALUES ('local', 'agent', 'gemini', '/path/to/gemini')",
+            "INSERT INTO environment_paths (environment, resource_type, resource_name, path) VALUES ('local', 'agent', 'gemini', '/path/to/gemini')",
             [],
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO environment_paths VALUES ('remote', 'agent', 'gemini', '/usr/bin/gemini')",
+            "INSERT INTO environment_paths (environment, resource_type, resource_name, path) VALUES ('remote', 'agent', 'gemini', '/usr/bin/gemini')",
             [],
         )
         .unwrap();
 
         // Test get
-        let local_path =
-            settings::get_environment_path(&conn, "local", "agent", "gemini").unwrap();
+        let local_path = settings::get_environment_path(&conn, "local", "agent", "gemini").unwrap();
         assert_eq!(local_path, Some("/path/to/gemini".to_string()));
 
         let remote_path =

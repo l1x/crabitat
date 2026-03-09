@@ -36,6 +36,10 @@ fn repos_routes() -> Router<AppState> {
             "/{repo_id}/issues/refresh",
             post(handlers::issues::refresh_repo_issues),
         )
+        .route(
+            "/{repo_id}/missions",
+            get(handlers::missions::list_repo_missions),
+        )
 }
 
 fn workflows_routes() -> Router<AppState> {

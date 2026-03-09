@@ -41,13 +41,14 @@ pub fn insert_mission(
         flavor_id: req.flavor_id.clone(),
         status: "pending".to_string(),
         created_at: "".to_string(),
+        updated_at: None,
         branch: branch.to_string(),
     })
 }
 
 pub fn get_mission(conn: &Connection, mission_id: &str) -> Result<Option<Mission>, String> {
     let mut stmt = conn.prepare(
-        "SELECT m.mission_id, m.repo_id, r.owner, r.name, m.issue_number, m.workflow_name, m.flavor_id, m.status, m.created_at, m.branch 
+        "SELECT m.mission_id, m.repo_id, r.owner, r.name, m.issue_number, m.workflow_name, m.flavor_id, m.status, m.created_at, m.updated_at, m.branch
          FROM missions m
          JOIN repos r ON m.repo_id = r.repo_id
          WHERE m.mission_id = ?1"
@@ -64,7 +65,8 @@ pub fn get_mission(conn: &Connection, mission_id: &str) -> Result<Option<Mission
             flavor_id: row.get(6)?,
             status: row.get(7)?,
             created_at: row.get(8)?,
-            branch: row.get(9)?,
+            updated_at: row.get(9)?,
+            branch: row.get(10)?,
         })
     });
 
@@ -77,7 +79,7 @@ pub fn get_mission(conn: &Connection, mission_id: &str) -> Result<Option<Mission
 
 pub fn list_all(conn: &Connection) -> Result<Vec<Mission>, String> {
     let mut stmt = conn.prepare(
-        "SELECT m.mission_id, m.repo_id, r.owner, r.name, m.issue_number, m.workflow_name, m.flavor_id, m.status, m.created_at, m.branch 
+        "SELECT m.mission_id, m.repo_id, r.owner, r.name, m.issue_number, m.workflow_name, m.flavor_id, m.status, m.created_at, m.updated_at, m.branch
          FROM missions m
          JOIN repos r ON m.repo_id = r.repo_id
          ORDER BY m.created_at DESC"
@@ -95,7 +97,42 @@ pub fn list_all(conn: &Connection) -> Result<Vec<Mission>, String> {
                 flavor_id: row.get(6)?,
                 status: row.get(7)?,
                 created_at: row.get(8)?,
-                branch: row.get(9)?,
+                updated_at: row.get(9)?,
+                branch: row.get(10)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut missions = Vec::new();
+    for m in rows {
+        missions.push(m.map_err(|e| e.to_string())?);
+    }
+    Ok(missions)
+}
+
+pub fn list_by_repo(conn: &Connection, repo_id: &str) -> Result<Vec<Mission>, String> {
+    let mut stmt = conn.prepare(
+        "SELECT m.mission_id, m.repo_id, r.owner, r.name, m.issue_number, m.workflow_name, m.flavor_id, m.status, m.created_at, m.updated_at, m.branch
+         FROM missions m
+         JOIN repos r ON m.repo_id = r.repo_id
+         WHERE m.repo_id = ?1
+         ORDER BY m.created_at DESC"
+    ).map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map([repo_id], |row| {
+            Ok(Mission {
+                mission_id: row.get(0)?,
+                repo_id: row.get(1)?,
+                repo_owner: row.get(2)?,
+                repo_name: row.get(3)?,
+                issue_number: row.get(4)?,
+                workflow_name: row.get(5)?,
+                flavor_id: row.get(6)?,
+                status: row.get(7)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+                branch: row.get(10)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -134,7 +171,7 @@ pub fn recalculate_mission_status(conn: &Connection, mission_id: &str) -> Result
     };
 
     conn.execute(
-        "UPDATE missions SET status = ?1 WHERE mission_id = ?2",
+        "UPDATE missions SET status = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE mission_id = ?2",
         params![new_status, mission_id],
     )
     .map_err(|e| e.to_string())?;

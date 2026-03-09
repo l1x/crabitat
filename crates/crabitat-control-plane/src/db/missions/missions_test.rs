@@ -20,7 +20,7 @@ mod tests {
 
         // 1. Setup repo
         let repo = repos::insert(&conn, "l1x", "test", None, Some("url")).unwrap();
-        
+
         // 2. Seed issue cache (required for mission FK)
         conn.execute(
             "INSERT INTO github_issues_cache (repo_id, number, title, body) VALUES (?1, ?2, ?3, ?4)",
@@ -42,31 +42,41 @@ mod tests {
 
         // Initial state: both queued -> mission pending
         missions::recalculate_mission_status(&conn, &mission.mission_id).unwrap();
-        let m = missions::get_mission(&conn, &mission.mission_id).unwrap().unwrap();
+        let m = missions::get_mission(&conn, &mission.mission_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(m.status, "pending");
 
         // Step 1 running -> mission running
         tasks::update_task_status(&conn, &t1.task_id, "running").unwrap();
         missions::recalculate_mission_status(&conn, &mission.mission_id).unwrap();
-        let m = missions::get_mission(&conn, &mission.mission_id).unwrap().unwrap();
+        let m = missions::get_mission(&conn, &mission.mission_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(m.status, "running");
 
         // Step 1 completed, Step 2 queued -> mission pending (as per current logic)
         tasks::update_task_status(&conn, &t1.task_id, "completed").unwrap();
         missions::recalculate_mission_status(&conn, &mission.mission_id).unwrap();
-        let m = missions::get_mission(&conn, &mission.mission_id).unwrap().unwrap();
-        assert_eq!(m.status, "pending"); 
+        let m = missions::get_mission(&conn, &mission.mission_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(m.status, "pending");
 
         // Step 2 failed -> mission failed
         tasks::update_task_status(&conn, &t2.task_id, "failed").unwrap();
         missions::recalculate_mission_status(&conn, &mission.mission_id).unwrap();
-        let m = missions::get_mission(&conn, &mission.mission_id).unwrap().unwrap();
+        let m = missions::get_mission(&conn, &mission.mission_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(m.status, "failed");
 
         // Step 2 retried and completed -> mission completed
         tasks::update_task_status(&conn, &t2.task_id, "completed").unwrap();
         missions::recalculate_mission_status(&conn, &mission.mission_id).unwrap();
-        let m = missions::get_mission(&conn, &mission.mission_id).unwrap().unwrap();
+        let m = missions::get_mission(&conn, &mission.mission_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(m.status, "completed");
     }
 }

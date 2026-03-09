@@ -35,13 +35,14 @@ pub fn insert_task(
         retry_count: 0,
         max_retries,
         created_at: "".to_string(),
+        updated_at: None,
     })
 }
 
 pub fn list_tasks_for_mission(conn: &Connection, mission_id: &str) -> Result<Vec<Task>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT task_id, mission_id, step_id, step_order, assembled_prompt, status, retry_count, max_retries, created_at 
+            "SELECT task_id, mission_id, step_id, step_order, assembled_prompt, status, retry_count, max_retries, created_at, updated_at
          FROM tasks WHERE mission_id = ?1 ORDER BY step_order ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -58,6 +59,7 @@ pub fn list_tasks_for_mission(conn: &Connection, mission_id: &str) -> Result<Vec
                 retry_count: row.get(6)?,
                 max_retries: row.get(7)?,
                 created_at: row.get(8)?,
+                updated_at: row.get(9)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -72,12 +74,13 @@ pub fn list_tasks_for_mission(conn: &Connection, mission_id: &str) -> Result<Vec
 pub fn get_next_queued_task(conn: &Connection) -> Result<Option<TaskWithGit>, String> {
     // Get oldest queued task along with Git info
     let mut stmt = conn.prepare(
-        "SELECT t.task_id, t.mission_id, t.step_id, t.step_order, t.assembled_prompt, t.status, t.retry_count, t.max_retries, t.created_at, 
+        "SELECT t.task_id, t.mission_id, t.step_id, t.step_order, t.assembled_prompt, t.status, t.retry_count, t.max_retries, t.created_at, t.updated_at,
                 r.repo_url, m.branch, r.local_path
          FROM tasks t
          JOIN missions m ON t.mission_id = m.mission_id
          JOIN repos r ON m.repo_id = r.repo_id
          WHERE t.status = 'queued'
+           AND r.deleted_at IS NULL
          ORDER BY t.created_at ASC
          LIMIT 1"
     ).map_err(|e| e.to_string())?;
@@ -94,11 +97,12 @@ pub fn get_next_queued_task(conn: &Connection) -> Result<Option<TaskWithGit>, St
                 retry_count: row.get(6)?,
                 max_retries: row.get(7)?,
                 created_at: row.get(8)?,
+                updated_at: row.get(9)?,
             },
             git: GitInfo {
-                repo_url: row.get(9)?,
-                branch: row.get(10)?,
-                local_path: row.get(11)?,
+                repo_url: row.get(10)?,
+                branch: row.get(11)?,
+                local_path: row.get(12)?,
             },
         })
     });
@@ -112,7 +116,7 @@ pub fn get_next_queued_task(conn: &Connection) -> Result<Option<TaskWithGit>, St
 
 pub fn update_task_status(conn: &Connection, task_id: &str, status: &str) -> Result<(), String> {
     conn.execute(
-        "UPDATE tasks SET status = ?1 WHERE task_id = ?2",
+        "UPDATE tasks SET status = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE task_id = ?2",
         params![status, task_id],
     )
     .map_err(|e| e.to_string())?;
@@ -121,7 +125,7 @@ pub fn update_task_status(conn: &Connection, task_id: &str, status: &str) -> Res
 
 pub fn increment_task_retry(conn: &Connection, task_id: &str) -> Result<(), String> {
     conn.execute(
-        "UPDATE tasks SET status = 'queued', retry_count = retry_count + 1 WHERE task_id = ?1",
+        "UPDATE tasks SET status = 'queued', retry_count = retry_count + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE task_id = ?1",
         params![task_id],
     )
     .map_err(|e| e.to_string())?;

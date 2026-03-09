@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 
 use crate::AppState;
 use crate::db::missions as db;
+use crate::db::repos as repos_db;
 use crate::db::settings as settings_db;
 use crate::db::tasks as tasks_db;
 use crate::mission_service::{AssemblePromptRequest, MissionService};
@@ -21,11 +22,42 @@ pub async fn list_missions(
     }
 }
 
+pub async fn list_repo_missions(
+    State(state): State<AppState>,
+    Path(repo_id): Path<String>,
+) -> Result<Json<Vec<Mission>>, (StatusCode, Json<Value>)> {
+    let conn = state.db.lock().unwrap();
+    match db::list_by_repo(&conn, &repo_id) {
+        Ok(missions) => Ok(Json(missions)),
+        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e})))),
+    }
+}
+
 pub async fn create_mission(
     State(state): State<AppState>,
     Json(req): Json<CreateMissionRequest>,
 ) -> Result<(StatusCode, Json<Mission>), (StatusCode, Json<Value>)> {
     let mut conn = state.db.lock().unwrap();
+
+    // Guard: reject missions for soft-deleted repos
+    match repos_db::get_by_id(&conn, &req.repo_id) {
+        Ok(Some(repo)) if repo.deleted_at.is_some() => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "repo not found"})),
+            ));
+        }
+        Ok(None) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "repo not found"})),
+            ));
+        }
+        Err(e) => {
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))));
+        }
+        Ok(Some(_)) => {}
+    }
 
     // 1. Define Intent (Deterministic Branch)
     let branch = format!("mission/issue-{}", req.issue_number);
@@ -135,4 +167,43 @@ pub async fn get_mission(
         "mission": mission,
         "tasks": tasks_with_runs
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db;
+    use rusqlite::Connection;
+    use std::sync::{Arc, Mutex};
+
+    fn setup() -> AppState {
+        let conn = Connection::open_in_memory().unwrap();
+        db::migrate(&conn);
+        AppState {
+            db: Arc::new(Mutex::new(conn)),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_mission_soft_deleted_repo_returns_404() {
+        let state = setup();
+        let repo_id = {
+            let conn = state.db.lock().unwrap();
+            let repo = repos_db::insert(&conn, "owner", "name", None, None).unwrap();
+            repos_db::delete(&conn, &repo.repo_id).unwrap();
+            repo.repo_id
+        };
+
+        let req = CreateMissionRequest {
+            repo_id,
+            issue_number: 1,
+            workflow_name: "test-wf".into(),
+            flavor_id: None,
+        };
+
+        let result = create_mission(State(state), Json(req)).await;
+        assert!(result.is_err());
+        let (status, _) = result.unwrap_err();
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
 }

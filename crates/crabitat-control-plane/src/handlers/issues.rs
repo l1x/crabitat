@@ -45,6 +45,10 @@ fn lookup_repo(
 ) -> Result<(String, String), (StatusCode, Json<Value>)> {
     let conn = state.db.lock().unwrap();
     match repos::get_by_id(&conn, repo_id) {
+        Ok(Some(repo)) if repo.deleted_at.is_some() => Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "repo not found"})),
+        )),
         Ok(Some(repo)) => Ok((repo.owner, repo.name)),
         Ok(None) => Err((
             StatusCode::NOT_FOUND,
@@ -65,13 +69,65 @@ async fn fetch_and_cache(
         .map_err(|e| (StatusCode::BAD_GATEWAY, Json(json!({"error": e}))))?;
 
     let conn = state.db.lock().unwrap();
-    issues_db::clear_cache(&conn, repo_id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
+
+    // We DO NOT clear the cache anymore, because missions refer to issues.
+    // Instead we upsert the ones we found.
     issues_db::upsert_issues(&conn, repo_id, &issues)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
+
+    // Mark missing issues as closed (optional, but good for accuracy)
+    // For now, we just return the updated list.
 
     match issues_db::list_by_repo(&conn, repo_id) {
         Ok(issues) => Ok(Json(issues)),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e})))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db;
+    use rusqlite::Connection;
+    use std::sync::{Arc, Mutex};
+
+    fn setup() -> AppState {
+        let conn = Connection::open_in_memory().unwrap();
+        db::migrate(&conn);
+        AppState {
+            db: Arc::new(Mutex::new(conn)),
+        }
+    }
+
+    #[test]
+    fn test_lookup_repo_active() {
+        let state = setup();
+        let repo_id = {
+            let conn = state.db.lock().unwrap();
+            let repo = repos::insert(&conn, "owner", "name", None, None).unwrap();
+            repo.repo_id
+        };
+
+        let res = lookup_repo(&state, &repo_id);
+        assert!(res.is_ok());
+        let (owner, name) = res.unwrap();
+        assert_eq!(owner, "owner");
+        assert_eq!(name, "name");
+    }
+
+    #[test]
+    fn test_lookup_repo_soft_deleted_returns_404() {
+        let state = setup();
+        let repo_id = {
+            let conn = state.db.lock().unwrap();
+            let repo = repos::insert(&conn, "owner", "name", None, None).unwrap();
+            repos::delete(&conn, &repo.repo_id).unwrap();
+            repo.repo_id
+        };
+
+        let res = lookup_repo(&state, &repo_id);
+        assert!(res.is_err());
+        let (status, _) = res.unwrap_err();
+        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 }
