@@ -89,3 +89,23 @@ pub async fn list_environment_paths(
         )),
     }
 }
+
+#[derive(Deserialize)]
+pub struct UpdateEnvPathRequest {
+    pub path: String,
+}
+
+pub async fn update_environment_path(
+    State(state): State<AppState>,
+    Path((env, res_type, res_name)): Path<(String, String, String)>,
+    Json(body): Json<UpdateEnvPathRequest>,
+) -> Result<StatusCode, (StatusCode, Json<Value>)> {
+    let conn = state.db.lock().unwrap();
+    match settings_db::upsert_environment_path(&conn, &env, &res_type, &res_name, &body.path) {
+        Ok(_) => Ok(StatusCode::NO_CONTENT),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )),
+    }
+}

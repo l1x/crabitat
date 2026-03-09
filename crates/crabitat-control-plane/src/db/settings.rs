@@ -51,6 +51,23 @@ pub fn list_all_environment_paths(conn: &Connection) -> Result<Vec<EnvironmentPa
     Ok(paths)
 }
 
+pub fn upsert_environment_path(
+    conn: &Connection,
+    env: &str,
+    res_type: &str,
+    res_name: &str,
+    path: &str,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO environment_paths (environment, resource_type, resource_name, path)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(environment, resource_type, resource_name) 
+         DO UPDATE SET path = excluded.path, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
+        [env, res_type, res_name, path],
+    )?;
+    Ok(())
+}
+
 pub fn set(conn: &Connection, key: &str, value: &str) -> Result<()> {
     conn.execute(
         "INSERT INTO settings (key, value) VALUES (?, ?)
