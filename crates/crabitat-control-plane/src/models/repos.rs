@@ -21,3 +21,9 @@ pub struct CreateRepoRequest {
     pub local_path: Option<String>,
     pub repo_url: Option<String>,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateRepoRequest {
+    pub local_path: Option<String>,
+    pub repo_url: Option<String>,
+}

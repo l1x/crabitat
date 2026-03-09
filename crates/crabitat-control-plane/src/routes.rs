@@ -29,7 +29,9 @@ fn repos_routes() -> Router<AppState> {
         )
         .route(
             "/{repo_id}",
-            get(handlers::repos::get_repo).delete(handlers::repos::delete_repo),
+            get(handlers::repos::get_repo)
+                .delete(handlers::repos::delete_repo)
+                .put(handlers::repos::update_repo),
         )
         .route("/{repo_id}/issues", get(handlers::issues::list_repo_issues))
         .route(
@@ -98,7 +100,8 @@ fn system_routes() -> Router<AppState> {
         .route("/dirs", get(handlers::system::list_dirs))
         .route(
             "/env-path/{env}/{type}/{name}",
-            get(handlers::system::get_environment_path),
+            get(handlers::system::get_environment_path)
+                .post(handlers::system::update_environment_path),
         )
         .route("/env-paths", get(handlers::system::list_environment_paths))
 }

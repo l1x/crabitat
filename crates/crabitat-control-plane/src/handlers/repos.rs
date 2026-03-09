@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use crate::AppState;
 use crate::db::repos;
-use crate::models::{CreateRepoRequest, Repo};
+use crate::models::{CreateRepoRequest, Repo, UpdateRepoRequest};
 
 pub async fn create_repo(
     State(state): State<AppState>,
@@ -55,6 +55,24 @@ pub async fn delete_repo(
 ) -> Result<StatusCode, (StatusCode, Json<Value>)> {
     let conn = state.db.lock().unwrap();
     match repos::delete(&conn, &repo_id) {
+        Ok(true) => Ok(StatusCode::NO_CONTENT),
+        Ok(false) => Err((StatusCode::NOT_FOUND, Json(json!({"error": "not found"})))),
+        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e})))),
+    }
+}
+
+pub async fn update_repo(
+    State(state): State<AppState>,
+    Path(repo_id): Path<String>,
+    Json(body): Json<UpdateRepoRequest>,
+) -> Result<StatusCode, (StatusCode, Json<Value>)> {
+    let conn = state.db.lock().unwrap();
+    match repos::update(
+        &conn,
+        &repo_id,
+        body.local_path.as_deref(),
+        body.repo_url.as_deref(),
+    ) {
         Ok(true) => Ok(StatusCode::NO_CONTENT),
         Ok(false) => Err((StatusCode::NOT_FOUND, Json(json!({"error": "not found"})))),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e})))),

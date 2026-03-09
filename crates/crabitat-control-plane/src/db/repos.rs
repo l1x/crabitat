@@ -82,6 +82,21 @@ pub fn delete(conn: &Connection, repo_id: &str) -> Result<bool, String> {
     Ok(affected > 0)
 }
 
+pub fn update(
+    conn: &Connection,
+    repo_id: &str,
+    local_path: Option<&str>,
+    repo_url: Option<&str>,
+) -> Result<bool, String> {
+    let affected = conn
+        .execute(
+            "UPDATE repos SET local_path = ?1, repo_url = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE repo_id = ?3 AND deleted_at IS NULL",
+            params![local_path, repo_url, repo_id],
+        )
+        .map_err(|e| e.to_string())? ;
+    Ok(affected > 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
