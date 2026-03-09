@@ -1,5 +1,5 @@
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -9,11 +9,17 @@ use crate::db::missions as db_missions;
 use crate::db::tasks as db;
 use crate::models::tasks::CreateRunRequest;
 
+#[derive(Deserialize)]
+pub struct TaskQuery {
+    pub worker_id: Option<String>,
+}
+
 pub async fn get_next_task(
     State(state): State<AppState>,
+    Query(query): Query<TaskQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let conn = state.db.lock().unwrap();
-    match db::get_next_queued_task(&conn) {
+    match db::get_next_queued_task(&conn, query.worker_id.as_deref()) {
         Ok(Some(task_with_git)) => Ok(Json(json!(task_with_git))),
         Ok(None) => Err((
             StatusCode::NOT_FOUND,

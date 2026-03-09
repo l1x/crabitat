@@ -14,6 +14,8 @@ pub struct Mission {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
     pub branch: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_worker_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

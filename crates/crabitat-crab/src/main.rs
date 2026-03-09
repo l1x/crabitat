@@ -91,9 +91,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let client = reqwest::Client::new();
+    let worker_id = uuid::Uuid::new_v4().to_string();
+
+    info!("Worker ID: {}", worker_id);
 
     loop {
-        match poll_and_execute(&args, &client).await {
+        match poll_and_execute(&args, &client, &worker_id).await {
             Ok(executed) => {
                 if !executed {
                     debug!("No tasks found, sleeping...");
@@ -133,10 +136,12 @@ async fn get_env_path(
 async fn poll_and_execute(
     args: &Args,
     client: &reqwest::Client,
+    worker_id: &str,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     // 1. Fetch next task
     let res = client
         .get(format!("{}/v1/tasks/next", args.api_url))
+        .query(&[("worker_id", worker_id)])
         .send()
         .await?;
 
