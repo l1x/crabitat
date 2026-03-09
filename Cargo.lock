@@ -242,6 +242,7 @@ name = "crabitat-control-plane"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "reqwest",
  "rusqlite",
  "serde",
  "serde_json",

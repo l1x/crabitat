@@ -26,8 +26,11 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let conn = db::init("crabitat.db");
-    tracing::info!("database initialized");
+    let db_path = std::env::var("DATABASE_PATH").unwrap_or_else(|_| "crabitat.db".into());
+    let addr = std::env::var("LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:3001".into());
+
+    let conn = db::init(&db_path);
+    tracing::info!("database initialized at {}", db_path);
 
     let state = AppState {
         db: Arc::new(Mutex::new(conn)),
@@ -35,9 +38,7 @@ async fn main() {
 
     let app = routes::create_router(state);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3001")
-        .await
-        .unwrap();
-    tracing::info!("listening on http://localhost:3001");
+    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+    tracing::info!("listening on http://{}", addr);
     axum::serve(listener, app).await.unwrap();
 }
