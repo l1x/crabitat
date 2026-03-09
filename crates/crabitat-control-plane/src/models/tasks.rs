@@ -11,6 +11,8 @@ pub struct Task {
     pub retry_count: i64,
     pub max_retries: i64,
     pub created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

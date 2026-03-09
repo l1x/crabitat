@@ -30,6 +30,9 @@ pub struct WorkflowFlavor {
     pub workflow_name: String,
     pub name: String,
     pub prompt_paths: Vec<String>, // JSON array in DB
+    pub created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
 }
 
 /// The unified view returned by the API (Workflow + its Flavors)

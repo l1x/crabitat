@@ -11,6 +11,8 @@ pub struct Mission {
     pub flavor_id: Option<String>,
     pub status: String,
     pub created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
     pub branch: String,
 }
 

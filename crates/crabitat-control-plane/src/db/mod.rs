@@ -24,11 +24,13 @@ pub(crate) fn migrate(conn: &Connection) {
             local_path TEXT,
             repo_url   TEXT,
             created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            updated_at TEXT,
+            deleted_at TEXT,
             UNIQUE(owner, name)
         );
 
         CREATE TABLE IF NOT EXISTS github_issues_cache (
-            repo_id    TEXT NOT NULL REFERENCES repos(repo_id) ON DELETE CASCADE,
+            repo_id    TEXT NOT NULL REFERENCES repos(repo_id),
             number     INTEGER NOT NULL,
             title      TEXT NOT NULL,
             body       TEXT,
@@ -43,12 +45,17 @@ pub(crate) fn migrate(conn: &Connection) {
             workflow_name TEXT NOT NULL,
             name          TEXT NOT NULL,
             prompt_paths  TEXT NOT NULL DEFAULT '[]',
+            created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            updated_at    TEXT,
+            deleted_at    TEXT,
             UNIQUE(workflow_name, name)
         );
 
         CREATE TABLE IF NOT EXISTS settings (
-            key   TEXT PRIMARY KEY,
-            value TEXT NOT NULL
+            key        TEXT PRIMARY KEY,
+            value      TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            updated_at TEXT
         );
 
         CREATE TABLE IF NOT EXISTS environment_paths (
@@ -56,6 +63,8 @@ pub(crate) fn migrate(conn: &Connection) {
             resource_type TEXT NOT NULL,
             resource_name TEXT NOT NULL,
             path          TEXT NOT NULL,
+            created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            updated_at    TEXT,
             PRIMARY KEY (environment, resource_type, resource_name)
         );
 
@@ -63,31 +72,35 @@ pub(crate) fn migrate(conn: &Connection) {
 
         CREATE TABLE IF NOT EXISTS missions (
             mission_id    TEXT PRIMARY KEY,
-            repo_id       TEXT NOT NULL REFERENCES repos(repo_id) ON DELETE CASCADE,
+            repo_id       TEXT NOT NULL REFERENCES repos(repo_id),
             issue_number  INTEGER NOT NULL,
             workflow_name TEXT NOT NULL,
-            flavor_id     TEXT REFERENCES workflow_flavors(flavor_id) ON DELETE SET NULL,
+            flavor_id     TEXT REFERENCES workflow_flavors(flavor_id),
             status        TEXT NOT NULL DEFAULT 'pending',
             branch        TEXT,
             created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            updated_at    TEXT,
+            repo_owner    TEXT,
+            repo_name     TEXT,
             FOREIGN KEY (repo_id, issue_number) REFERENCES github_issues_cache(repo_id, number)
         );
 
         CREATE TABLE IF NOT EXISTS tasks (
             task_id          TEXT PRIMARY KEY,
-            mission_id       TEXT NOT NULL REFERENCES missions(mission_id) ON DELETE CASCADE,
+            mission_id       TEXT NOT NULL REFERENCES missions(mission_id),
             step_id          TEXT NOT NULL,
             step_order       INTEGER NOT NULL,
             assembled_prompt TEXT NOT NULL,
             status           TEXT NOT NULL DEFAULT 'queued',
             retry_count      INTEGER DEFAULT 0,
             max_retries      INTEGER DEFAULT 3,
-            created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+            created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            updated_at       TEXT
         );
 
         CREATE TABLE IF NOT EXISTS runs (
             run_id      TEXT PRIMARY KEY,
-            task_id     TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+            task_id     TEXT NOT NULL REFERENCES tasks(task_id),
             status      TEXT NOT NULL,
             logs        TEXT,
             summary     TEXT,
@@ -98,4 +111,35 @@ pub(crate) fn migrate(conn: &Connection) {
         );",
     )
     .expect("failed to run migrations");
+
+    // Add columns for existing databases (ALTER TABLE cannot use non-constant DEFAULT)
+    for stmt in &[
+        "ALTER TABLE repos ADD COLUMN deleted_at TEXT",
+        "ALTER TABLE repos ADD COLUMN updated_at TEXT",
+        "ALTER TABLE workflow_flavors ADD COLUMN deleted_at TEXT",
+        "ALTER TABLE workflow_flavors ADD COLUMN created_at TEXT",
+        "ALTER TABLE workflow_flavors ADD COLUMN updated_at TEXT",
+        "ALTER TABLE settings ADD COLUMN created_at TEXT",
+        "ALTER TABLE settings ADD COLUMN updated_at TEXT",
+        "ALTER TABLE environment_paths ADD COLUMN created_at TEXT",
+        "ALTER TABLE environment_paths ADD COLUMN updated_at TEXT",
+        "ALTER TABLE missions ADD COLUMN updated_at TEXT",
+        "ALTER TABLE tasks ADD COLUMN updated_at TEXT",
+    ] {
+        match conn.execute(stmt, []) {
+            Ok(_) => {}
+            Err(e) if e.to_string().contains("duplicate column") => {}
+            Err(e) => panic!("migration failed: {e}"),
+        }
+    }
+
+    // Backfill created_at for rows added before the column existed
+    for stmt in &[
+        "UPDATE workflow_flavors SET created_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE created_at IS NULL",
+        "UPDATE settings SET created_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE created_at IS NULL",
+        "UPDATE environment_paths SET created_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE created_at IS NULL",
+    ] {
+        conn.execute(stmt, [])
+            .expect("failed to backfill created_at");
+    }
 }

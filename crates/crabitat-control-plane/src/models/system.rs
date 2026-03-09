@@ -7,6 +7,9 @@ pub struct EnvironmentPath {
     pub resource_type: String,
     pub resource_name: String,
     pub path: String,
+    pub created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

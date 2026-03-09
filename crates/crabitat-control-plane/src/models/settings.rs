@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 pub struct Setting {
     pub key: String,
     pub value: String,
+    pub created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
