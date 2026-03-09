@@ -6,9 +6,11 @@ CREATE TABLE IF NOT EXISTS repos (
     repo_url   TEXT,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at TEXT,
-    deleted_at TEXT,
-    UNIQUE(owner, name)
+    deleted_at TEXT
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS repos_owner_name_uniq
+    ON repos(owner, name) WHERE deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS github_issues_cache (
     repo_id    TEXT NOT NULL REFERENCES repos(repo_id),
@@ -28,9 +30,11 @@ CREATE TABLE IF NOT EXISTS workflow_flavors (
     prompt_paths  TEXT NOT NULL DEFAULT '[]',
     created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at    TEXT,
-    deleted_at    TEXT,
-    UNIQUE(workflow_name, name)
+    deleted_at    TEXT
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS workflow_flavors_name_uniq
+    ON workflow_flavors(workflow_name, name) WHERE deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS settings (
     key        TEXT PRIMARY KEY,

@@ -139,4 +139,32 @@ mod tests {
         let conn = setup();
         assert!(get_by_id(&conn, "no-such-id").unwrap().is_none());
     }
+
+    #[test]
+    fn re_add_soft_deleted_repo() {
+        let conn = setup();
+        let repo = insert(&conn, "owner", "name", None, None).unwrap();
+        delete(&conn, &repo.repo_id).unwrap();
+
+        // This should fail currently because of the UNIQUE(owner, name) constraint
+        let result = insert(&conn, "owner", "name", None, None);
+        assert!(
+            result.is_ok(),
+            "Should be able to re-add soft-deleted repo, but got: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn active_duplicate_repo_rejected() {
+        let conn = setup();
+        insert(&conn, "owner", "name", None, None).unwrap();
+        let result = insert(&conn, "owner", "name", None, None);
+        assert!(
+            result.is_err(),
+            "Should NOT be able to add duplicate active repo"
+        );
+        let err = result.err().unwrap();
+        assert!(err.contains("UNIQUE constraint failed"), "got: {err}");
+    }
 }

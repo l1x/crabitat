@@ -221,4 +221,32 @@ mod tests {
         let names: Vec<&str> = flavors.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(names, vec!["alpha", "mike", "zulu"]);
     }
+
+    #[test]
+    fn re_add_soft_deleted_flavor() {
+        let conn = setup();
+        let f = insert_flavor(&conn, "wf", "rust", &[]).unwrap();
+        delete_flavor(&conn, &f.flavor_id).unwrap();
+
+        // This should fail currently because of the UNIQUE(workflow_name, name) constraint
+        let result = insert_flavor(&conn, "wf", "rust", &[]);
+        assert!(
+            result.is_ok(),
+            "Should be able to re-add soft-deleted flavor, but got: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn active_duplicate_flavor_rejected() {
+        let conn = setup();
+        insert_flavor(&conn, "wf", "rust", &[]).unwrap();
+        let result = insert_flavor(&conn, "wf", "rust", &[]);
+        assert!(
+            result.is_err(),
+            "Should NOT be able to add duplicate active flavor"
+        );
+        let err = result.err().unwrap();
+        assert!(err.contains("already exists"), "got: {err}");
+    }
 }
