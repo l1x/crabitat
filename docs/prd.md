@@ -41,9 +41,9 @@ Crabitat is an orchestration platform for autonomous coding agents. It manages w
 - The Control-Plane does **not** modify the filesystem; it only records the intent.
 
 ### FR-4.2: Hybrid Prompt Assembly
-Prompts are assembled in two stages:
-1.  **Static Assembly (Control-Plane):** Combines Base, Flavor, and Issue layers. Resolves `{{mission}}` and `{{context}}`.
-2.  **Late-Binding Resolution (Crab):** Resolves `{{worktree_path}}` once the physical burrow has been created.
+Prompts are assembled in two stages to separate **intent** from **physicality**:
+1.  **Static Assembly (Control-Plane):** Combines Base, Flavor, and Issue layers. Resolves `{{mission}}` and `{{context}}`. This defines the **intent** of the task.
+2.  **Late-Binding Resolution (Crab):** Resolves environment-specific variables like `{{worktree_path}}` once the physical burrow has been created on the worker's filesystem.
 
 ---
 
@@ -57,7 +57,8 @@ The Crab worker is responsible for the physical environment:
 4.  **Execution:** The Crab spawns the agent inside the burrow and captures all `stdout/stderr` output.
 5.  **Performance Tracking:** Each run records **execution duration** (ms) and **token usage** (if reported by the agent).
 6.  **Harvesting:** Upon success, the Crab `git push`es the burrow's branch back to the origin.
-7.  **Cleanup:** (TBD) Burrows accumulate in the cache. A future requirement will involve pruning completed burrows to save disk space.
+7.  **Traceability:** Data is never hard-deleted. Repos and Flavors use **soft-deletion** (`deleted_at`) to ensure that historical missions, tasks, and runs remain accessible for auditing even if their parent resources are removed from the active UI.
+8.  **Cleanup:** (TBD) Burrows accumulate in the cache. A future requirement will involve pruning completed burrows to save disk space.
 
 ---
 
@@ -69,10 +70,10 @@ FileSystem (.agent-prompts/)
   └── prompts/**/*.md (Source for Base and Flavor layers)
 
 Database (SQLite)
-  ├── repos (repo_id, owner, name, repo_url, local_path?)
+  ├── repos (repo_id, owner, name, repo_url, local_path?, deleted_at?)
   ├── settings (key, value)
   ├── environment_paths (environment, resource_type, resource_name, path)
-  ├── workflow_flavors (flavor_id, workflow_name, name, prompt_paths_json)
+  ├── workflow_flavors (flavor_id, workflow_name, name, prompt_paths_json, deleted_at?)
   ├── github_issues_cache (repo_id, number, title, body, labels, state)
   ├── missions (mission_id, repo_id, issue_number, workflow_name, flavor_id, branch, status)
   ├── tasks (task_id, mission_id, step_id, assembled_prompt, status)
