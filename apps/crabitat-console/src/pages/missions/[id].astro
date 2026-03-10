@@ -50,11 +50,15 @@ try {
               <div class={`task-status ${task.status}`}>{task.status}</div>
             </div>
 
-            {task.runs && task.runs.length > 0 && (
+            {task.runs && task.runs.length > 0 && task.runs[0] && (
               <div class="run-stats">
                 <div class="stat">
                   <span class="stat-label">Duration</span>
-                  <span class="stat-value">{(task.runs[0].duration_ms / 1000).toFixed(1)}s</span>
+                  <span class="stat-value">
+                    {task.runs[0].duration_ms !== null 
+                      ? (task.runs[0].duration_ms / 1000).toFixed(1) + 's' 
+                      : '—'}
+                  </span>
                 </div>
                 <div class="stat">
                   <span class="stat-label">Tokens</span>

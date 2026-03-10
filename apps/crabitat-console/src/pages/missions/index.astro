@@ -12,6 +12,14 @@ try {
   error = e instanceof Error ? e.message : String(e);
 }
 
+const completed = missions.filter(m => m.status === 'completed').length;
+const failed = missions.filter(m => m.status === 'failed').length;
+const active = missions.filter(m => m.status === 'pending' || m.status === 'running').length;
+const total = missions.length;
+const successRate = (completed + failed) > 0 
+  ? Math.round((completed / (completed + failed)) * 100) 
+  : 0;
+
 function timeAgo(dateStr: string): string {
   if (!dateStr) return "";
   const now = Date.now();
@@ -34,6 +42,35 @@ function timeAgo(dateStr: string): string {
     </div>
   </div>
 
+  <div class="stats-bar">
+    <div class="stat-item">
+      <span class="stat-label">Total</span>
+      <span class="stat-value">{total}</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-label">Active</span>
+      <span class="stat-value">{active}</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-label">Completed</span>
+      <span class="stat-value text-success">{completed}</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-label">Failed</span>
+      <span class="stat-value text-error">{failed}</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-label">Success Rate</span>
+      <span class="stat-value">{successRate}%</span>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="active">Active ({active})</button>
+    <button class="tab-btn" data-tab="completed">Completed ({completed})</button>
+    <button class="tab-btn" data-tab="failed">Failed ({failed})</button>
+  </div>
+
   <div class="divider"></div>
 
   {error && <p class="message error">{error}</p>}
@@ -48,30 +85,79 @@ function timeAgo(dateStr: string): string {
   )}
 
   <div class="mission-list">
-    {missions.map((m) => (
-      <a href={`/missions/${m.mission_id}`} class="mission-row">
-        <div class="mission-main">
-          <div class={`status-dot ${m.status}`}></div>
-          <div class="mission-info">
-            <span class="workflow-name">{m.workflow_name}</span>
-            <span class="issue-ref">{m.repo_id} #{m.issue_number}</span>
+    {missions.map((m) => {
+      const displayStatus = (m.status === 'pending' || m.status === 'running') ? 'active' : m.status;
+      return (
+        <a href={`/missions/${m.mission_id}`} class="mission-row" data-status={displayStatus}>
+          <div class="mission-main">
+            <div class={`status-dot ${m.status}`}></div>
+            <div class="mission-info">
+              <span class="workflow-name">{m.workflow_name}</span>
+              <span class="issue-ref">{m.repo_id} #{m.issue_number}</span>
+            </div>
           </div>
-        </div>
-        <div class="mission-meta">
-          <span class="time">{timeAgo(m.created_at)}</span>
-          <span class="mission-id">ID: {m.mission_id.slice(0, 8)}</span>
-          <span class="chevron">→</span>
-        </div>
-      </a>
-    ))}
+          <div class="mission-meta">
+            <span class="time">{timeAgo(m.created_at)}</span>
+            <span class="mission-id">ID: {m.mission_id.slice(0, 8)}</span>
+            <span class="chevron">→</span>
+          </div>
+        </a>
+      );
+    })}
+    <div id="tab-empty-state" class="empty-state" style="display: none;">
+      <div class="icon">🔍</div>
+      <h2>No Missions Found</h2>
+      <p>There are no missions with this status.</p>
+    </div>
   </div>
 </Layout>
+
+<script>
+  const tabs = document.querySelectorAll('.tab-btn');
+  const missions = document.querySelectorAll('.mission-row');
+  const emptyState = document.getElementById('tab-empty-state');
+
+  function filterMissions(status: string) {
+    let visibleCount = 0;
+    missions.forEach(mission => {
+      if (mission instanceof HTMLElement) {
+        if (mission.getAttribute('data-status') === status) {
+          mission.style.display = 'flex';
+          visibleCount++;
+        } else {
+          mission.style.display = 'none';
+        }
+      }
+    });
+
+    if (emptyState) {
+      emptyState.style.display = visibleCount === 0 && missions.length > 0 ? 'block' : 'none';
+    }
+  }
+
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      tabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      const status = tab.getAttribute('data-tab') || 'active';
+      filterMissions(status);
+    });
+  });
+
+  // Initial filter
+  const activeTab = document.querySelector('.tab-btn.active');
+  if (activeTab) {
+    const status = activeTab.getAttribute('data-tab') || 'active';
+    filterMissions(status);
+  }
+</script>
 
 <style>
   .page-header {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
+    margin-bottom: 32px;
   }
 
   h1 {
@@ -87,10 +173,73 @@ function timeAgo(dateStr: string): string {
     margin-top: 4px;
   }
 
+  .stats-bar {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 16px;
+    margin-bottom: 32px;
+    padding: 20px;
+    background: var(--card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+  }
+
+  .stat-item {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .stat-label {
+    color: var(--muted);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+  }
+
+  .stat-value {
+    color: var(--heading);
+    font-size: 24px;
+    font-weight: 700;
+    font-family: monospace;
+  }
+
+  .text-success { color: #3fb950; }
+  .text-error { color: #f85149; }
+
+  .tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .tab-btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--muted);
+    border: 1px solid transparent;
+    transition: all 0.2s;
+    background: transparent;
+  }
+
+  .tab-btn:hover {
+    color: var(--heading);
+    background: var(--btn-bg);
+  }
+
+  .tab-btn.active {
+    color: var(--heading);
+    background: var(--btn-bg);
+    border-color: var(--border);
+  }
+
   .divider {
     height: 1px;
     background: var(--border-subtle);
-    margin: 24px 0 32px;
+    margin: 16px 0 24px;
   }
 
   .empty-state {
@@ -168,6 +317,7 @@ function timeAgo(dateStr: string): string {
   .status-dot.pending { background: #c5a059; box-shadow: 0 0 8px rgba(197, 160, 89, 0.4); }
   .status-dot.running { background: #388bfd; box-shadow: 0 0 8px rgba(56, 139, 253, 0.4); }
   .status-dot.completed { background: #3fb950; box-shadow: 0 0 8px rgba(63, 185, 80, 0.4); }
+  .status-dot.failed { background: #f85149; box-shadow: 0 0 8px rgba(248, 81, 73, 0.4); }
 
   .mission-info {
     display: flex;
