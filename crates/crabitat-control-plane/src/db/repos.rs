@@ -146,13 +146,36 @@ mod tests {
         let repo = insert(&conn, "owner", "name", None, None).unwrap();
         delete(&conn, &repo.repo_id).unwrap();
 
-        // This should fail currently because of the UNIQUE(owner, name) constraint
+        // After partial index fix, re-adding after soft-delete should succeed
         let result = insert(&conn, "owner", "name", None, None);
         assert!(
             result.is_ok(),
             "Should be able to re-add soft-deleted repo, but got: {:?}",
             result.err()
         );
+    }
+
+    #[test]
+    fn multiple_soft_delete_re_add_cycles() {
+        let conn = setup();
+
+        // Cycle 1: insert -> delete
+        let repo1 = insert(&conn, "owner", "name", None, None).unwrap();
+        delete(&conn, &repo1.repo_id).unwrap();
+
+        // Cycle 2: insert -> delete
+        let repo2 = insert(&conn, "owner", "name", None, None).unwrap();
+        assert_ne!(repo1.repo_id, repo2.repo_id);
+        delete(&conn, &repo2.repo_id).unwrap();
+
+        // Cycle 3: insert (leave active)
+        let repo3 = insert(&conn, "owner", "name", None, None).unwrap();
+        assert_ne!(repo2.repo_id, repo3.repo_id);
+
+        // Only the latest active repo should appear in list
+        let repos = list(&conn).unwrap();
+        assert_eq!(repos.len(), 1);
+        assert_eq!(repos[0].repo_id, repo3.repo_id);
     }
 
     #[test]

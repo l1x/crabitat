@@ -228,13 +228,36 @@ mod tests {
         let f = insert_flavor(&conn, "wf", "rust", &[]).unwrap();
         delete_flavor(&conn, &f.flavor_id).unwrap();
 
-        // This should fail currently because of the UNIQUE(workflow_name, name) constraint
+        // After partial index fix, re-adding after soft-delete should succeed
         let result = insert_flavor(&conn, "wf", "rust", &[]);
         assert!(
             result.is_ok(),
             "Should be able to re-add soft-deleted flavor, but got: {:?}",
             result.err()
         );
+    }
+
+    #[test]
+    fn multiple_soft_delete_re_add_cycles() {
+        let conn = setup();
+
+        // Cycle 1: insert -> delete
+        let f1 = insert_flavor(&conn, "wf", "rust", &[]).unwrap();
+        delete_flavor(&conn, &f1.flavor_id).unwrap();
+
+        // Cycle 2: insert -> delete
+        let f2 = insert_flavor(&conn, "wf", "rust", &[]).unwrap();
+        assert_ne!(f1.flavor_id, f2.flavor_id);
+        delete_flavor(&conn, &f2.flavor_id).unwrap();
+
+        // Cycle 3: insert (leave active)
+        let f3 = insert_flavor(&conn, "wf", "rust", &[]).unwrap();
+        assert_ne!(f2.flavor_id, f3.flavor_id);
+
+        // Only the latest active flavor should appear in list
+        let flavors = list_flavors_for_workflow(&conn, "wf").unwrap();
+        assert_eq!(flavors.len(), 1);
+        assert_eq!(flavors[0].flavor_id, f3.flavor_id);
     }
 
     #[test]

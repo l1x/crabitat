@@ -158,7 +158,13 @@ pub(crate) fn migrate(conn: &Connection) {
             )
             .unwrap_or_default();
 
-        if sql.contains("UNIQUE") {
+        let needs_rebuild = if *table == "repos" {
+            sql.contains("UNIQUE") && sql.contains("owner") && sql.contains("name")
+        } else {
+            sql.contains("UNIQUE") && sql.contains("workflow_name") && sql.contains("name")
+        };
+
+        if needs_rebuild {
             let (create_sql, columns, index_name, index_cols) = if *table == "repos" {
                 (
                     "CREATE TABLE repos_new (
@@ -201,6 +207,7 @@ pub(crate) fn migrate(conn: &Connection) {
                  ALTER TABLE {table}_new RENAME TO {table};
                  CREATE UNIQUE INDEX IF NOT EXISTS {index_name} ON {table}({index_cols}) WHERE deleted_at IS NULL;
                  COMMIT;
+                 PRAGMA foreign_key_check;
                  PRAGMA foreign_keys = ON;"
             ))
             .expect("failed to rebuild table");
