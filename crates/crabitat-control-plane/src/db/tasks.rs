@@ -112,10 +112,11 @@ pub fn get_next_queued_task(
 
     match result {
         Ok(res) => {
-            // Update last_worker_id if worker_id was provided
+            // Stickiness is last-writer-wins: the most recent worker to pick up
+            // a task from this mission gets affinity for subsequent tasks.
             if let Some(wid) = worker_id {
                 conn.execute(
-                    "UPDATE missions SET last_worker_id = ?1 WHERE mission_id = ?2",
+                    "UPDATE missions SET last_worker_id = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE mission_id = ?2",
                     params![wid, res.task.mission_id],
                 )
                 .map_err(|e| e.to_string())?;

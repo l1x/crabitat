@@ -98,7 +98,7 @@ mod tests {
         // 4. Add tasks (T1 and then T2)
         let t1 = tasks::insert_task(&conn, &m1.mission_id, "step1", 0, "p1", 3).unwrap();
         // Ensure t2 is created slightly later to test age-based fallthrough
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::thread::sleep(std::time::Duration::from_millis(1100));
         let t2 = tasks::insert_task(&conn, &m2.mission_id, "step1", 0, "p2", 3).unwrap();
 
         // 5. Pull T1 with worker-A (this will set M1.last_worker_id = 'worker-A')
