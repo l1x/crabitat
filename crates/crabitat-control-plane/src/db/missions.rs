@@ -43,12 +43,13 @@ pub fn insert_mission(
         created_at: "".to_string(),
         updated_at: None,
         branch: branch.to_string(),
+        last_worker_id: None,
     })
 }
 
 pub fn get_mission(conn: &Connection, mission_id: &str) -> Result<Option<Mission>, String> {
     let mut stmt = conn.prepare(
-        "SELECT m.mission_id, m.repo_id, r.owner, r.name, m.issue_number, m.workflow_name, m.flavor_id, m.status, m.created_at, m.updated_at, m.branch
+        "SELECT m.mission_id, m.repo_id, r.owner, r.name, m.issue_number, m.workflow_name, m.flavor_id, m.status, m.created_at, m.updated_at, m.branch, m.last_worker_id
          FROM missions m
          JOIN repos r ON m.repo_id = r.repo_id
          WHERE m.mission_id = ?1"
@@ -67,6 +68,7 @@ pub fn get_mission(conn: &Connection, mission_id: &str) -> Result<Option<Mission
             created_at: row.get(8)?,
             updated_at: row.get(9)?,
             branch: row.get(10)?,
+            last_worker_id: row.get(11)?,
         })
     });
 
@@ -79,7 +81,7 @@ pub fn get_mission(conn: &Connection, mission_id: &str) -> Result<Option<Mission
 
 pub fn list_all(conn: &Connection) -> Result<Vec<Mission>, String> {
     let mut stmt = conn.prepare(
-        "SELECT m.mission_id, m.repo_id, r.owner, r.name, m.issue_number, m.workflow_name, m.flavor_id, m.status, m.created_at, m.updated_at, m.branch
+        "SELECT m.mission_id, m.repo_id, r.owner, r.name, m.issue_number, m.workflow_name, m.flavor_id, m.status, m.created_at, m.updated_at, m.branch, m.last_worker_id
          FROM missions m
          JOIN repos r ON m.repo_id = r.repo_id
          ORDER BY m.created_at DESC"
@@ -99,6 +101,7 @@ pub fn list_all(conn: &Connection) -> Result<Vec<Mission>, String> {
                 created_at: row.get(8)?,
                 updated_at: row.get(9)?,
                 branch: row.get(10)?,
+                last_worker_id: row.get(11)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -112,7 +115,7 @@ pub fn list_all(conn: &Connection) -> Result<Vec<Mission>, String> {
 
 pub fn list_by_repo(conn: &Connection, repo_id: &str) -> Result<Vec<Mission>, String> {
     let mut stmt = conn.prepare(
-        "SELECT m.mission_id, m.repo_id, r.owner, r.name, m.issue_number, m.workflow_name, m.flavor_id, m.status, m.created_at, m.updated_at, m.branch
+        "SELECT m.mission_id, m.repo_id, r.owner, r.name, m.issue_number, m.workflow_name, m.flavor_id, m.status, m.created_at, m.updated_at, m.branch, m.last_worker_id
          FROM missions m
          JOIN repos r ON m.repo_id = r.repo_id
          WHERE m.repo_id = ?1
@@ -133,6 +136,7 @@ pub fn list_by_repo(conn: &Connection, repo_id: &str) -> Result<Vec<Mission>, St
                 created_at: row.get(8)?,
                 updated_at: row.get(9)?,
                 branch: row.get(10)?,
+                last_worker_id: row.get(11)?,
             })
         })
         .map_err(|e| e.to_string())?;

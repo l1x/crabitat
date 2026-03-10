@@ -71,8 +71,11 @@ pub fn list_tasks_for_mission(conn: &Connection, mission_id: &str) -> Result<Vec
     Ok(tasks)
 }
 
-pub fn get_next_queued_task(conn: &Connection) -> Result<Option<TaskWithGit>, String> {
-    // Get oldest queued task along with Git info
+pub fn get_next_queued_task(
+    conn: &Connection,
+    worker_id: Option<&str>,
+) -> Result<Option<TaskWithGit>, String> {
+    // Get oldest queued task along with Git info, prioritizing sticky worker if provided
     let mut stmt = conn.prepare(
         "SELECT t.task_id, t.mission_id, t.step_id, t.step_order, t.assembled_prompt, t.status, t.retry_count, t.max_retries, t.created_at, t.updated_at,
                 r.repo_url, m.branch, r.local_path
@@ -81,11 +84,11 @@ pub fn get_next_queued_task(conn: &Connection) -> Result<Option<TaskWithGit>, St
          JOIN repos r ON m.repo_id = r.repo_id
          WHERE t.status = 'queued'
            AND r.deleted_at IS NULL
-         ORDER BY t.created_at ASC
+         ORDER BY (CASE WHEN ?1 IS NOT NULL AND m.last_worker_id = ?1 THEN 1 ELSE 0 END) DESC, t.created_at ASC
          LIMIT 1"
     ).map_err(|e| e.to_string())?;
 
-    let result = stmt.query_row([], |row| {
+    let result = stmt.query_row(params![worker_id], |row| {
         Ok(TaskWithGit {
             task: Task {
                 task_id: row.get(0)?,
@@ -108,7 +111,18 @@ pub fn get_next_queued_task(conn: &Connection) -> Result<Option<TaskWithGit>, St
     });
 
     match result {
-        Ok(res) => Ok(Some(res)),
+        Ok(res) => {
+            // Stickiness is last-writer-wins: the most recent worker to pick up
+            // a task from this mission gets affinity for subsequent tasks.
+            if let Some(wid) = worker_id {
+                conn.execute(
+                    "UPDATE missions SET last_worker_id = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE mission_id = ?2",
+                    params![wid, res.task.mission_id],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+            Ok(Some(res))
+        }
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.to_string()),
     }

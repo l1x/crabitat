@@ -86,6 +86,7 @@ pub(crate) fn migrate(conn: &Connection) {
             updated_at    TEXT,
             repo_owner    TEXT,
             repo_name     TEXT,
+            last_worker_id TEXT,
             FOREIGN KEY (repo_id, issue_number) REFERENCES github_issues_cache(repo_id, number)
         );
 
@@ -128,6 +129,7 @@ pub(crate) fn migrate(conn: &Connection) {
         "ALTER TABLE environment_paths ADD COLUMN created_at TEXT",
         "ALTER TABLE environment_paths ADD COLUMN updated_at TEXT",
         "ALTER TABLE missions ADD COLUMN updated_at TEXT",
+        "ALTER TABLE missions ADD COLUMN last_worker_id TEXT",
         "ALTER TABLE tasks ADD COLUMN updated_at TEXT",
     ] {
         match conn.execute(stmt, []) {

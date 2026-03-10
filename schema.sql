@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS missions (
     updated_at    TEXT,
     repo_owner    TEXT,
     repo_name     TEXT,
+    last_worker_id TEXT,
     FOREIGN KEY (repo_id, issue_number) REFERENCES github_issues_cache(repo_id, number)
 );
 
