@@ -221,4 +221,55 @@ mod tests {
         let names: Vec<&str> = flavors.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(names, vec!["alpha", "mike", "zulu"]);
     }
+
+    #[test]
+    fn re_add_soft_deleted_flavor() {
+        let conn = setup();
+        let f = insert_flavor(&conn, "wf", "rust", &[]).unwrap();
+        delete_flavor(&conn, &f.flavor_id).unwrap();
+
+        // After partial index fix, re-adding after soft-delete should succeed
+        let result = insert_flavor(&conn, "wf", "rust", &[]);
+        assert!(
+            result.is_ok(),
+            "Should be able to re-add soft-deleted flavor, but got: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn multiple_soft_delete_re_add_cycles() {
+        let conn = setup();
+
+        // Cycle 1: insert -> delete
+        let f1 = insert_flavor(&conn, "wf", "rust", &[]).unwrap();
+        delete_flavor(&conn, &f1.flavor_id).unwrap();
+
+        // Cycle 2: insert -> delete
+        let f2 = insert_flavor(&conn, "wf", "rust", &[]).unwrap();
+        assert_ne!(f1.flavor_id, f2.flavor_id);
+        delete_flavor(&conn, &f2.flavor_id).unwrap();
+
+        // Cycle 3: insert (leave active)
+        let f3 = insert_flavor(&conn, "wf", "rust", &[]).unwrap();
+        assert_ne!(f2.flavor_id, f3.flavor_id);
+
+        // Only the latest active flavor should appear in list
+        let flavors = list_flavors_for_workflow(&conn, "wf").unwrap();
+        assert_eq!(flavors.len(), 1);
+        assert_eq!(flavors[0].flavor_id, f3.flavor_id);
+    }
+
+    #[test]
+    fn active_duplicate_flavor_rejected() {
+        let conn = setup();
+        insert_flavor(&conn, "wf", "rust", &[]).unwrap();
+        let result = insert_flavor(&conn, "wf", "rust", &[]);
+        assert!(
+            result.is_err(),
+            "Should NOT be able to add duplicate active flavor"
+        );
+        let err = result.err().unwrap();
+        assert!(err.contains("already exists"), "got: {err}");
+    }
 }

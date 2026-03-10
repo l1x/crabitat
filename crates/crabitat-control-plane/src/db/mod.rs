@@ -5,7 +5,7 @@ pub mod settings;
 pub mod tasks;
 pub mod workflows;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, params};
 
 pub fn init(path: &str) -> Connection {
     let conn = Connection::open(path).expect("failed to open database");
@@ -25,9 +25,11 @@ pub(crate) fn migrate(conn: &Connection) {
             repo_url   TEXT,
             created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
             updated_at TEXT,
-            deleted_at TEXT,
-            UNIQUE(owner, name)
+            deleted_at TEXT
         );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS repos_owner_name_uniq
+            ON repos(owner, name) WHERE deleted_at IS NULL;
 
         CREATE TABLE IF NOT EXISTS github_issues_cache (
             repo_id    TEXT NOT NULL REFERENCES repos(repo_id),
@@ -47,9 +49,11 @@ pub(crate) fn migrate(conn: &Connection) {
             prompt_paths  TEXT NOT NULL DEFAULT '[]',
             created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
             updated_at    TEXT,
-            deleted_at    TEXT,
-            UNIQUE(workflow_name, name)
+            deleted_at    TEXT
         );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS workflow_flavors_name_uniq
+            ON workflow_flavors(workflow_name, name) WHERE deleted_at IS NULL;
 
         CREATE TABLE IF NOT EXISTS settings (
             key        TEXT PRIMARY KEY,
@@ -141,5 +145,72 @@ pub(crate) fn migrate(conn: &Connection) {
     ] {
         conn.execute(stmt, [])
             .expect("failed to backfill created_at");
+    }
+
+    // Migration: Remove UNIQUE constraints from repos and workflow_flavors by rebuilding tables
+    // This is necessary because SQLite doesn't support DROP CONSTRAINT.
+    for table in &["repos", "workflow_flavors"] {
+        let sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",
+                params![table],
+                |row| row.get(0),
+            )
+            .unwrap_or_default();
+
+        let needs_rebuild = if *table == "repos" {
+            sql.contains("UNIQUE") && sql.contains("owner") && sql.contains("name")
+        } else {
+            sql.contains("UNIQUE") && sql.contains("workflow_name") && sql.contains("name")
+        };
+
+        if needs_rebuild {
+            let (create_sql, columns, index_name, index_cols) = if *table == "repos" {
+                (
+                    "CREATE TABLE repos_new (
+                        repo_id    TEXT PRIMARY KEY,
+                        owner      TEXT NOT NULL,
+                        name       TEXT NOT NULL,
+                        local_path TEXT,
+                        repo_url   TEXT,
+                        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                        updated_at TEXT,
+                        deleted_at TEXT
+                    )",
+                    "repo_id, owner, name, local_path, repo_url, created_at, updated_at, deleted_at",
+                    "repos_owner_name_uniq",
+                    "owner, name",
+                )
+            } else {
+                (
+                    "CREATE TABLE workflow_flavors_new (
+                        flavor_id     TEXT PRIMARY KEY,
+                        workflow_name TEXT NOT NULL,
+                        name          TEXT NOT NULL,
+                        prompt_paths  TEXT NOT NULL DEFAULT '[]',
+                        created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                        updated_at    TEXT,
+                        deleted_at    TEXT
+                    )",
+                    "flavor_id, workflow_name, name, prompt_paths, created_at, updated_at, deleted_at",
+                    "workflow_flavors_name_uniq",
+                    "workflow_name, name",
+                )
+            };
+
+            conn.execute_batch(&format!(
+                "PRAGMA foreign_keys = OFF;
+                 BEGIN TRANSACTION;
+                 {create_sql};
+                 INSERT INTO {table}_new ({columns}) SELECT {columns} FROM {table};
+                 DROP TABLE {table};
+                 ALTER TABLE {table}_new RENAME TO {table};
+                 CREATE UNIQUE INDEX IF NOT EXISTS {index_name} ON {table}({index_cols}) WHERE deleted_at IS NULL;
+                 COMMIT;
+                 PRAGMA foreign_key_check;
+                 PRAGMA foreign_keys = ON;"
+            ))
+            .expect("failed to rebuild table");
+        }
     }
 }
