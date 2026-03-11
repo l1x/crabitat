@@ -1,6 +1,7 @@
 ---
 import { getSystemStatus } from "../lib/api-client";
 import type { SystemStatus } from "../lib/types";
+import SchemeToggle from "./SchemeToggle.astro";
 import ThemeToggle from "./ThemeToggle.astro";
 
 interface Props {
@@ -28,7 +29,10 @@ const links = [
 <nav>
   <div class="logo-row">
     <div class="logo">crabitat</div>
-    <ThemeToggle />
+    <div class="toggles">
+      <SchemeToggle />
+      <ThemeToggle />
+    </div>
   </div>
   <div class="divider"></div>
   <ul>
@@ -80,6 +84,11 @@ const links = [
     align-items: center;
     justify-content: space-between;
     padding: 0 16px;
+  }
+
+  .toggles {
+    display: flex;
+    gap: 2px;
   }
 
   .logo {

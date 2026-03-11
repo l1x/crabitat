@@ -17,12 +17,16 @@ const { title } = Astro.props;
     <title>{title} — crabitat</title>
     <script is:inline>
       (function() {
-        var theme = localStorage.getItem("theme");
-        if (!theme) {
-          theme = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        var mode = localStorage.getItem("mode");
+        if (!mode) {
+          mode = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
         }
-        if (theme === "light") {
-          document.documentElement.setAttribute("data-theme", "light");
+        if (mode === "light") {
+          document.documentElement.setAttribute("data-mode", "light");
+        }
+        var scheme = localStorage.getItem("scheme");
+        if (scheme === "catppuccin") {
+          document.documentElement.setAttribute("data-scheme", "catppuccin");
         }
       })();
     </script>

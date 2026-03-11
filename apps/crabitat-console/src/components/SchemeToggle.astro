@@ -1,0 +1,60 @@
+---
+---
+
+<button class="scheme-toggle" id="scheme-toggle" title="Toggle color scheme" aria-label="Toggle color scheme">
+  <span class="dot dot-a"></span>
+  <span class="dot dot-b"></span>
+</button>
+
+<script>
+  const btn = document.getElementById("scheme-toggle")!;
+
+  function getScheme(): string {
+    return document.documentElement.getAttribute("data-scheme") || "minimal-orange";
+  }
+
+  function setScheme(scheme: string) {
+    if (scheme === "catppuccin") {
+      document.documentElement.setAttribute("data-scheme", "catppuccin");
+    } else {
+      document.documentElement.removeAttribute("data-scheme");
+    }
+    localStorage.setItem("scheme", scheme);
+  }
+
+  btn.addEventListener("click", () => {
+    setScheme(getScheme() === "minimal-orange" ? "catppuccin" : "minimal-orange");
+  });
+</script>
+
+<style>
+  .scheme-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    transition: background 0.2s;
+    flex-shrink: 0;
+  }
+
+  .scheme-toggle:hover {
+    background: var(--overlay-medium);
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+
+  /* Minimal Orange (default): orange + warm gray */
+  .dot-a { background: #e8740e; }
+  .dot-b { background: #706e68; }
+
+  /* Catppuccin: peach + lavender */
+  :global([data-scheme="catppuccin"]) .dot-a { background: #fab387; }
+  :global([data-scheme="catppuccin"]) .dot-b { background: #b4befe; }
+</style>

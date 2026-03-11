@@ -21,21 +21,21 @@
 <script>
   const btn = document.getElementById("theme-toggle")!;
 
-  function getTheme(): string {
-    return document.documentElement.getAttribute("data-theme") || "dark";
+  function getMode(): string {
+    return document.documentElement.getAttribute("data-mode") || "dark";
   }
 
-  function setTheme(theme: string) {
-    if (theme === "light") {
-      document.documentElement.setAttribute("data-theme", "light");
+  function setMode(mode: string) {
+    if (mode === "light") {
+      document.documentElement.setAttribute("data-mode", "light");
     } else {
-      document.documentElement.removeAttribute("data-theme");
+      document.documentElement.removeAttribute("data-mode");
     }
-    localStorage.setItem("theme", theme);
+    localStorage.setItem("mode", mode);
   }
 
   btn.addEventListener("click", () => {
-    setTheme(getTheme() === "dark" ? "light" : "dark");
+    setMode(getMode() === "dark" ? "light" : "dark");
   });
 </script>
 
@@ -67,6 +67,6 @@
   .sun  { display: block; }
 
   /* Light mode: show moon icon, hide sun */
-  :global([data-theme="light"]) .moon { display: block; }
-  :global([data-theme="light"]) .sun  { display: none; }
+  :global([data-mode="light"]) .moon { display: block; }
+  :global([data-mode="light"]) .sun  { display: none; }
 </style>
