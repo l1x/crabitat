@@ -85,7 +85,7 @@ const { repo } = Astro.props;
   .value {
     color: var(--body);
     font-size: 15px;
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--overlay-subtle);
     border-radius: 6px;
     border: 1px solid var(--border-subtle);
     min-width: 0;
@@ -134,7 +134,7 @@ const { repo } = Astro.props;
 
   .issues-btn:hover {
     border-color: var(--muted);
-    background: #222;
+    background: var(--btn-hover-bg);
   }
 
   .delete-btn {
@@ -149,6 +149,6 @@ const { repo } = Astro.props;
   }
 
   .delete-btn:hover {
-    color: #f85149;
+    color: var(--status-error);
   }
 </style>

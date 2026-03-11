@@ -143,7 +143,7 @@ try {
     border-radius: 12px;
     padding: 32px;
     margin-bottom: 24px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+    box-shadow: 0 4px 20px var(--shadow-card);
   }
 
   .setting-group h3 {
@@ -197,9 +197,9 @@ try {
   }
 
   .primary-btn {
-    background: #d0d0d0;
-    color: #000;
-    border: 1px solid #d0d0d0;
+    background: var(--primary-bg);
+    color: var(--primary-text);
+    border: 1px solid var(--primary-bg);
     border-radius: 8px;
     padding: 0 32px;
     font-size: 15px;
@@ -209,8 +209,8 @@ try {
   }
 
   .primary-btn:hover {
-    background: #ffffff;
-    border-color: #ffffff;
+    background: var(--primary-hover);
+    border-color: var(--primary-hover);
   }
 
   .primary-btn:disabled {
@@ -226,15 +226,15 @@ try {
   }
 
   .error {
-    background: rgba(238, 85, 85, 0.1);
-    color: #f85149;
-    border: 1px solid rgba(238, 85, 85, 0.2);
+    background: var(--status-error-bg);
+    color: var(--status-error);
+    border: 1px solid var(--status-error-border);
   }
 
   .success {
-    background: rgba(63, 185, 80, 0.1);
-    color: #3fb950;
-    border: 1px solid rgba(63, 185, 80, 0.2);
+    background: var(--status-success-bg);
+    color: var(--status-success);
+    border: 1px solid var(--status-success-border);
   }
 
   .table-container {
@@ -273,13 +273,13 @@ try {
   }
 
   .pill.local {
-    background: rgba(56, 139, 253, 0.15);
-    color: #58a6ff;
+    background: var(--env-local-bg);
+    color: var(--env-local-text);
   }
 
   .pill.remote {
-    background: rgba(163, 113, 247, 0.15);
-    color: #bc8cff;
+    background: var(--env-remote-bg);
+    color: var(--env-remote-text);
   }
 
   .path-cell code {

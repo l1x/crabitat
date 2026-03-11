@@ -98,9 +98,9 @@ try {
   }
 
   .error {
-    background: rgba(238, 85, 85, 0.1);
-    color: #f85149;
-    border: 1px solid rgba(238, 85, 85, 0.2);
+    background: var(--status-error-bg);
+    color: var(--status-error);
+    border: 1px solid var(--status-error-border);
   }
 
   .empty-state {
@@ -111,7 +111,7 @@ try {
     border-radius: 16px;
     max-width: 600px;
     margin: 40px auto;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    box-shadow: 0 10px 30px var(--shadow-elevated);
   }
 
   .empty-state .icon {
@@ -140,20 +140,20 @@ try {
 
   .primary-btn {
     display: inline-block;
-    background: #d0d0d0;
-    color: #000;
+    background: var(--primary-bg);
+    color: var(--primary-text);
     text-decoration: none;
     padding: 12px 32px;
     border-radius: 8px;
     font-size: 15px;
     font-weight: 600;
     transition: all 0.2s;
-    border: 1px solid #d0d0d0;
+    border: 1px solid var(--primary-bg);
   }
 
   .primary-btn:hover {
-    background: #ffffff;
-    border-color: #ffffff;
+    background: var(--primary-hover);
+    border-color: var(--primary-hover);
   }
 
   .grid {

@@ -176,7 +176,7 @@ const promptTree = buildPromptTree(promptFiles);
   .add-flavor-trigger:hover {
     border-color: var(--muted);
     color: var(--heading);
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--overlay-light);
   }
 
   .flavor-dialog {
@@ -189,7 +189,7 @@ const promptTree = buildPromptTree(promptFiles);
   }
 
   .flavor-dialog::backdrop {
-    background: rgba(0, 0, 0, 0.8);
+    background: var(--backdrop);
     backdrop-filter: blur(4px);
   }
 
@@ -199,7 +199,7 @@ const promptTree = buildPromptTree(promptFiles);
     border-radius: 16px;
     padding: 32px;
     width: 500px;
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 20px 40px var(--shadow-card);
   }
 
   .modal-header {
@@ -236,13 +236,13 @@ const promptTree = buildPromptTree(promptFiles);
   }
 
   .modal-error {
-    background: rgba(238, 85, 85, 0.1);
-    color: #f85149;
+    background: var(--status-error-bg);
+    color: var(--status-error);
     padding: 12px 16px;
     border-radius: 8px;
     font-size: 13px;
     margin-bottom: 24px;
-    border: 1px solid rgba(238, 85, 85, 0.2);
+    border: 1px solid var(--status-error-border);
   }
 
   .field {
@@ -286,7 +286,7 @@ const promptTree = buildPromptTree(promptFiles);
   }
 
   .preview-box {
-    background: #0a0a0a;
+    background: var(--code-bg);
     border: 1px solid var(--border);
     border-radius: 8px;
     max-height: 200px;
@@ -342,18 +342,18 @@ const promptTree = buildPromptTree(promptFiles);
 
   .cancel-btn:hover {
     color: var(--heading);
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--overlay-medium);
   }
 
   .submit-btn {
-    background: #d0d0d0;
-    color: #000;
-    border: 1px solid #d0d0d0;
+    background: var(--primary-bg);
+    color: var(--primary-text);
+    border: 1px solid var(--primary-bg);
   }
 
   .submit-btn:hover {
-    background: #ffffff;
-    border-color: #ffffff;
+    background: var(--primary-hover);
+    border-color: var(--primary-hover);
   }
 
   .submit-btn:disabled {

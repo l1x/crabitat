@@ -1,6 +1,7 @@
 ---
 import { getSystemStatus } from "../lib/api-client";
 import type { SystemStatus } from "../lib/types";
+import ThemeToggle from "./ThemeToggle.astro";
 
 interface Props {
   active: string;
@@ -25,7 +26,10 @@ const links = [
 ---
 
 <nav>
-  <div class="logo">crabitat</div>
+  <div class="logo-row">
+    <div class="logo">crabitat</div>
+    <ThemeToggle />
+  </div>
   <div class="divider"></div>
   <ul>
     {links.map((link) => {
@@ -71,12 +75,18 @@ const links = [
     flex-direction: column;
   }
 
+  .logo-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+  }
+
   .logo {
     color: var(--heading);
     font-size: 22px;
     font-weight: 800;
     letter-spacing: -0.5px;
-    padding: 0 16px;
   }
 
   .divider {
@@ -103,11 +113,11 @@ const links = [
   }
 
   a:hover {
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--overlay-light);
   }
 
   a.active {
-    background: #1a1a1a;
+    background: var(--sidebar-active-bg);
     color: var(--heading);
     font-weight: 500;
   }
@@ -122,7 +132,7 @@ const links = [
 
   .status-box {
     margin-top: auto;
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--overlay-subtle);
     border: 1px solid var(--border-subtle);
     border-radius: 8px;
     padding: 14px;
@@ -149,8 +159,8 @@ const links = [
     border-radius: 50%;
   }
 
-  .online { background: #3fb950; box-shadow: 0 0 4px #3fb950; }
-  .offline { background: #f85149; box-shadow: 0 0 4px #f85149; }
+  .online { background: var(--status-success); box-shadow: 0 0 4px var(--status-success); }
+  .offline { background: var(--status-error); box-shadow: 0 0 4px var(--status-error); }
 
   .label { color: var(--muted); flex-grow: 1; }
   .value { color: var(--body); font-family: monospace; }

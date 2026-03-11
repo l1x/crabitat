@@ -111,14 +111,14 @@ function getPreview(text: string | null): string {
 
   .markdown-body code {
     font-family: monospace;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--overlay-medium);
     padding: 2px 4px;
     border-radius: 4px;
     font-size: 0.9em;
   }
 
   .markdown-body pre {
-    background: #0f0f0f;
+    background: var(--code-bg);
     padding: 16px;
     border-radius: 8px;
     border: 1px solid var(--border-subtle);
@@ -153,7 +153,7 @@ function getPreview(text: string | null): string {
   }
 
   .issue-card:hover {
-    border-color: #333;
+    border-color: var(--border-hover);
   }
 
   .row {
@@ -177,8 +177,8 @@ function getPreview(text: string | null): string {
     flex-shrink: 0;
   }
 
-  .dot.open { background: #3fb950; box-shadow: 0 0 8px rgba(63, 185, 80, 0.4); }
-  .dot.closed { background: #8b949e; }
+  .dot.open { background: var(--status-success); box-shadow: 0 0 8px var(--status-success-bg); }
+  .dot.closed { background: var(--status-closed); }
 
   .number {
     color: var(--muted);
@@ -219,7 +219,7 @@ function getPreview(text: string | null): string {
   }
 
   .expand-btn:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--overlay-medium);
     color: var(--heading);
   }
 
@@ -237,7 +237,7 @@ function getPreview(text: string | null): string {
 
   .launch-btn:hover {
     border-color: var(--muted);
-    background: #222;
+    background: var(--btn-hover-bg);
   }
 
   .details {
@@ -257,7 +257,7 @@ function getPreview(text: string | null): string {
     font-size: 12px;
     font-weight: 600;
     color: var(--body);
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--overlay-subtle);
     border: 1px solid var(--btn-border);
     border-radius: 12px;
     padding: 2px 12px;

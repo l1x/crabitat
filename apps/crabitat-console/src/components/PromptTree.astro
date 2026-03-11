@@ -71,7 +71,7 @@ const { nodes, selectedPaths = [], depth = 0 } = Astro.props;
   }
 
   summary:hover {
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--overlay-light);
     color: var(--heading);
   }
 
@@ -91,7 +91,7 @@ const { nodes, selectedPaths = [], depth = 0 } = Astro.props;
   }
 
   .prompt-item:hover {
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--overlay-light);
   }
 
   .file-icon {

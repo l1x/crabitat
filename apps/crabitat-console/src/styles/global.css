@@ -1,18 +1,146 @@
+@import "open-props/gray-oklch.min.css";
+@import "open-props/oklch-hues.min.css";
+
+/* ── Dark theme (default) ─────────────────────────── */
 :root {
-  --bg: #111111;
-  --bg-sidebar: #0e0e0e;
-  --card: #1a1a1a;
-  --border: #2a2a2a;
-  --border-subtle: #222222;
-  --heading: #ffffff;
-  --body: #b0b0b0;
-  --muted: #777777;
-  --faint: #444444;
-  --accent: #ffffff; /* Monochrome accent */
-  --btn-bg: #1a1a1a;
-  --btn-border: #333333;
-  --input-bg: #0a0a0a;
+  /* Surfaces */
+  --bg: var(--gray-14);
+  --bg-sidebar: var(--gray-15);
+  --card: var(--gray-13);
+  --input-bg: var(--gray-15);
+  --code-bg: var(--gray-15);
+
+  /* Borders */
+  --border: var(--gray-11);
+  --border-subtle: var(--gray-12);
+  --border-hover: var(--gray-10);
+
+  /* Text */
+  --heading: var(--gray-0);
+  --body: var(--gray-4);
+  --muted: var(--gray-7);
+  --faint: var(--gray-9);
+  --accent: var(--gray-0);
+
+  /* Buttons – secondary */
+  --btn-bg: var(--gray-13);
+  --btn-border: var(--gray-11);
+  --btn-hover-bg: var(--gray-12);
+
+  /* Buttons – primary */
+  --primary-bg: var(--gray-3);
+  --primary-text: var(--gray-15);
+  --primary-hover: var(--gray-0);
+
+  /* Overlays */
+  --overlay-subtle: oklch(100% 0 0 / 0.02);
+  --overlay-light: oklch(100% 0 0 / 0.03);
+  --overlay-medium: oklch(100% 0 0 / 0.05);
+  --overlay-strong: oklch(100% 0 0 / 0.1);
+  --backdrop: oklch(0% 0 0 / 0.8);
+  --shadow-card: oklch(0% 0 0 / 0.4);
+  --shadow-elevated: oklch(0% 0 0 / 0.3);
+
+  /* Status */
+  --status-success: oklch(65% 0.19 var(--hue-green));
+  --status-error: oklch(65% 0.22 var(--hue-red));
+  --status-warning: oklch(72% 0.12 var(--hue-orange));
+  --status-info: oklch(63% 0.18 var(--hue-blue));
+  --status-closed: var(--gray-7);
+
+  --status-success-bg: oklch(65% 0.19 var(--hue-green) / 0.1);
+  --status-success-border: oklch(65% 0.19 var(--hue-green) / 0.2);
+  --status-error-bg: oklch(65% 0.22 var(--hue-red) / 0.1);
+  --status-error-border: oklch(65% 0.22 var(--hue-red) / 0.2);
+  --status-warning-bg: oklch(72% 0.12 var(--hue-orange) / 0.1);
+  --status-warning-border: oklch(72% 0.12 var(--hue-orange) / 0.2);
+  --status-info-bg: oklch(63% 0.18 var(--hue-blue) / 0.1);
+  --status-info-border: oklch(63% 0.18 var(--hue-blue) / 0.2);
+
+  /* Env pills */
+  --env-local-text: oklch(70% 0.15 var(--hue-blue));
+  --env-local-bg: oklch(70% 0.15 var(--hue-blue) / 0.15);
+  --env-remote-text: oklch(70% 0.2 var(--hue-violet));
+  --env-remote-bg: oklch(70% 0.2 var(--hue-violet) / 0.15);
+
+  /* Misc */
+  --hatch-color: oklch(20% 0 0 / 0.5);
+  --sidebar-active-bg: var(--gray-13);
+  --row-hover-bg: var(--gray-14);
+  --row-hover-border: var(--gray-10);
+  --row-hover-text: var(--gray-5);
+
   --font-size-base: 16px;
+}
+
+/* ── Light theme ───────────────────────────────────── */
+[data-theme="light"] {
+  /* Surfaces */
+  --bg: var(--gray-1);
+  --bg-sidebar: var(--gray-0);
+  --card: oklch(100% 0 0);
+  --input-bg: var(--gray-1);
+  --code-bg: var(--gray-1);
+
+  /* Borders */
+  --border: var(--gray-3);
+  --border-subtle: var(--gray-2);
+  --border-hover: var(--gray-4);
+
+  /* Text */
+  --heading: var(--gray-13);
+  --body: var(--gray-10);
+  --muted: var(--gray-7);
+  --faint: var(--gray-5);
+  --accent: var(--gray-13);
+
+  /* Buttons – secondary */
+  --btn-bg: oklch(100% 0 0);
+  --btn-border: var(--gray-3);
+  --btn-hover-bg: var(--gray-2);
+
+  /* Buttons – primary */
+  --primary-bg: var(--gray-13);
+  --primary-text: var(--gray-0);
+  --primary-hover: var(--gray-14);
+
+  /* Overlays */
+  --overlay-subtle: oklch(0% 0 0 / 0.02);
+  --overlay-light: oklch(0% 0 0 / 0.03);
+  --overlay-medium: oklch(0% 0 0 / 0.05);
+  --overlay-strong: oklch(0% 0 0 / 0.1);
+  --backdrop: oklch(0% 0 0 / 0.6);
+  --shadow-card: oklch(0% 0 0 / 0.08);
+  --shadow-elevated: oklch(0% 0 0 / 0.15);
+
+  /* Status – slightly darker for contrast on light bg */
+  --status-success: oklch(55% 0.19 var(--hue-green));
+  --status-error: oklch(55% 0.22 var(--hue-red));
+  --status-warning: oklch(60% 0.12 var(--hue-orange));
+  --status-info: oklch(53% 0.18 var(--hue-blue));
+  --status-closed: var(--gray-7);
+
+  --status-success-bg: oklch(55% 0.19 var(--hue-green) / 0.1);
+  --status-success-border: oklch(55% 0.19 var(--hue-green) / 0.2);
+  --status-error-bg: oklch(55% 0.22 var(--hue-red) / 0.1);
+  --status-error-border: oklch(55% 0.22 var(--hue-red) / 0.2);
+  --status-warning-bg: oklch(60% 0.12 var(--hue-orange) / 0.1);
+  --status-warning-border: oklch(60% 0.12 var(--hue-orange) / 0.2);
+  --status-info-bg: oklch(53% 0.18 var(--hue-blue) / 0.1);
+  --status-info-border: oklch(53% 0.18 var(--hue-blue) / 0.2);
+
+  /* Env pills */
+  --env-local-text: oklch(50% 0.15 var(--hue-blue));
+  --env-local-bg: oklch(50% 0.15 var(--hue-blue) / 0.12);
+  --env-remote-text: oklch(50% 0.2 var(--hue-violet));
+  --env-remote-bg: oklch(50% 0.2 var(--hue-violet) / 0.12);
+
+  /* Misc */
+  --hatch-color: oklch(88% 0 0 / 0.4);
+  --sidebar-active-bg: var(--gray-2);
+  --row-hover-bg: var(--gray-1);
+  --row-hover-border: var(--gray-4);
+  --row-hover-text: var(--gray-10);
 }
 
 *,
@@ -47,8 +175,8 @@ body::before {
     45deg,
     transparent,
     transparent 5px,
-    rgba(28, 28, 28, 0.5) 5px,
-    rgba(28, 28, 28, 0.5) 6px
+    var(--hatch-color) 5px,
+    var(--hatch-color) 6px
   );
 }
 

@@ -149,7 +149,7 @@ try {
 
   .launch-trigger:hover {
     border-color: var(--muted);
-    background: #222;
+    background: var(--btn-hover-bg);
   }
 
   .launch-dialog {
@@ -162,7 +162,7 @@ try {
   }
 
   .launch-dialog::backdrop {
-    background: rgba(0, 0, 0, 0.8);
+    background: var(--backdrop);
     backdrop-filter: blur(4px);
   }
 
@@ -172,7 +172,7 @@ try {
     border-radius: 16px;
     padding: 32px;
     width: 500px;
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 20px 40px var(--shadow-card);
   }
 
   .modal-header {
@@ -258,18 +258,18 @@ try {
 
   .cancel-btn:hover {
     color: var(--heading);
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--overlay-medium);
   }
 
   .submit-btn {
-    background: #d0d0d0;
-    color: #000;
-    border: 1px solid #d0d0d0;
+    background: var(--primary-bg);
+    color: var(--primary-text);
+    border: 1px solid var(--primary-bg);
   }
 
   .submit-btn:hover {
-    background: #ffffff;
-    border-color: #ffffff;
+    background: var(--primary-hover);
+    border-color: var(--primary-hover);
   }
 
   .submit-btn:disabled {
