@@ -21,7 +21,7 @@ const { summary, detail } = Astro.props;
     <p class="description">{summary.description}</p>
   )}
 
-  <div class="section">
+  <div class="section flavors-section">
     <div class="section-label">FLAVORS</div>
     <div class="flavors">
       {detail.flavors.map((f) => (
@@ -93,6 +93,12 @@ const { summary, detail } = Astro.props;
     display: flex;
     flex-direction: column;
     gap: 12px;
+  }
+
+  .flavors-section {
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
   }
 
   .section-label {

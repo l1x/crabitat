@@ -287,6 +287,11 @@ function timeAgo(dateStr: string): string {
     text-decoration: none;
   }
 
+  .mission-row[data-status="failed"] {
+    border-left: 3px solid var(--status-error);
+    background: var(--status-error-bg);
+  }
+
   .mission-row:hover {
     border-color: var(--row-hover-border);
     background: var(--row-hover-bg);
@@ -314,10 +319,15 @@ function timeAgo(dateStr: string): string {
     border-radius: 50%;
   }
 
-  .status-dot.pending { background: var(--status-warning); box-shadow: 0 0 8px var(--status-warning-bg); }
-  .status-dot.running { background: var(--status-info); box-shadow: 0 0 8px var(--status-info-bg); }
+  .status-dot.pending { background: var(--status-warning); box-shadow: 0 0 8px var(--status-warning-bg); animation: pulse 2s ease-in-out infinite; }
+  .status-dot.running { background: var(--status-info); box-shadow: 0 0 8px var(--status-info-bg); animation: pulse 1.5s ease-in-out infinite; }
   .status-dot.completed { background: var(--status-success); box-shadow: 0 0 8px var(--status-success-bg); }
   .status-dot.failed { background: var(--status-error); box-shadow: 0 0 8px var(--status-error-bg); }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.75); }
+  }
 
   .mission-info {
     display: flex;

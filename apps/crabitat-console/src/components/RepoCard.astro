@@ -39,6 +39,13 @@ const { repo } = Astro.props;
     flex-direction: column;
     gap: 20px;
     min-width: 0; /* Allow card to shrink if needed */
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  }
+
+  .card:hover {
+    transform: scale(1.02);
+    border-color: var(--border-hover);
+    box-shadow: 0 4px 16px var(--shadow-card);
   }
 
   .header {
