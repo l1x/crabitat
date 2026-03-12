@@ -1,20 +1,40 @@
 ---
 import Layout from "../../layouts/Layout.astro";
 import { getMission } from "../../lib/api-client";
-import type { Mission, Task } from "../../lib/types";
+import type { Mission, Task, StateHistoryEntry } from "../../lib/types";
 
 const { id } = Astro.params;
 
 let mission: Mission | null = null;
 let tasks: Task[] = [];
+let stateHistory: StateHistoryEntry[] = [];
 let error = "";
 
 try {
   const data = await getMission(id!);
   mission = data.mission;
   tasks = data.tasks;
+  stateHistory = data.state_history || [];
 } catch (e) {
   error = e instanceof Error ? e.message : String(e);
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainSec = seconds % 60;
+  if (minutes < 60) return `${minutes}m ${remainSec}s`;
+  const hours = Math.floor(minutes / 60);
+  const remainMin = minutes % 60;
+  return `${hours}h ${remainMin}m`;
+}
+
+function stateDuration(entry: StateHistoryEntry): string {
+  const start = new Date(entry.entered_at).getTime();
+  const end = entry.exited_at ? new Date(entry.exited_at).getTime() : Date.now();
+  return formatDuration(end - start);
 }
 ---
 
@@ -35,6 +55,25 @@ try {
   <div class="divider"></div>
 
   {error && <p class="message error">{error}</p>}
+
+  {stateHistory.length > 0 && (
+    <div class="state-timeline">
+      <h3>State Timeline</h3>
+      <div class="timeline-track">
+        {stateHistory.map((entry) => (
+          <div class={`timeline-entry ${entry.state}`}>
+            <div class="timeline-dot"></div>
+            <div class="timeline-content">
+              <span class="timeline-state">{entry.state}</span>
+              <span class="timeline-duration">
+                {stateDuration(entry)}{!entry.exited_at && ' (active)'}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )}
 
   <div class="mission-container">
     <div class="pipeline">
@@ -342,6 +381,80 @@ try {
   }
 
   .markdown-content :global(li) { margin-bottom: 4px; }
+
+  .state-timeline {
+    margin-bottom: 32px;
+  }
+
+  .state-timeline h3 {
+    font-size: 18px;
+    color: var(--heading);
+    margin-bottom: 20px;
+  }
+
+  .timeline-track {
+    display: flex;
+    gap: 0;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 24px;
+    overflow-x: auto;
+  }
+
+  .timeline-entry {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px;
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .timeline-entry:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    right: -1px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 0;
+    height: 0;
+    border-top: 6px solid transparent;
+    border-bottom: 6px solid transparent;
+    border-left: 6px solid var(--border-subtle);
+  }
+
+  .timeline-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .timeline-entry.pending .timeline-dot { background: var(--status-warning); }
+  .timeline-entry.running .timeline-dot { background: var(--status-info); }
+  .timeline-entry.completed .timeline-dot { background: var(--status-success); }
+  .timeline-entry.failed .timeline-dot { background: var(--status-error); }
+
+  .timeline-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .timeline-state {
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--heading);
+  }
+
+  .timeline-duration {
+    font-size: 12px;
+    color: var(--muted);
+    font-family: monospace;
+  }
 
   .message.error {
     background: var(--status-error-bg);

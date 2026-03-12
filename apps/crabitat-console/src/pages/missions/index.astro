@@ -16,9 +16,32 @@ const completed = missions.filter(m => m.status === 'completed').length;
 const failed = missions.filter(m => m.status === 'failed').length;
 const active = missions.filter(m => m.status === 'pending' || m.status === 'running').length;
 const total = missions.length;
-const successRate = (completed + failed) > 0 
-  ? Math.round((completed / (completed + failed)) * 100) 
+const successRate = (completed + failed) > 0
+  ? Math.round((completed / (completed + failed)) * 100)
   : 0;
+
+// Compute average duration for completed missions
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainSec = seconds % 60;
+  if (minutes < 60) return `${minutes}m ${remainSec}s`;
+  const hours = Math.floor(minutes / 60);
+  const remainMin = minutes % 60;
+  return `${hours}h ${remainMin}m`;
+}
+
+const completedMissions = missions.filter(m => m.status === 'completed' && m.updated_at);
+const avgDuration = completedMissions.length > 0
+  ? completedMissions.reduce((sum, m) => {
+      const start = new Date(m.created_at).getTime();
+      const end = new Date(m.updated_at!).getTime();
+      return sum + (end - start);
+    }, 0) / completedMissions.length
+  : 0;
+const avgDurationStr = completedMissions.length > 0 ? formatDuration(Math.round(avgDuration)) : '—';
 
 function timeAgo(dateStr: string): string {
   if (!dateStr) return "";
@@ -62,6 +85,10 @@ function timeAgo(dateStr: string): string {
     <div class="stat-item">
       <span class="stat-label">Success Rate</span>
       <span class="stat-value">{successRate}%</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-label">Avg Duration</span>
+      <span class="stat-value">{avgDurationStr}</span>
     </div>
   </div>
 

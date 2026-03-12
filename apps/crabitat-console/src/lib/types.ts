@@ -95,6 +95,14 @@ export interface Mission {
   status: string;
   branch: string | null;
   created_at: string;
+  updated_at?: string;
+}
+
+export interface StateHistoryEntry {
+  mission_id: string;
+  state: string;
+  entered_at: string;
+  exited_at: string | null;
 }
 
 export interface Run {

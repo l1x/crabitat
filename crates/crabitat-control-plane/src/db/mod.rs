@@ -113,6 +113,14 @@ pub(crate) fn migrate(conn: &Connection) {
             tokens_used INTEGER,
             started_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
             finished_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS mission_state_history (
+            id         INTEGER PRIMARY KEY,
+            mission_id TEXT NOT NULL REFERENCES missions(mission_id),
+            state      TEXT NOT NULL,
+            entered_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            exited_at  TEXT
         );",
     )
     .expect("failed to run migrations");

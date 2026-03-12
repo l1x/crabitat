@@ -1,4 +1,4 @@
-use crate::models::missions::{CreateMissionRequest, Mission};
+use crate::models::missions::{CreateMissionRequest, Mission, StateHistoryEntry};
 use rusqlite::{Connection, params};
 
 pub fn insert_mission(
@@ -149,6 +149,15 @@ pub fn list_by_repo(conn: &Connection, repo_id: &str) -> Result<Vec<Mission>, St
 }
 
 pub fn recalculate_mission_status(conn: &Connection, mission_id: &str) -> Result<(), String> {
+    // Get current mission status before recalculating
+    let current_status: String = conn
+        .query_row(
+            "SELECT status FROM missions WHERE mission_id = ?1",
+            [mission_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+
     // Get all task statuses for this mission
     let mut stmt = conn
         .prepare("SELECT status FROM tasks WHERE mission_id = ?1")
@@ -180,7 +189,63 @@ pub fn recalculate_mission_status(conn: &Connection, mission_id: &str) -> Result
     )
     .map_err(|e| e.to_string())?;
 
+    // Track state transition if status actually changed
+    if new_status != current_status {
+        close_current_state(conn, mission_id)?;
+        insert_state_history_entry(conn, mission_id, new_status)?;
+    }
+
     Ok(())
+}
+
+pub fn insert_state_history_entry(
+    conn: &Connection,
+    mission_id: &str,
+    state: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO mission_state_history (mission_id, state) VALUES (?1, ?2)",
+        params![mission_id, state],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn close_current_state(conn: &Connection, mission_id: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE mission_state_history SET exited_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE mission_id = ?1 AND exited_at IS NULL",
+        params![mission_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn get_state_history(
+    conn: &Connection,
+    mission_id: &str,
+) -> Result<Vec<StateHistoryEntry>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT mission_id, state, entered_at, exited_at FROM mission_state_history WHERE mission_id = ?1 ORDER BY entered_at ASC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map([mission_id], |row| {
+            Ok(StateHistoryEntry {
+                mission_id: row.get(0)?,
+                state: row.get(1)?,
+                entered_at: row.get(2)?,
+                exited_at: row.get(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut entries = Vec::new();
+    for row in rows {
+        entries.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(entries)
 }
 
 #[cfg(test)]

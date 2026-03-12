@@ -12,6 +12,7 @@ import type {
   Mission,
   Task,
   CreateMissionRequest,
+  StateHistoryEntry,
 } from "./types";
 
 const API_BASE = "http://localhost:3001";
@@ -210,7 +211,7 @@ export async function listMissions(): Promise<Mission[]> {
   return res.json();
 }
 
-export async function getMission(missionId: string): Promise<{ mission: Mission; tasks: Task[] }> {
+export async function getMission(missionId: string): Promise<{ mission: Mission; tasks: Task[]; state_history: StateHistoryEntry[] }> {
   const res = await fetch(`${API_BASE}/v1/missions/${missionId}`);
   if (!res.ok) throw new Error(`Failed to get mission: ${res.status}`);
   return res.json();

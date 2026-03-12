@@ -96,6 +96,10 @@ pub async fn create_mission(
     let mission = db::insert_mission(&tx, &req, &branch)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
 
+    // Seed initial state history entry
+    db::insert_state_history_entry(&tx, &mission.mission_id, "pending")
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
+
     // 5. Expand Workflow into Tasks
     for (i, step) in wf.steps.iter().enumerate() {
         let prompt = service
@@ -163,9 +167,13 @@ pub async fn get_mission(
         tasks_with_runs.push(task_val);
     }
 
+    let state_history = db::get_state_history(&conn, &mission_id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
+
     Ok(Json(json!({
         "mission": mission,
-        "tasks": tasks_with_runs
+        "tasks": tasks_with_runs,
+        "state_history": state_history
     })))
 }
 

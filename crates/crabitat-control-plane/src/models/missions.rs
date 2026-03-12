@@ -18,6 +18,15 @@ pub struct Mission {
     pub last_worker_id: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StateHistoryEntry {
+    pub mission_id: String,
+    pub state: String,
+    pub entered_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exited_at: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreateMissionRequest {
     pub repo_id: String,
