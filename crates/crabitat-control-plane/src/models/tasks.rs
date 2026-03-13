@@ -41,6 +41,11 @@ pub struct Run {
     pub finished_at: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+pub struct RetryTaskRequest {
+    pub context: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreateRunRequest {
     pub status: String,

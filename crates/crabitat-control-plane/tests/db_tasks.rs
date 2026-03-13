@@ -405,3 +405,55 @@ fn test_three_step_sequential_gating() {
     let result = tasks::get_next_queued_task(&conn, None).unwrap();
     assert!(result.is_none());
 }
+
+#[test]
+fn test_retry_failed_task_resets_to_queued() {
+    let conn = test_conn();
+    let (_, mission_id) = setup_repo_and_mission(&conn);
+
+    let t = tasks::insert_task(&conn, &mission_id, "step1", 0, "p1", 3, "queued").unwrap();
+    assert_eq!(t.retry_count, 0);
+
+    // Fail the task
+    tasks::update_task_status(&conn, &t.task_id, "failed").unwrap();
+    let fetched = tasks::get_task(&conn, &t.task_id).unwrap().unwrap();
+    assert_eq!(fetched.status, "failed");
+
+    // Retry should reset to queued and bump retry_count
+    tasks::increment_task_retry(&conn, &t.task_id).unwrap();
+    let fetched = tasks::get_task(&conn, &t.task_id).unwrap().unwrap();
+    assert_eq!(fetched.status, "queued");
+    assert_eq!(fetched.retry_count, 1);
+
+    // Second retry
+    tasks::update_task_status(&conn, &t.task_id, "failed").unwrap();
+    tasks::increment_task_retry(&conn, &t.task_id).unwrap();
+    let fetched = tasks::get_task(&conn, &t.task_id).unwrap().unwrap();
+    assert_eq!(fetched.status, "queued");
+    assert_eq!(fetched.retry_count, 2);
+}
+
+#[test]
+fn test_retry_updates_assembled_prompt() {
+    let conn = test_conn();
+    let (_, mission_id) = setup_repo_and_mission(&conn);
+
+    let t = tasks::insert_task(&conn, &mission_id, "step1", 0, "original prompt", 3, "queued").unwrap();
+
+    // Fail the task
+    tasks::update_task_status(&conn, &t.task_id, "failed").unwrap();
+
+    // Update assembled prompt with new context (simulating what the handler does)
+    tasks::update_task_assembled_prompt(&conn, &t.task_id, "prompt with human guidance").unwrap();
+
+    let fetched = tasks::get_task(&conn, &t.task_id).unwrap().unwrap();
+    assert_eq!(fetched.assembled_prompt, "prompt with human guidance");
+    assert_eq!(fetched.status, "failed"); // prompt update doesn't change status
+
+    // Now retry
+    tasks::increment_task_retry(&conn, &t.task_id).unwrap();
+    let fetched = tasks::get_task(&conn, &t.task_id).unwrap().unwrap();
+    assert_eq!(fetched.status, "queued");
+    assert_eq!(fetched.assembled_prompt, "prompt with human guidance");
+    assert_eq!(fetched.retry_count, 1);
+}

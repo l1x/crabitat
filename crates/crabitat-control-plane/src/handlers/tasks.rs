@@ -8,7 +8,7 @@ use crate::AppState;
 use crate::db::missions as db_missions;
 use crate::db::tasks as db;
 use crate::mission_service::reassemble_prompt_with_context;
-use crate::models::tasks::CreateRunRequest;
+use crate::models::tasks::{CreateRunRequest, RetryTaskRequest};
 
 #[derive(Deserialize)]
 pub struct TaskQuery {
@@ -84,25 +84,37 @@ pub async fn update_task_status(
 pub async fn retry_task(
     State(state): State<AppState>,
     Path(task_id): Path<String>,
+    body: Option<Json<RetryTaskRequest>>,
 ) -> Result<StatusCode, (StatusCode, Json<Value>)> {
     let conn = state.db.lock().unwrap();
 
-    if let Err(e) = db::increment_task_retry(&conn, &task_id) {
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))));
+    // 1. Fetch task, return 404 if not found
+    let task = db::get_task(&conn, &task_id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, Json(json!({"error": "task not found"}))))?;
+
+    // 2. Validate task is in failed status
+    if task.status != "failed" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": format!("task status is '{}', must be 'failed' to retry", task.status)})),
+        ));
     }
 
-    // Recalculate mission status
-    let mission_id_res: Result<String, String> = conn
-        .query_row(
-            "SELECT mission_id FROM tasks WHERE task_id = ?1",
-            [&task_id],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string());
-
-    if let Ok(mid) = mission_id_res {
-        let _ = db_missions::recalculate_mission_status(&conn, &mid);
+    // 3. If context provided, reassemble prompt with human guidance
+    if let Some(ctx) = body.and_then(|b| b.context.clone()) {
+        let new_prompt = reassemble_prompt_with_context(&conn, &task, &ctx)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
+        db::update_task_assembled_prompt(&conn, &task_id, &new_prompt)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
     }
+
+    // 4. Increment retry (resets status to queued, bumps retry_count)
+    db::increment_task_retry(&conn, &task_id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
+
+    // 5. Recalculate mission status
+    let _ = db_missions::recalculate_mission_status(&conn, &task.mission_id);
 
     Ok(StatusCode::NO_CONTENT)
 }
