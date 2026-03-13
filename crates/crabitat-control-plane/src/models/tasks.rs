@@ -17,7 +17,7 @@ pub struct Task {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GitInfo {
-    pub repo_url: String,
+    pub repo_url: Option<String>,
     pub branch: String,
     pub local_path: Option<String>,
 }

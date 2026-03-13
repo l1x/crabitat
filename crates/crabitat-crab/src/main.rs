@@ -54,7 +54,7 @@ struct Task {
 
 #[derive(Debug, Deserialize)]
 struct GitInfo {
-    repo_url: String,
+    repo_url: Option<String>,
     branch: String,
     local_path: Option<String>,
 }
@@ -164,7 +164,7 @@ async fn poll_and_execute(
     let task_data: TaskResponse = res.json().await?;
     let task_id = &task_data.task.task_id;
 
-    info!("Found task {} for repo {}", task_id, task_data.git.repo_url);
+    info!("Found task {} for repo {}", task_id, task_data.git.repo_url.as_deref().unwrap_or("(local)"));
 
     // 2. Mark as running
     client
@@ -185,9 +185,12 @@ async fn poll_and_execute(
         PathBuf::from(lp)
     } else {
         // Deterministic cache path based on repo URL
-        let repo_name = task_data
+        let repo_url = task_data
             .git
             .repo_url
+            .as_ref()
+            .ok_or("No repo_url or local_path provided")?;
+        let repo_name = repo_url
             .split('/')
             .next_back()
             .unwrap()
@@ -203,13 +206,13 @@ async fn poll_and_execute(
                 if !cache_path.exists() {
                     info!(
                         "Cloning repo {} to {:?}",
-                        task_data.git.repo_url, cache_path
+                        repo_url, cache_path
                     );
                     std::fs::create_dir_all(cache_path.parent().unwrap())?;
                     let status = new_git_command(args)
                         .args([
                             "clone",
-                            &task_data.git.repo_url,
+                            repo_url.as_str(),
                             cache_path.to_str().unwrap(),
                         ])
                         .status()?;
