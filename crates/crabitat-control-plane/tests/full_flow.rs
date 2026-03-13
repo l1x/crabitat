@@ -197,8 +197,15 @@ async fn test_full_flow() {
         .collect();
     assert_eq!(step_ids, vec!["implement", "qa"]);
 
-    for task in tasks {
-        assert_eq!(task["status"], "queued", "tasks should start as queued");
+    assert_eq!(
+        tasks[0]["status"], "queued",
+        "first task should start as queued"
+    );
+    for task in &tasks[1..] {
+        assert_eq!(
+            task["status"], "blocked",
+            "subsequent tasks should start as blocked"
+        );
     }
 
     // Verify task prompts contain the issue title

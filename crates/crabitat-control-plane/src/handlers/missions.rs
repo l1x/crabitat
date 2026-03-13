@@ -117,6 +117,7 @@ pub async fn create_mission(
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
 
         let max_retries = step.max_retries.unwrap_or(3) as i64;
+        let status = if i == 0 { "queued" } else { "blocked" };
 
         tasks_db::insert_task(
             &tx,
@@ -125,6 +126,7 @@ pub async fn create_mission(
             i as i64,
             &prompt,
             max_retries,
+            status,
         )
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
     }
