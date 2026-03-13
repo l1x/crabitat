@@ -247,6 +247,3 @@ pub fn get_state_history(
     }
     Ok(entries)
 }
-
-#[cfg(test)]
-mod missions_test;

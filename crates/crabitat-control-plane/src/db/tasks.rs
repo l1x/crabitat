@@ -283,6 +283,3 @@ pub fn update_task_assembled_prompt(
     .map_err(|e| e.to_string())?;
     Ok(())
 }
-
-#[cfg(test)]
-mod tasks_test;

@@ -15,7 +15,7 @@ pub fn init(path: &str) -> Connection {
     conn
 }
 
-pub(crate) fn migrate(conn: &Connection) {
+pub fn migrate(conn: &Connection) {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS repos (
             repo_id    TEXT PRIMARY KEY,
