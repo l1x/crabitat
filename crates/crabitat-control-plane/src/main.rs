@@ -1,20 +1,7 @@
-mod db;
-mod github;
-mod handlers;
-mod mission_service;
-mod models;
-mod routes;
-mod workflow_registry;
-
 use std::sync::{Arc, Mutex};
 
-use rusqlite::Connection;
+use crabitat_control_plane::{AppState, db, routes};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
-#[derive(Clone)]
-pub struct AppState {
-    pub db: Arc<Mutex<Connection>>,
-}
 
 #[tokio::main]
 async fn main() {

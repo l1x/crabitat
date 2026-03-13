@@ -1,6 +1,8 @@
 use crate::db::issues as issues_db;
+use crate::db::missions as missions_db;
 use crate::db::settings as settings_db;
 use crate::db::workflows as wf_db;
+use crate::models::tasks::Task;
 use crate::workflow_registry::WorkflowRegistry;
 use rusqlite::Connection;
 
@@ -111,4 +113,28 @@ impl MissionService {
 
         Ok(final_prompt)
     }
+}
+
+/// Re-run prompt assembly for a task's workflow step, injecting `context` into `{{context}}`.
+pub fn reassemble_prompt_with_context(
+    conn: &Connection,
+    task: &Task,
+    context: &str,
+) -> Result<String, String> {
+    let mission = missions_db::get_mission(conn, &task.mission_id)?
+        .ok_or_else(|| format!("mission not found: {}", task.mission_id))?;
+
+    let service = MissionService::new(conn)?;
+
+    service.assemble_prompt(
+        conn,
+        AssemblePromptRequest {
+            workflow_name: &mission.workflow_name,
+            step_id: &task.step_id,
+            flavor_id: mission.flavor_id.as_deref(),
+            repo_id: &mission.repo_id,
+            issue_number: mission.issue_number,
+            context: Some(context),
+        },
+    )
 }

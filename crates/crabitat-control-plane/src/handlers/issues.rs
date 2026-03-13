@@ -39,7 +39,7 @@ pub async fn refresh_repo_issues(
     fetch_and_cache(&state, &repo_id, &owner, &name).await
 }
 
-fn lookup_repo(
+pub fn lookup_repo(
     state: &AppState,
     repo_id: &str,
 ) -> Result<(String, String), (StatusCode, Json<Value>)> {
@@ -81,53 +81,5 @@ async fn fetch_and_cache(
     match issues_db::list_by_repo(&conn, repo_id) {
         Ok(issues) => Ok(Json(issues)),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e})))),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::db;
-    use rusqlite::Connection;
-    use std::sync::{Arc, Mutex};
-
-    fn setup() -> AppState {
-        let conn = Connection::open_in_memory().unwrap();
-        db::migrate(&conn);
-        AppState {
-            db: Arc::new(Mutex::new(conn)),
-        }
-    }
-
-    #[test]
-    fn test_lookup_repo_active() {
-        let state = setup();
-        let repo_id = {
-            let conn = state.db.lock().unwrap();
-            let repo = repos::insert(&conn, "owner", "name", None, None).unwrap();
-            repo.repo_id
-        };
-
-        let res = lookup_repo(&state, &repo_id);
-        assert!(res.is_ok());
-        let (owner, name) = res.unwrap();
-        assert_eq!(owner, "owner");
-        assert_eq!(name, "name");
-    }
-
-    #[test]
-    fn test_lookup_repo_soft_deleted_returns_404() {
-        let state = setup();
-        let repo_id = {
-            let conn = state.db.lock().unwrap();
-            let repo = repos::insert(&conn, "owner", "name", None, None).unwrap();
-            repos::delete(&conn, &repo.repo_id).unwrap();
-            repo.repo_id
-        };
-
-        let res = lookup_repo(&state, &repo_id);
-        assert!(res.is_err());
-        let (status, _) = res.unwrap_err();
-        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 }

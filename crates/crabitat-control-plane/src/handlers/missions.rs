@@ -117,6 +117,7 @@ pub async fn create_mission(
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
 
         let max_retries = step.max_retries.unwrap_or(3) as i64;
+        let status = if i == 0 { "queued" } else { "blocked" };
 
         tasks_db::insert_task(
             &tx,
@@ -125,6 +126,7 @@ pub async fn create_mission(
             i as i64,
             &prompt,
             max_retries,
+            status,
         )
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
     }
@@ -175,43 +177,4 @@ pub async fn get_mission(
         "tasks": tasks_with_runs,
         "state_history": state_history
     })))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::db;
-    use rusqlite::Connection;
-    use std::sync::{Arc, Mutex};
-
-    fn setup() -> AppState {
-        let conn = Connection::open_in_memory().unwrap();
-        db::migrate(&conn);
-        AppState {
-            db: Arc::new(Mutex::new(conn)),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_create_mission_soft_deleted_repo_returns_404() {
-        let state = setup();
-        let repo_id = {
-            let conn = state.db.lock().unwrap();
-            let repo = repos_db::insert(&conn, "owner", "name", None, None).unwrap();
-            repos_db::delete(&conn, &repo.repo_id).unwrap();
-            repo.repo_id
-        };
-
-        let req = CreateMissionRequest {
-            repo_id,
-            issue_number: 1,
-            workflow_name: "test-wf".into(),
-            flavor_id: None,
-        };
-
-        let result = create_mission(State(state), Json(req)).await;
-        assert!(result.is_err());
-        let (status, _) = result.unwrap_err();
-        assert_eq!(status, StatusCode::NOT_FOUND);
-    }
 }

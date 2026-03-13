@@ -110,6 +110,3 @@ pub fn list_all(conn: &Connection) -> Result<Vec<Setting>> {
     }
     Ok(settings)
 }
-
-#[cfg(test)]
-mod settings_test;

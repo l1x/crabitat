@@ -164,7 +164,11 @@ async fn poll_and_execute(
     let task_data: TaskResponse = res.json().await?;
     let task_id = &task_data.task.task_id;
 
-    info!("Found task {} for repo {}", task_id, task_data.git.repo_url.as_deref().unwrap_or("(local)"));
+    info!(
+        "Found task {} for repo {}",
+        task_id,
+        task_data.git.repo_url.as_deref().unwrap_or("(local)")
+    );
 
     // 2. Mark as running
     client
@@ -190,11 +194,7 @@ async fn poll_and_execute(
             .repo_url
             .as_ref()
             .ok_or("No repo_url or local_path provided")?;
-        let repo_name = repo_url
-            .split('/')
-            .next_back()
-            .unwrap()
-            .replace(".git", "");
+        let repo_name = repo_url.split('/').next_back().unwrap().replace(".git", "");
 
         match get_env_path(client, &args.api_url, &args.env, "repo", &repo_name).await {
             Some(p) => PathBuf::from(p),
@@ -204,17 +204,10 @@ async fn poll_and_execute(
                     .join(&repo_name);
 
                 if !cache_path.exists() {
-                    info!(
-                        "Cloning repo {} to {:?}",
-                        repo_url, cache_path
-                    );
+                    info!("Cloning repo {} to {:?}", repo_url, cache_path);
                     std::fs::create_dir_all(cache_path.parent().unwrap())?;
                     let status = new_git_command(args)
-                        .args([
-                            "clone",
-                            repo_url.as_str(),
-                            cache_path.to_str().unwrap(),
-                        ])
+                        .args(["clone", repo_url.as_str(), cache_path.to_str().unwrap()])
                         .status()?;
                     if !status.success() {
                         return Err("Failed to clone repository".into());

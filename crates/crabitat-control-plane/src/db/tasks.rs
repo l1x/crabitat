@@ -8,19 +8,21 @@ pub fn insert_task(
     step_order: i64,
     assembled_prompt: &str,
     max_retries: i64,
+    status: &str,
 ) -> Result<Task, String> {
     let task_id = uuid::Uuid::new_v4().to_string();
 
     conn.execute(
-        "INSERT INTO tasks (task_id, mission_id, step_id, step_order, assembled_prompt, max_retries) 
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO tasks (task_id, mission_id, step_id, step_order, assembled_prompt, max_retries, status)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             task_id,
             mission_id,
             step_id,
             step_order,
             assembled_prompt,
-            max_retries
+            max_retries,
+            status
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -31,7 +33,7 @@ pub fn insert_task(
         step_id: step_id.to_string(),
         step_order,
         assembled_prompt: assembled_prompt.to_string(),
-        status: "queued".to_string(),
+        status: status.to_string(),
         retry_count: 0,
         max_retries,
         created_at: "".to_string(),
@@ -208,5 +210,76 @@ pub fn list_runs_for_task(conn: &Connection, task_id: &str) -> Result<Vec<Run>, 
     Ok(runs)
 }
 
-#[cfg(test)]
-mod tasks_test;
+pub fn get_task(conn: &Connection, task_id: &str) -> Result<Option<Task>, String> {
+    let result = conn.query_row(
+        "SELECT task_id, mission_id, step_id, step_order, assembled_prompt, status, retry_count, max_retries, created_at, updated_at
+         FROM tasks WHERE task_id = ?1",
+        [task_id],
+        |row| {
+            Ok(Task {
+                task_id: row.get(0)?,
+                mission_id: row.get(1)?,
+                step_id: row.get(2)?,
+                step_order: row.get(3)?,
+                assembled_prompt: row.get(4)?,
+                status: row.get(5)?,
+                retry_count: row.get(6)?,
+                max_retries: row.get(7)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+            })
+        },
+    );
+
+    match result {
+        Ok(task) => Ok(Some(task)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+pub fn get_next_task_in_mission(
+    conn: &Connection,
+    mission_id: &str,
+    after_step_order: i64,
+) -> Result<Option<Task>, String> {
+    let result = conn.query_row(
+        "SELECT task_id, mission_id, step_id, step_order, assembled_prompt, status, retry_count, max_retries, created_at, updated_at
+         FROM tasks WHERE mission_id = ?1 AND step_order > ?2
+         ORDER BY step_order ASC LIMIT 1",
+        params![mission_id, after_step_order],
+        |row| {
+            Ok(Task {
+                task_id: row.get(0)?,
+                mission_id: row.get(1)?,
+                step_id: row.get(2)?,
+                step_order: row.get(3)?,
+                assembled_prompt: row.get(4)?,
+                status: row.get(5)?,
+                retry_count: row.get(6)?,
+                max_retries: row.get(7)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+            })
+        },
+    );
+
+    match result {
+        Ok(task) => Ok(Some(task)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+pub fn update_task_assembled_prompt(
+    conn: &Connection,
+    task_id: &str,
+    assembled_prompt: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE tasks SET assembled_prompt = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE task_id = ?2",
+        params![assembled_prompt, task_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}

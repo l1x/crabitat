@@ -170,6 +170,3 @@ pub async fn search_repos(query: &str) -> Result<Vec<GhRepo>, String> {
 
     Ok(filtered)
 }
-
-#[cfg(test)]
-mod github_test;
