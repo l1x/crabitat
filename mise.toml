@@ -1,20 +1,24 @@
-[tasks.fmt]
+[tasks."rust:fmt"]
 description = "Format Rust code"
 run = "cargo fmt --all"
 
-[tasks.clippy]
+[tasks."rust:clippy"]
 description = "Run clippy lints"
 run = "cargo clippy --workspace --all-targets -- -D warnings"
 
-[tasks.test]
+[tasks."rust:test"]
 description = "Run all tests"
 run = "cargo test --workspace"
 
-[tasks.build]
-description = "Build all crates"
+[tasks."rust:build"]
+description = "Build all crates (dev)"
 run = "cargo build --workspace"
 
-[tasks.verify]
+[tasks."rust:build-release"]
+description = "Build all crates (release)"
+run = "cargo build --workspace --release"
+
+[tasks."rust:verify"]
 description = "Format, lint, test, build"
 run = """
 cargo fmt --all --check
@@ -23,21 +27,31 @@ cargo test --workspace
 cargo build --workspace
 """
 
-[tasks."run-cp"]
+[tasks."rust:run-control-plane"]
 description = "Run control-plane server"
 run = "cargo run -p crabitat-control-plane"
 
-[tasks."console-dev"]
-description = "Run Astro console in dev mode"
+[tasks."astro:dev"]
+description = "Start Astro dev server"
 dir = "apps/crabitat-console"
 run = "bun run dev"
 
-[tasks."console-build"]
-description = "Build Astro console"
+[tasks."astro:build"]
+description = "Build Astro project"
 dir = "apps/crabitat-console"
-run = "bun run build"
+run = "bunx --bun astro build"
 
-[tasks."console-check"]
-description = "Typecheck Astro console"
+[tasks."astro:check"]
+description = "Run Astro type checking"
 dir = "apps/crabitat-console"
-run = "bun run astro check"
+run = "bunx --bun astro check"
+
+[tasks."astro:preview"]
+description = "Preview Astro production build"
+dir = "apps/crabitat-console"
+run = "bun run preview"
+
+[tasks."astro:install"]
+description = "Install Astro console dependencies"
+dir = "apps/crabitat-console"
+run = "bun install"
