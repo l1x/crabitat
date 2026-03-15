@@ -96,20 +96,28 @@ fn test_sticky_distribution() {
     let t2 = tasks::insert_task(&conn, &m2.mission_id, "step1", 0, "p2", 3, "queued").unwrap();
 
     // Pull T1 with worker-A
-    let pulled = tasks::get_next_queued_task(&conn, Some("worker-A")).unwrap().unwrap();
+    let pulled = tasks::get_next_queued_task(&conn, Some("worker-A"))
+        .unwrap()
+        .unwrap();
     assert_eq!(pulled.task.task_id, t1.task_id);
 
-    let m1_updated = missions::get_mission(&conn, &m1.mission_id).unwrap().unwrap();
+    let m1_updated = missions::get_mission(&conn, &m1.mission_id)
+        .unwrap()
+        .unwrap();
     assert_eq!(m1_updated.last_worker_id, Some("worker-A".to_string()));
 
     // Reset T1 to queued
     tasks::update_task_status(&conn, &t1.task_id, "queued").unwrap();
 
     // Pull with worker-B — T1 is older so it should still be first
-    let pulled_b = tasks::get_next_queued_task(&conn, Some("worker-B")).unwrap().unwrap();
+    let pulled_b = tasks::get_next_queued_task(&conn, Some("worker-B"))
+        .unwrap()
+        .unwrap();
     assert_eq!(pulled_b.task.task_id, t1.task_id);
 
-    let m1_updated_b = missions::get_mission(&conn, &m1.mission_id).unwrap().unwrap();
+    let m1_updated_b = missions::get_mission(&conn, &m1.mission_id)
+        .unwrap()
+        .unwrap();
     assert_eq!(m1_updated_b.last_worker_id, Some("worker-B".to_string()));
 
     // Reset T1 to queued again
@@ -123,7 +131,9 @@ fn test_sticky_distribution() {
     .unwrap();
 
     // Pull with worker-A — T2 should be prioritized (sticky) even though T1 is older
-    let pulled_a = tasks::get_next_queued_task(&conn, Some("worker-A")).unwrap().unwrap();
+    let pulled_a = tasks::get_next_queued_task(&conn, Some("worker-A"))
+        .unwrap()
+        .unwrap();
     assert_eq!(pulled_a.task.task_id, t2.task_id);
 }
 
@@ -145,7 +155,16 @@ fn test_next_queued_task_with_null_repo_url() {
         flavor_id: None,
     };
     let mission = missions::insert_mission(&conn, &req, "branch").unwrap();
-    tasks::insert_task(&conn, &mission.mission_id, "step1", 0, "prompt", 3, "queued").unwrap();
+    tasks::insert_task(
+        &conn,
+        &mission.mission_id,
+        "step1",
+        0,
+        "prompt",
+        3,
+        "queued",
+    )
+    .unwrap();
 
     let result = tasks::get_next_queued_task(&conn, None).unwrap();
     assert!(result.is_some());
@@ -158,7 +177,14 @@ fn test_next_queued_task_with_null_repo_url() {
 fn test_next_queued_task_with_both_url_and_local_path() {
     let conn = test_conn();
 
-    let repo = repos::insert(&conn, "l1x", "both", Some("/tmp/repo"), Some("https://github.com/l1x/both")).unwrap();
+    let repo = repos::insert(
+        &conn,
+        "l1x",
+        "both",
+        Some("/tmp/repo"),
+        Some("https://github.com/l1x/both"),
+    )
+    .unwrap();
     conn.execute(
         "INSERT INTO github_issues_cache (repo_id, number, title, body) VALUES (?1, ?2, ?3, ?4)",
         params![repo.repo_id, 1, "Test", "Body"],
@@ -172,10 +198,22 @@ fn test_next_queued_task_with_both_url_and_local_path() {
         flavor_id: None,
     };
     let mission = missions::insert_mission(&conn, &req, "branch").unwrap();
-    tasks::insert_task(&conn, &mission.mission_id, "step1", 0, "prompt", 3, "queued").unwrap();
+    tasks::insert_task(
+        &conn,
+        &mission.mission_id,
+        "step1",
+        0,
+        "prompt",
+        3,
+        "queued",
+    )
+    .unwrap();
 
     let result = tasks::get_next_queued_task(&conn, None).unwrap().unwrap();
-    assert_eq!(result.git.repo_url, Some("https://github.com/l1x/both".to_string()));
+    assert_eq!(
+        result.git.repo_url,
+        Some("https://github.com/l1x/both".to_string())
+    );
     assert_eq!(result.git.local_path, Some("/tmp/repo".to_string()));
 }
 
@@ -197,12 +235,24 @@ fn test_next_queued_task_skips_deleted_repos() {
         flavor_id: None,
     };
     let mission = missions::insert_mission(&conn, &req, "branch").unwrap();
-    tasks::insert_task(&conn, &mission.mission_id, "step1", 0, "prompt", 3, "queued").unwrap();
+    tasks::insert_task(
+        &conn,
+        &mission.mission_id,
+        "step1",
+        0,
+        "prompt",
+        3,
+        "queued",
+    )
+    .unwrap();
 
     repos::delete(&conn, &repo.repo_id).unwrap();
 
     let result = tasks::get_next_queued_task(&conn, None).unwrap();
-    assert!(result.is_none(), "should not return tasks for deleted repos");
+    assert!(
+        result.is_none(),
+        "should not return tasks for deleted repos"
+    );
 }
 
 #[test]
@@ -305,7 +355,16 @@ fn test_update_task_assembled_prompt() {
     let conn = test_conn();
     let (_, mission_id) = setup_repo_and_mission(&conn);
 
-    let t = tasks::insert_task(&conn, &mission_id, "step1", 0, "original prompt", 3, "queued").unwrap();
+    let t = tasks::insert_task(
+        &conn,
+        &mission_id,
+        "step1",
+        0,
+        "original prompt",
+        3,
+        "queued",
+    )
+    .unwrap();
 
     tasks::update_task_assembled_prompt(&conn, &t.task_id, "updated prompt with context").unwrap();
 
@@ -358,8 +417,13 @@ fn test_failed_leaves_downstream_blocked() {
     // Fail step1 — step2 should remain blocked
     tasks::update_task_status(&conn, &t1.task_id, "failed").unwrap();
 
-    let next = tasks::get_next_task_in_mission(&conn, &mission_id, 0).unwrap().unwrap();
-    assert_eq!(next.status, "blocked", "downstream task should remain blocked after failure");
+    let next = tasks::get_next_task_in_mission(&conn, &mission_id, 0)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        next.status, "blocked",
+        "downstream task should remain blocked after failure"
+    );
 
     // No queued tasks available
     let result = tasks::get_next_queued_task(&conn, None).unwrap();
@@ -438,7 +502,16 @@ fn test_retry_updates_assembled_prompt() {
     let conn = test_conn();
     let (_, mission_id) = setup_repo_and_mission(&conn);
 
-    let t = tasks::insert_task(&conn, &mission_id, "step1", 0, "original prompt", 3, "queued").unwrap();
+    let t = tasks::insert_task(
+        &conn,
+        &mission_id,
+        "step1",
+        0,
+        "original prompt",
+        3,
+        "queued",
+    )
+    .unwrap();
 
     // Fail the task
     tasks::update_task_status(&conn, &t.task_id, "failed").unwrap();

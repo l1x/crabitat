@@ -91,13 +91,20 @@ pub async fn retry_task(
     // 1. Fetch task, return 404 if not found
     let task = db::get_task(&conn, &task_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, Json(json!({"error": "task not found"}))))?;
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "task not found"})),
+            )
+        })?;
 
     // 2. Validate task is in failed status
     if task.status != "failed" {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": format!("task status is '{}', must be 'failed' to retry", task.status)})),
+            Json(
+                json!({"error": format!("task status is '{}', must be 'failed' to retry", task.status)}),
+            ),
         ));
     }
 

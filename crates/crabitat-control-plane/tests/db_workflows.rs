@@ -31,10 +31,16 @@ fn insert_and_list_flavors() {
 #[test]
 fn count_flavors() {
     let conn = test_conn();
-    assert_eq!(workflows::count_flavors_for_workflow(&conn, "wf").unwrap(), 0);
+    assert_eq!(
+        workflows::count_flavors_for_workflow(&conn, "wf").unwrap(),
+        0
+    );
     workflows::insert_flavor(&conn, "wf", "a", &[]).unwrap();
     workflows::insert_flavor(&conn, "wf", "b", &["x.md".into()]).unwrap();
-    assert_eq!(workflows::count_flavors_for_workflow(&conn, "wf").unwrap(), 2);
+    assert_eq!(
+        workflows::count_flavors_for_workflow(&conn, "wf").unwrap(),
+        2
+    );
 }
 
 #[test]
@@ -42,7 +48,12 @@ fn delete_existing_flavor() {
     let conn = test_conn();
     let f = workflows::insert_flavor(&conn, "wf", "rust", &[]).unwrap();
     assert!(workflows::delete_flavor(&conn, &f.flavor_id).unwrap());
-    assert_eq!(workflows::list_flavors_for_workflow(&conn, "wf").unwrap().len(), 0);
+    assert_eq!(
+        workflows::list_flavors_for_workflow(&conn, "wf")
+            .unwrap()
+            .len(),
+        0
+    );
 }
 
 #[test]
@@ -64,8 +75,14 @@ fn same_flavor_name_different_workflows() {
     let conn = test_conn();
     workflows::insert_flavor(&conn, "wf-a", "rust", &[]).unwrap();
     workflows::insert_flavor(&conn, "wf-b", "rust", &[]).unwrap();
-    assert_eq!(workflows::count_flavors_for_workflow(&conn, "wf-a").unwrap(), 1);
-    assert_eq!(workflows::count_flavors_for_workflow(&conn, "wf-b").unwrap(), 1);
+    assert_eq!(
+        workflows::count_flavors_for_workflow(&conn, "wf-a").unwrap(),
+        1
+    );
+    assert_eq!(
+        workflows::count_flavors_for_workflow(&conn, "wf-b").unwrap(),
+        1
+    );
 }
 
 #[test]
