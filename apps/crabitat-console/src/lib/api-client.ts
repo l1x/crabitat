@@ -216,3 +216,15 @@ export async function getMission(missionId: string): Promise<{ mission: Mission;
   if (!res.ok) throw new Error(`Failed to get mission: ${res.status}`);
   return res.json();
 }
+
+export async function retryTask(taskId: string, context?: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/v1/tasks/${taskId}/retry`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(context ? { context } : {}),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || `Failed to retry task: ${res.status}`);
+  }
+}

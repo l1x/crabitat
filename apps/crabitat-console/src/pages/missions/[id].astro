@@ -94,8 +94,8 @@ function stateDuration(entry: StateHistoryEntry): string {
                 <div class="stat">
                   <span class="stat-label">Duration</span>
                   <span class="stat-value">
-                    {task.runs[0].duration_ms !== null 
-                      ? (task.runs[0].duration_ms / 1000).toFixed(1) + 's' 
+                    {task.runs[0].duration_ms !== null
+                      ? (task.runs[0].duration_ms / 1000).toFixed(1) + 's'
                       : '—'}
                   </span>
                 </div>
@@ -105,7 +105,14 @@ function stateDuration(entry: StateHistoryEntry): string {
                 </div>
               </div>
             )}
-            
+
+            {task.status === 'failed' && task.runs && task.runs.length > 0 && task.runs[0] && task.runs[0].logs && (
+              <div class="run-logs">
+                <div class="run-logs-header">Run Logs</div>
+                <pre class="run-logs-content">{task.runs[0].logs}</pre>
+              </div>
+            )}
+
             <div class="prompt-container">
               <div class="prompt-header">
                 <span>Assembled Prompt</span>
@@ -113,6 +120,19 @@ function stateDuration(entry: StateHistoryEntry): string {
               </div>
               <div class="markdown-content" data-content={task.assembled_prompt}></div>
             </div>
+
+            {task.status === 'failed' && (
+              <div class="retry-section" data-task-id={task.task_id}>
+                <details class="context-details">
+                  <summary>Add Context</summary>
+                  <textarea class="retry-context" placeholder="Optional guidance for the agent..."></textarea>
+                </details>
+                <div class="retry-actions">
+                  <button class="retry-btn">Retry</button>
+                  <span class="retry-error" hidden></span>
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -133,13 +153,47 @@ function stateDuration(entry: StateHistoryEntry): string {
   document.addEventListener('click', (e) => {
     const btn = (e.target as Element).closest('.copy-btn');
     if (!btn) return;
-    
+
     const text = btn.getAttribute('data-prompt') || '';
     navigator.clipboard.writeText(text);
-    
+
     const originalText = btn.textContent;
     btn.textContent = 'Copied!';
     setTimeout(() => { btn.textContent = originalText; }, 2000);
+  });
+
+  // Retry failed tasks
+  document.addEventListener('click', async (e) => {
+    const btn = (e.target as Element).closest('.retry-btn') as HTMLButtonElement | null;
+    if (!btn) return;
+
+    const section = btn.closest('.retry-section') as HTMLElement;
+    const taskId = section.dataset.taskId;
+    const textarea = section.querySelector('.retry-context') as HTMLTextAreaElement | null;
+    const errorSpan = section.querySelector('.retry-error') as HTMLElement;
+    const context = textarea?.value?.trim() || undefined;
+
+    btn.disabled = true;
+    btn.textContent = 'Retrying...';
+    errorSpan.hidden = true;
+
+    try {
+      const res = await fetch(`http://localhost:3001/v1/tasks/${taskId}/retry`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(context ? { context } : {}),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || `Failed to retry task: ${res.status}`);
+      }
+      window.location.reload();
+    } catch (err: any) {
+      errorSpan.textContent = err.message || 'Retry failed';
+      errorSpan.hidden = false;
+      btn.disabled = false;
+      btn.textContent = 'Retry';
+    }
   });
 </script>
 
@@ -462,5 +516,108 @@ function stateDuration(entry: StateHistoryEntry): string {
     padding: 12px 16px;
     border-radius: 8px;
     margin-bottom: 24px;
+  }
+
+  .run-logs {
+    background: var(--code-bg);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    margin-bottom: 16px;
+    overflow: hidden;
+  }
+
+  .run-logs-header {
+    background: var(--overlay-subtle);
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border-subtle);
+    font-size: 12px;
+    color: var(--muted);
+    font-weight: 600;
+  }
+
+  .run-logs-content {
+    padding: 16px;
+    font-size: 13px;
+    font-family: monospace;
+    color: var(--body);
+    line-height: 1.5;
+    max-height: 300px;
+    overflow-y: auto;
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .retry-section {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  .context-details {
+    margin-bottom: 12px;
+  }
+
+  .context-details summary {
+    font-size: 13px;
+    color: var(--muted);
+    cursor: pointer;
+    font-weight: 600;
+  }
+
+  .context-details summary:hover {
+    color: var(--heading);
+  }
+
+  .retry-context {
+    width: 100%;
+    min-height: 80px;
+    margin-top: 8px;
+    padding: 12px;
+    background: var(--code-bg);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    color: var(--body);
+    font-family: monospace;
+    font-size: 13px;
+    resize: vertical;
+    box-sizing: border-box;
+  }
+
+  .retry-context:focus {
+    outline: none;
+    border-color: var(--status-error);
+  }
+
+  .retry-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .retry-btn {
+    background: var(--status-error-bg);
+    color: var(--status-error);
+    border: 1px solid var(--status-error-border);
+    padding: 6px 20px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .retry-btn:hover:not(:disabled) {
+    background: var(--status-error);
+    color: var(--card);
+  }
+
+  .retry-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .retry-error {
+    font-size: 13px;
+    color: var(--status-error);
   }
 </style>
