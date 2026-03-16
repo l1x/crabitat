@@ -271,6 +271,93 @@ pub fn get_next_task_in_mission(
     }
 }
 
+pub fn count_incomplete_at_order(
+    conn: &Connection,
+    mission_id: &str,
+    step_order: i64,
+) -> Result<i64, String> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM tasks WHERE mission_id = ?1 AND step_order = ?2 AND status != 'completed'",
+        params![mission_id, step_order],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+pub fn get_completed_tasks_at_order(
+    conn: &Connection,
+    mission_id: &str,
+    step_order: i64,
+) -> Result<Vec<Task>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT task_id, mission_id, step_id, step_order, assembled_prompt, status, retry_count, max_retries, created_at, updated_at
+             FROM tasks WHERE mission_id = ?1 AND step_order = ?2 AND status = 'completed'
+             ORDER BY created_at ASC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map(params![mission_id, step_order], |row| {
+            Ok(Task {
+                task_id: row.get(0)?,
+                mission_id: row.get(1)?,
+                step_id: row.get(2)?,
+                step_order: row.get(3)?,
+                assembled_prompt: row.get(4)?,
+                status: row.get(5)?,
+                retry_count: row.get(6)?,
+                max_retries: row.get(7)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut tasks = Vec::new();
+    for task in rows {
+        tasks.push(task.map_err(|e| e.to_string())?);
+    }
+    Ok(tasks)
+}
+
+pub fn get_blocked_tasks_at_order(
+    conn: &Connection,
+    mission_id: &str,
+    step_order: i64,
+) -> Result<Vec<Task>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT task_id, mission_id, step_id, step_order, assembled_prompt, status, retry_count, max_retries, created_at, updated_at
+             FROM tasks WHERE mission_id = ?1 AND step_order = ?2 AND status = 'blocked'
+             ORDER BY created_at ASC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map(params![mission_id, step_order], |row| {
+            Ok(Task {
+                task_id: row.get(0)?,
+                mission_id: row.get(1)?,
+                step_id: row.get(2)?,
+                step_order: row.get(3)?,
+                assembled_prompt: row.get(4)?,
+                status: row.get(5)?,
+                retry_count: row.get(6)?,
+                max_retries: row.get(7)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut tasks = Vec::new();
+    for task in rows {
+        tasks.push(task.map_err(|e| e.to_string())?);
+    }
+    Ok(tasks)
+}
+
 pub fn update_task_assembled_prompt(
     conn: &Connection,
     task_id: &str,

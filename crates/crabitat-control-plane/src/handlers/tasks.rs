@@ -47,30 +47,39 @@ pub async fn update_task_status(
         return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))));
     }
 
-    // 2. Promote next blocked task when a task completes
+    // 2. Fan-in / fan-out: promote next tier when all siblings complete
     if body.status == "completed"
         && let Ok(Some(completed_task)) = db::get_task(&conn, &task_id)
-        && let Ok(Some(next_task)) = db::get_next_task_in_mission(
-            &conn,
-            &completed_task.mission_id,
-            completed_task.step_order,
-        )
-        && next_task.status == "blocked"
     {
-        // Extract output from the completed task's latest run
-        let context = db::list_runs_for_task(&conn, &task_id)
-            .unwrap_or_default()
-            .into_iter()
-            .next()
-            .and_then(|r| r.logs)
-            .unwrap_or_default();
+        let mission_id = &completed_task.mission_id;
+        let current_order = completed_task.step_order;
 
-        // Re-assemble prompt with context from prior step
-        if let Ok(new_prompt) = reassemble_prompt_with_context(&conn, &next_task, &context) {
-            let _ = db::update_task_assembled_prompt(&conn, &next_task.task_id, &new_prompt);
+        // Check if all tasks at this order are done
+        let incomplete =
+            db::count_incomplete_at_order(&conn, mission_id, current_order).unwrap_or(1);
+
+        if incomplete == 0 {
+            // Fan-in complete — collect context from ALL completed tasks at this order
+            let combined_context = collect_fan_in_context(&conn, mission_id, current_order);
+
+            // Get ALL blocked tasks at the next order (fan-out)
+            let next_order = current_order + 1;
+            if let Ok(blocked_tasks) = db::get_blocked_tasks_at_order(&conn, mission_id, next_order)
+            {
+                for next_task in &blocked_tasks {
+                    if let Ok(new_prompt) =
+                        reassemble_prompt_with_context(&conn, next_task, &combined_context)
+                    {
+                        let _ = db::update_task_assembled_prompt(
+                            &conn,
+                            &next_task.task_id,
+                            &new_prompt,
+                        );
+                    }
+                    let _ = db::update_task_status(&conn, &next_task.task_id, "queued");
+                }
+            }
         }
-
-        let _ = db::update_task_status(&conn, &next_task.task_id, "queued");
     }
 
     // 3. Recalculate mission status
@@ -136,4 +145,27 @@ pub async fn create_run(
         Ok(run) => Ok((StatusCode::CREATED, Json(json!(run)))),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e})))),
     }
+}
+
+/// Collect logs from all completed tasks at a given step_order, wrapped in XML tags.
+fn collect_fan_in_context(
+    conn: &rusqlite::Connection,
+    mission_id: &str,
+    step_order: i64,
+) -> String {
+    let completed =
+        db::get_completed_tasks_at_order(conn, mission_id, step_order).unwrap_or_default();
+
+    let mut parts: Vec<String> = Vec::new();
+    for task in &completed {
+        let logs = db::list_runs_for_task(conn, &task.task_id)
+            .unwrap_or_default()
+            .into_iter()
+            .next()
+            .and_then(|r| r.logs)
+            .unwrap_or_default();
+        parts.push(format!("<step id=\"{}\">\n{}\n</step>", task.step_id, logs));
+    }
+
+    parts.join("\n\n")
 }

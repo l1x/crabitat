@@ -530,3 +530,89 @@ fn test_retry_updates_assembled_prompt() {
     assert_eq!(fetched.assembled_prompt, "prompt with human guidance");
     assert_eq!(fetched.retry_count, 1);
 }
+
+// --- Fan-out / Fan-in DB tests ---
+
+#[test]
+fn test_fan_out_multiple_blocked_at_same_order() {
+    let conn = test_conn();
+    let (_, mission_id) = setup_repo_and_mission(&conn);
+
+    // Order 0: single root task
+    tasks::insert_task(&conn, &mission_id, "plan", 0, "p0", 3, "queued").unwrap();
+    // Order 1: three parallel tasks (fan-out)
+    tasks::insert_task(&conn, &mission_id, "kani", 1, "p1", 3, "blocked").unwrap();
+    tasks::insert_task(&conn, &mission_id, "tla", 1, "p2", 3, "blocked").unwrap();
+    tasks::insert_task(&conn, &mission_id, "proptest", 1, "p3", 3, "blocked").unwrap();
+
+    let blocked = tasks::get_blocked_tasks_at_order(&conn, &mission_id, 1).unwrap();
+    assert_eq!(blocked.len(), 3);
+
+    let incomplete = tasks::count_incomplete_at_order(&conn, &mission_id, 1).unwrap();
+    assert_eq!(incomplete, 3);
+}
+
+#[test]
+fn test_fan_in_partial_completion() {
+    let conn = test_conn();
+    let (_, mission_id) = setup_repo_and_mission(&conn);
+
+    let t1 = tasks::insert_task(&conn, &mission_id, "kani", 1, "p1", 3, "queued").unwrap();
+    tasks::insert_task(&conn, &mission_id, "tla", 1, "p2", 3, "queued").unwrap();
+    tasks::insert_task(&conn, &mission_id, "proptest", 1, "p3", 3, "queued").unwrap();
+
+    // Complete 1 of 3
+    tasks::update_task_status(&conn, &t1.task_id, "completed").unwrap();
+
+    let incomplete = tasks::count_incomplete_at_order(&conn, &mission_id, 1).unwrap();
+    assert_eq!(incomplete, 2);
+
+    let completed = tasks::get_completed_tasks_at_order(&conn, &mission_id, 1).unwrap();
+    assert_eq!(completed.len(), 1);
+    assert_eq!(completed[0].step_id, "kani");
+}
+
+#[test]
+fn test_fan_in_all_complete() {
+    let conn = test_conn();
+    let (_, mission_id) = setup_repo_and_mission(&conn);
+
+    let t1 = tasks::insert_task(&conn, &mission_id, "kani", 1, "p1", 3, "queued").unwrap();
+    let t2 = tasks::insert_task(&conn, &mission_id, "tla", 1, "p2", 3, "queued").unwrap();
+    let t3 = tasks::insert_task(&conn, &mission_id, "proptest", 1, "p3", 3, "queued").unwrap();
+
+    tasks::update_task_status(&conn, &t1.task_id, "completed").unwrap();
+    tasks::update_task_status(&conn, &t2.task_id, "completed").unwrap();
+    tasks::update_task_status(&conn, &t3.task_id, "completed").unwrap();
+
+    let incomplete = tasks::count_incomplete_at_order(&conn, &mission_id, 1).unwrap();
+    assert_eq!(incomplete, 0);
+
+    let completed = tasks::get_completed_tasks_at_order(&conn, &mission_id, 1).unwrap();
+    assert_eq!(completed.len(), 3);
+}
+
+#[test]
+fn test_linear_backward_compat_single_task_per_order() {
+    let conn = test_conn();
+    let (_, mission_id) = setup_repo_and_mission(&conn);
+
+    tasks::insert_task(&conn, &mission_id, "step1", 0, "p0", 3, "queued").unwrap();
+    tasks::insert_task(&conn, &mission_id, "step2", 1, "p1", 3, "blocked").unwrap();
+    tasks::insert_task(&conn, &mission_id, "step3", 2, "p2", 3, "blocked").unwrap();
+
+    // Each order has exactly 1 incomplete
+    assert_eq!(
+        tasks::count_incomplete_at_order(&conn, &mission_id, 0).unwrap(),
+        1
+    );
+    assert_eq!(
+        tasks::count_incomplete_at_order(&conn, &mission_id, 1).unwrap(),
+        1
+    );
+
+    // Order 1 has 1 blocked task
+    let blocked = tasks::get_blocked_tasks_at_order(&conn, &mission_id, 1).unwrap();
+    assert_eq!(blocked.len(), 1);
+    assert_eq!(blocked[0].step_id, "step2");
+}
